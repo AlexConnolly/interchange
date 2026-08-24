@@ -98,7 +98,34 @@ export function Inspector({
             {def.kind === 'extraction' && <><dt>Richness</dt><dd>{pct(w.sites.richness[s])}</dd></>}
             <dt>Shipped out</dt><dd>{tonnes(w.sites.shipped[s])}</dd>
             <dt>Connected</dt><dd>{w.sites.connected(s) ? 'yes' : <span className="neg">no way reaches it</span>}</dd>
+            <dt>Owner</dt><dd>{w.companies.names[w.sites.owner[s]] ?? '—'}</dd>
           </dl>
+          {w.era >= 3 && (def.powerNeed > 0 || def.waterNeed > 0 || def.labourNeed > 0) && (
+            <>
+              {/*
+                design.md 2.2: a mine produces nothing until it has power,
+                water and workers, and each is a different network. The binding
+                one is what the player has to fix, so it is the one marked.
+              */}
+              <div className="ledger"><div className="head">The three networks</div></div>
+              {([
+                ['Power', w.sites.powered[s], def.powerNeed],
+                ['Water', w.sites.watered[s], def.waterNeed],
+                ['Labour', w.sites.staffed[s], def.labourNeed],
+              ] as [string, number, number][]).filter(([, , need]) => need > 0).map(([label, have, need]) => (
+                <div className="row" key={label}>
+                  <div className="grow">
+                    <div className="title">{label}</div>
+                    <div className="sub">needs {need}</div>
+                    <div className="meter" style={{ marginTop: 4 }}>
+                      <div style={{ width: `${have}%`, background: have > 80 ? 'var(--good)' : have > 30 ? 'var(--warn)' : 'var(--bad)' }} />
+                    </div>
+                  </div>
+                  <span className={`sub ${have > 80 ? 'pos' : have > 30 ? 'warnc' : 'neg'}`}>{pct(have)}</span>
+                </div>
+              ))}
+            </>
+          )}
           {outputs.length > 0 && (
             <>
               <div className="ledger"><div className="head">Produces — waiting for collection</div></div>
@@ -857,6 +884,120 @@ export function Saves({
             checks the result against the hashes the original recorded.
           </span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+// -------------------------------------------------------------- objectives
+
+/**
+ * Objectives, the fourth pressure system (D10).
+ *
+ * Two at a time and no more. A board of nine is a checklist, and a checklist
+ * is the opposite of "events break routine" — the player stops reading it and
+ * works down it, which is the same as having none.
+ */
+export function Objectives({ engine }: { engine: Engine }): JSX.Element {
+  const w = engine.world;
+  const open = w.objectives.openFor(w.player);
+  return (
+    <div className="window right">
+      <h2>From the authority</h2>
+      <div className="body">
+        {open.length === 0 && (
+          <div style={{ padding: '12px 10px', fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
+            Nothing asked of you at the moment. The authority notices what you are
+            not doing and gets in touch about it.
+          </div>
+        )}
+        {open.map((id) => {
+          const frac = Math.min(1, w.objectives.progress[id] / Math.max(1, w.objectives.target[id]));
+          const left = w.objectives.deadline[id] - w.tick;
+          return (
+            <div className="row" key={id}>
+              <div className="grow">
+                <div className="title" style={{ whiteSpace: 'normal' }}>{w.objectives.text[id]}</div>
+                <div className="sub">
+                  pays {shortMoney(w.objectives.reward[id])} ·
+                  <span className={left < TICKS_PER_DAY * 60 ? ' warnc' : ''}> {days(left, TICKS_PER_DAY)} left</span>
+                </div>
+                <div className="meter" style={{ marginTop: 4 }}>
+                  <div style={{ width: `${frac * 100}%`, background: frac >= 1 ? 'var(--good)' : 'var(--accent)' }} />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- industry
+
+/**
+ * Founding industry: the extraction charter's verb.
+ *
+ * The list shows what the ground will take, not everything that exists —
+ * because "a colliery needs coal and there is none here" is a better thing to
+ * find out from a greyed-out row than from a refusal after you have picked a
+ * spot.
+ */
+export function Industries({
+  engine, selected, onSelect, tile,
+}: {
+  engine: Engine;
+  selected: number;
+  onSelect: (index: number) => void;
+  tile: number;
+}): JSX.Element {
+  const w = engine.world;
+  const era = w.era;
+  const available = C.industries
+    .map((ind, i) => ({ ind, i }))
+    .filter(({ ind }) => ind.fromEra <= era && ind.foundCost > 0);
+
+  return (
+    <div className="window left">
+      <h2>Found industry <span className="dim mono">{CHARTER_NAMES[w.companies.charter[w.player]]}</span></h2>
+      <div className="body">
+        {w.companies.charter[w.player] < 2 && (
+          <div style={{ padding: '12px 10px', fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
+            You have no extraction charter. You may haul, and you may build, but
+            you may not dig. Run a real business at this level and the authority
+            will let you.
+          </div>
+        )}
+        {available.map(({ ind, i }) => {
+          const problem = tile >= 0 ? w.canFound(w.player, i, tile) : '';
+          const affordable = w.companies.cash[w.player] >= ind.foundCost;
+          return (
+            <div
+              key={ind.id}
+              className={`row click ${selected === i ? 'selected' : ''}`}
+              onClick={() => onSelect(selected === i ? -1 : i)}
+              style={{ opacity: affordable ? 1 : 0.45 }}
+            >
+              <div className="grow">
+                <div className="title">{ind.name}</div>
+                <div className="sub">
+                  {money(ind.foundCost)}
+                  {ind.powerNeed > 0 && ` · ${ind.powerNeed} power`}
+                  {ind.waterNeed > 0 && ` · ${ind.waterNeed} water`}
+                  {ind.labourNeed > 0 && ` · ${ind.labourNeed} workers`}
+                </div>
+                {selected === i && problem && (
+                  <div className="sub neg" style={{ whiteSpace: 'normal', fontFamily: 'inherit' }}>{problem}</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="legend">
+        <span className="dim">Pick one, then click the ground. Extraction has to sit on the right deposit.</span>
       </div>
     </div>
   );

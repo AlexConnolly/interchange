@@ -23,6 +23,8 @@ export * from './world.ts';
 export * from './worldgen.ts';
 export * from './construction.ts';
 export * from './junction.ts';
+export * from './utilities.ts';
+export * from './objectives.ts';
 export * from './stress.ts';
 export * from './snapshot.ts';
 

@@ -4,7 +4,7 @@ import { OverlayMode } from '@interchange/render';
 import { content } from '@interchange/data';
 import { Engine } from './engine.ts';
 import { WorldView, type Picked } from './WorldView.tsx';
-import { BuildPalette, CharterPanel, Contracts, Finance, Fleet, FleetList, Inspector, Ownership, Saves, Services } from './panels.tsx';
+import { BuildPalette, CharterPanel, Contracts, Finance, Fleet, FleetList, Industries, Inspector, Objectives, Ownership, Saves, Services } from './panels.tsx';
 import { Reports } from './Reports.tsx';
 import { loadWorld, saveWorld } from './saves.ts';
 import { applyPreview, clearPreview, emptyBuildState, updatePlan } from './build.ts';
@@ -15,7 +15,7 @@ import { money, num, shortMoney } from './format.ts';
 
 const C = content();
 
-type Window_ = 'services' | 'contracts' | 'fleet' | 'finance' | 'charter' | 'build' | 'ownership' | null;
+type Window_ = 'services' | 'contracts' | 'fleet' | 'finance' | 'charter' | 'build' | 'ownership' | 'industry' | 'objectives' | null;
 
 /**
  * A region is a seed and a size, so a region is a URL. `?seed=1860&size=512`
@@ -136,6 +136,8 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
   const [activeService, setActiveService] = useState(-1);
   const [showDepot, setShowDepot] = useState(false);
   const [labNode, setLabNode] = useState(-1);
+  const [foundIndustry, setFoundIndustry] = useState(-1);
+  const [hoverTile, setHoverTile] = useState(-1);
   const [showSaves, setShowSaves] = useState(false);
   const [showReports, setShowReports] = useState(false);
   const [hover, setHover] = useState<{ text: string; x: number; y: number } | null>(null);
@@ -213,6 +215,11 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
   }, [engine]);
 
   const onPick = useCallback((p: Picked) => {
+    if (foundIndustry >= 0 && p.tile >= 0) {
+      engine.issue(Cmd.FoundIndustry, foundIndustry, p.tile);
+      setFoundIndustry(-1);
+      return;
+    }
     if (p.kind === 'tile' && p.tile >= 0) {
       const gph = engine.world.graph;
       for (let mode = 0; mode < 2; mode++) {
@@ -226,9 +233,10 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
     setPicked(p);
     if (engine.renderer) engine.renderer.selectedVehicle = p.kind === 'vehicle' ? p.id : -1;
     if (p.kind !== 'none') setRightWindow(null);
-  }, [engine]);
+  }, [engine, foundIndustry]);
 
   const onHover = useCallback((p: Picked | null, screen: { x: number; y: number } | null) => {
+    if (p && p.tile >= 0) setHoverTile(p.tile);
     if (!p || !screen) { setHover(null); return; }
     const wd = engine.world;
     let text = '';
@@ -312,6 +320,10 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
             if (leftWindow === 'build') { build.current.selection = null; build.current.demolish = false; clearPreview(engine, build.current); }
           }} />
           <RailButton label="Ownership" icon="§§" on={leftWindow === 'ownership'} onClick={() => setLeftWindow(leftWindow === 'ownership' ? null : 'ownership')} />
+          <RailButton label="Found industry" icon="⛭" on={leftWindow === 'industry'} onClick={() => {
+            setLeftWindow(leftWindow === 'industry' ? null : 'industry');
+            if (leftWindow === 'industry') setFoundIndustry(-1);
+          }} />
           <RailButton label="Junction Lab — the busiest junction on your network" icon="✳" on={labNode >= 0} onClick={() => {
             if (labNode >= 0) { setLabNode(-1); return; }
             // The busiest junction with something to arbitrate. Opening the
@@ -334,6 +346,9 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
           <RailButton label="Congestion overlay" icon="◍" on={overlay === OverlayMode.Congestion} onClick={() => engine.setOverlay(overlay === OverlayMode.Congestion ? OverlayMode.None : OverlayMode.Congestion)} />
           <RailButton label="Ownership overlay" icon="◈" on={overlay === OverlayMode.Ownership} onClick={() => engine.setOverlay(overlay === OverlayMode.Ownership ? OverlayMode.None : OverlayMode.Ownership)} />
           <RailButton label="Amenity overlay" icon="❋" on={overlay === OverlayMode.Amenity} onClick={() => engine.setOverlay(overlay === OverlayMode.Amenity ? OverlayMode.None : OverlayMode.Amenity)} />
+          <RailButton label="Labour catchment" icon="☗" on={overlay === OverlayMode.Catchment} onClick={() => engine.setOverlay(overlay === OverlayMode.Catchment ? OverlayMode.None : OverlayMode.Catchment)} />
+          <RailButton label="Power grid" icon="⚡" on={overlay === OverlayMode.Power} onClick={() => engine.setOverlay(overlay === OverlayMode.Power ? OverlayMode.None : OverlayMode.Power)} />
+          <RailButton label="Water network" icon="≋" on={overlay === OverlayMode.Water} onClick={() => engine.setOverlay(overlay === OverlayMode.Water ? OverlayMode.None : OverlayMode.Water)} />
         </div>
 
         {leftWindow === 'services' && <Services engine={engine} active={activeService} setActive={setActiveService} onFocus={focus} />}
@@ -360,16 +375,21 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
           />
         )}
         {leftWindow === 'ownership' && <Ownership engine={engine} onFocus={focus} />}
+        {leftWindow === 'industry' && (
+          <Industries engine={engine} selected={foundIndustry} onSelect={setFoundIndustry} tile={hoverTile} />
+        )}
 
         {picked.kind !== 'none'
           ? <Inspector engine={engine} picked={picked} activeService={activeService} onFocus={focus} />
           : rightWindow === 'finance' ? <Finance engine={engine} />
+          : rightWindow === 'objectives' ? <Objectives engine={engine} />
           : rightWindow === 'charter' ? <CharterPanel engine={engine} />
           : null}
 
         <div className="rail" style={{ gridColumn: 3, justifySelf: 'end' }}>
           <RailButton label="Charter" icon="✦" on={rightWindow === 'charter' && picked.kind === 'none'} onClick={() => { setPicked({ kind: 'none', id: -1, tile: -1 }); setRightWindow(rightWindow === 'charter' ? null : 'charter'); }} />
           <RailButton label="Finance" icon="£" on={rightWindow === 'finance' && picked.kind === 'none'} onClick={() => { setPicked({ kind: 'none', id: -1, tile: -1 }); setRightWindow(rightWindow === 'finance' ? null : 'finance'); }} />
+          <RailButton label="Objectives" icon="⚑" on={rightWindow === 'objectives' && picked.kind === 'none'} onClick={() => { setPicked({ kind: 'none', id: -1, tile: -1 }); setRightWindow(rightWindow === 'objectives' ? null : 'objectives'); }} />
         </div>
 
         <div className="log">
@@ -435,7 +455,11 @@ function OverlayLegend({ mode }: { mode: OverlayMode }): JSX.Element {
       ? [['#4fb477', 'free'], ['#e0b040', 'busy'], ['#d4632f', 'congested'], ['#c02f2f', 'jammed']]
       : mode === OverlayMode.Ownership
         ? [['#4fb477', 'yours'], ['#7c8288', 'the authority'], ['#c85a3c', 'a rival']]
-        : [['#4a7a52', 'high amenity'], ['#b06040', 'degraded']];
+        : mode === OverlayMode.Catchment
+          ? [['#b8a83c', 'many within a commute'], ['#1a2450', 'nobody']]
+          : mode === OverlayMode.Power || mode === OverlayMode.Water
+            ? [['#4fb477', 'supplied'], ['#e0b040', 'short'], ['#c02f2f', 'starved'], ['#2a2c30', 'not on the network']]
+            : [['#4a7a52', 'high amenity'], ['#b06040', 'degraded']];
   return (
     <div className="panel legend" style={{ position: 'absolute', bottom: 10, left: 64 }}>
       {items.map(([c, l]) => (

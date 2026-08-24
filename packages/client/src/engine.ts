@@ -136,8 +136,76 @@ export class Engine {
     this.notify();
   }
 
+  /**
+   * Build whatever field the overlay about to be shown needs.
+   *
+   * Computed on the switch rather than every frame: these are region-wide
+   * passes and none of them changes fast enough to be worth recomputing at
+   * sixty hertz. The cost is paid once, where the player has just asked a
+   * question and expects a moment of thought.
+   */
+  private buildOverlayField(mode: OverlayMode): void {
+    const src = this.buildSource();
+    const w = this.world;
+    const size = w.config.size;
+    if (mode === OverlayMode.Catchment) {
+      // Population reachable within a commute, splatted from the towns over
+      // the land. A tile-space approximation of the network catchment the
+      // simulation computes over the road graph — close enough to answer
+      // "roughly where are the people", which is what the overlay is for.
+      const field = new Float32Array(size * size);
+      const reach = 42;
+      for (let t = 0; t < w.towns.count; t++) {
+        const tx = w.towns.x[t];
+        const ty = w.towns.y[t];
+        const pop = w.towns.population[t];
+        for (let dy = -reach; dy <= reach; dy++) {
+          const y = ty + dy;
+          if (y < 0 || y >= size) continue;
+          for (let dx = -reach; dx <= reach; dx++) {
+            const x = tx + dx;
+            if (x < 0 || x >= size) continue;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            if (d > reach) continue;
+            field[y * size + x] += (pop / 1400) * (1 - d / reach);
+          }
+        }
+      }
+      src.overlayField = field;
+    } else {
+      src.overlayField = null;
+    }
+
+    if (mode === OverlayMode.Power || mode === OverlayMode.Water) {
+      const utility = mode === OverlayMode.Power ? w.power : w.water;
+      const layerMode = mode === OverlayMode.Power ? 5 : 4;
+      const sat = new Float32Array(Math.max(1, utility.grids.length));
+      utility.grids.forEach((g, i) => { sat[i] = g.satisfaction; });
+      const gridOfTile = new Int32Array(size * size).fill(-1);
+      const layer = w.layers[layerMode];
+      for (let tile = 0; tile < size * size; tile++) {
+        if (layer.cls[tile] === 255) continue;
+        const node = w.graph.nodeAt(layerMode, tile);
+        if (node >= 0) gridOfTile[tile] = utility.gridOfNode[node];
+      }
+      // A tile between two nodes belongs to the same grid as the link it is
+      // on, so fill the gaps from the link the tile was traced into.
+      for (let tile = 0; tile < size * size; tile++) {
+        if (layer.cls[tile] === 255 || gridOfTile[tile] >= 0) continue;
+        const link = layer.link[tile];
+        if (link >= 0) gridOfTile[tile] = utility.gridOfNode[w.graph.linkFrom[link]];
+      }
+      src.gridSatisfaction = sat;
+      src.gridOfTile = gridOfTile;
+    } else {
+      src.gridSatisfaction = null;
+      src.gridOfTile = null;
+    }
+  }
+
   setOverlay(mode: OverlayMode): void {
     if (!this.renderer) return;
+    this.buildOverlayField(mode);
     this.renderer.overlay = mode;
     this.renderer.invalidateOverlay();
     this.renderer.invalidateWays();
@@ -240,6 +308,9 @@ export class Engine {
         tX: w.towns.x,
         tY: w.towns.y,
         tPopulation: w.towns.population,
+        overlayField: null,
+        gridSatisfaction: null,
+        gridOfTile: null,
         dayFraction: 0,
         season: 0,
         era: 1,

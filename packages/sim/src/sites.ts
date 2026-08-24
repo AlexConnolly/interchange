@@ -204,6 +204,17 @@ export interface RecipeTables {
   fromEra: Uint8Array;
   /** Era in which each cargo starts existing; outputs before it are dropped. */
   cargoFromEra: Uint8Array;
+  /**
+   * Era from which the three-network requirement binds.
+   *
+   * design.md makes the three networks *Act III's* game, and the content gives
+   * every industry a power, water and labour figure because they all have one
+   * eventually. Applying those from 1860 stops Act I dead: there is no
+   * transmission line in the world, so every industry is at zero per cent
+   * power, so nothing anywhere produces anything and the map is inert. Before
+   * this era the figures are recorded and ignored.
+   */
+  networkFromEra: number;
 }
 
 export const IndustryKind = {
@@ -249,9 +260,11 @@ export function stepSites(
     // Three networks. Each is a percentage; the binding one wins, because a
     // mine with power and no water produces nothing, not two thirds.
     let gate = 100;
-    if (r.powerNeed[def] > 0) gate = Math.min(gate, sites.powered[s]);
-    if (r.waterNeed[def] > 0) gate = Math.min(gate, sites.watered[s]);
-    if (r.labourNeed[def] > 0) gate = Math.min(gate, sites.staffed[s]);
+    if (era >= r.networkFromEra) {
+      if (r.powerNeed[def] > 0) gate = Math.min(gate, sites.powered[s]);
+      if (r.waterNeed[def] > 0) gate = Math.min(gate, sites.watered[s]);
+      if (r.labourNeed[def] > 0) gate = Math.min(gate, sites.staffed[s]);
+    }
     if (gate <= 0) continue;
 
     // Struggling sites run at reduced output rather than stopping, so the
@@ -367,11 +380,32 @@ export function stepSiteDecay(
 export function stepTowns(
   towns: TownTable,
   demandPerThousand: Int32Array,
+  producePerThousand: Int32Array,
   growthPerDay: number,
 ): void {
   const cargoCount = towns.cargoCount;
   for (let t = 0; t < towns.count; t++) {
     const pop = towns.population[t];
+
+    /*
+     * Towns make people, post and holidays.
+     *
+     * "You bring people" was thin in the first draft (features.md's own
+     * review), and this is where it stops being thin: passengers are produced
+     * by a town in proportion to its size and *wanted* by every other town, so
+     * a commuter flow is a real cargo with a real origin and destination
+     * rather than a number attached to a bus. The stock is capped at a few
+     * days of departures, because people who cannot get a bus do not queue
+     * indefinitely — they stay at home, and the town notices.
+     */
+    for (let c = 0; c < cargoCount; c++) {
+      const per = producePerThousand[c];
+      if (per === 0) continue;
+      const made = Math.max(1, Math.round((per * pop) / 1000));
+      const i = t * cargoCount + c;
+      const cap = made * 5;
+      towns.stock[i] = Math.min(cap, towns.stock[i] + made);
+    }
     let wanted = 0;
     let met = 0;
     for (let c = 0; c < cargoCount; c++) {

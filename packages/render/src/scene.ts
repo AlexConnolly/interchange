@@ -105,6 +105,20 @@ export interface RenderSource {
   tX: Int32Array;
   tY: Int32Array;
   tPopulation: Int32Array;
+  /**
+   * A per-tile field, 0..1, for whichever overlay wants one — amenity,
+   * catchment, and later the noise and pollution fields. Null when the current
+   * overlay does not use one.
+   *
+   * Overlay modes recolour the world wholesale rather than adding marks to it
+   * (art-direction.md §14), so a field is the natural shape: each mode is a
+   * different drawing of the same place, and the drawing is a function from
+   * tile to colour.
+   */
+  overlayField: Float32Array | null;
+  /** Per-mode grid satisfaction, 0..100, indexed by the grid a tile is on. */
+  gridSatisfaction: Float32Array | null;
+  gridOfTile: Int32Array | null;
   /** Calendar. */
   dayFraction: number;
   season: number;
@@ -309,6 +323,17 @@ export class Renderer {
       const a = src.amenity[tile] / 100;
       return [0.75 - a * 0.55, 0.30 + a * 0.50, 0.32 + a * 0.18];
     }
+    if (this.overlay === OverlayMode.Catchment && src.overlayField) {
+      // How many people can reach here inside a commute. The field is the
+      // whole answer to "where should this industry go", so it gets the
+      // strongest treatment of any overlay.
+      const v = Math.min(1, src.overlayField[tile]);
+      if (h <= 0) return [0.05, 0.07, 0.10];
+      return [0.10 + v * 0.62, 0.13 + v * 0.52, 0.30 - v * 0.14];
+    }
+    if ((this.overlay === OverlayMode.Power || this.overlay === OverlayMode.Water) && h <= 0) {
+      return [0.05, 0.07, 0.10];
+    }
     if (this.overlay !== OverlayMode.None && h > 0) {
       // Every other overlay wants the land as a neutral ground so the marks on
       // top carry all the information.
@@ -447,6 +472,20 @@ export class Renderer {
             const asset = src.wayAsset[mode][tile];
             const owner = asset < 0 ? 0 : src.assetOwner[asset];
             colour = owner === src.player ? SEMANTIC.owned : owner === 0 ? SEMANTIC.public : SEMANTIC.rival;
+          } else if (this.overlay === OverlayMode.Power || this.overlay === OverlayMode.Water) {
+            // Only the network that carries the utility is lit; everything
+            // else recedes, so the grid reads as a grid.
+            const wanted = this.overlay === OverlayMode.Power ? 5 : 4;
+            if (mode !== wanted) {
+              colour = [0.16, 0.17, 0.19];
+            } else if (src.gridOfTile && src.gridSatisfaction) {
+              const gi = src.gridOfTile[tile];
+              const sat = gi >= 0 ? src.gridSatisfaction[gi] : 0;
+              colour = sat >= 99 ? SEMANTIC.free
+                : sat >= 70 ? SEMANTIC.busy
+                : sat >= 30 ? SEMANTIC.congested
+                : SEMANTIC.jammed;
+            }
           } else if (this.overlay === OverlayMode.Congestion) {
             const link = src.wayLink[mode][tile];
             if (link >= 0) {
