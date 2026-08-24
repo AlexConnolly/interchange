@@ -379,18 +379,36 @@ function carveRivers(t: Terrain, rng: Rng, count: number): void {
   }
 }
 
+/**
+ * Cut the channel, and grade the banks down to it.
+ *
+ * Carving the channel alone leaves a knife-edge gash wherever the river runs
+ * across a slope: the bed drops by four units and the tile beside it does not,
+ * so a valley side becomes a row of shards. A real river has cut its banks
+ * too, and the fix is to taper outward for a couple of tiles past the channel.
+ */
 function carveAt(t: Terrain, x: number, y: number, width: number): void {
   const size = t.size;
   const bed = Math.max(SEA_LEVEL + 1, t.height[y * size + x] - 4);
-  for (let dy = -width; dy <= width; dy++) {
-    for (let dx = -width; dx <= width; dx++) {
-      if (dx * dx + dy * dy > width * width + 1) continue;
+  const bank = width + 2;
+  for (let dy = -bank; dy <= bank; dy++) {
+    for (let dx = -bank; dx <= bank; dx++) {
       const nx = x + dx;
       const ny = y + dy;
       if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
       const j = ny * size + nx;
-      if (t.height[j] > SEA_LEVEL) t.height[j] = Math.min(t.height[j], bed);
-      t.flags[j] |= TileFlag.River;
+      const r2 = dx * dx + dy * dy;
+      if (r2 <= width * width + 1) {
+        if (t.height[j] > SEA_LEVEL) t.height[j] = Math.min(t.height[j], bed);
+        t.flags[j] |= TileFlag.River;
+      } else if (r2 <= bank * bank + 1 && t.height[j] > SEA_LEVEL) {
+        // Bank: pulled a fraction of the way down to the bed, so the profile
+        // reads as a valley rather than as a slot.
+        const d = Math.sqrt(r2) - width;
+        const k = Math.max(0, 1 - d / 2.4);
+        const target = bed + (t.height[j] - bed) * (1 - k * 0.75);
+        if (target < t.height[j]) t.height[j] = Math.round(target);
+      }
     }
   }
 }

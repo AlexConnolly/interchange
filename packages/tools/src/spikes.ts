@@ -145,11 +145,11 @@ function findPairs(w: ReturnType<typeof createWorld>, want: number): [number, nu
   const c = content();
   const out: [number, number][] = [];
   for (let a = 0; a < w.sites.count && out.length < want; a++) {
-    if (w.sites.node[a] === NONE) continue;
+    if (!w.sites.connected(a)) continue;
     if (c.industries[w.sites.def[a]].kind !== 'extraction') continue;
     for (const id of Object.keys(c.industries[w.sites.def[a]].recipe.outputs)) {
       for (let b = 0; b < w.sites.count; b++) {
-        if (b === a || w.sites.node[b] === NONE) continue;
+        if (b === a || !w.sites.connected(b)) continue;
         if (c.industries[w.sites.def[b]].recipe.inputs[id] === undefined) continue;
         out.push([a, b]);
         break;

@@ -21,10 +21,19 @@ interface Props {
   engine: Engine;
   onPick: (p: Picked) => void;
   onHover: (p: Picked | null, screen: { x: number; y: number } | null) => void;
+  /** Construction drag, when a way class is selected. Returning true from
+   *  `onDragStart` claims the gesture so it pans nothing. */
+  onDragStart?: (tile: number) => boolean;
+  onDragMove?: (tile: number) => void;
+  onDragEnd?: (tile: number) => void;
 }
 
-export function WorldView({ engine, onPick, onHover }: Props): JSX.Element {
+export function WorldView({ engine, onPick, onHover, onDragStart, onDragMove, onDragEnd }: Props): JSX.Element {
   const ref = useRef<HTMLCanvasElement>(null);
+  // Held in a ref so the pointer handlers, which are installed once, always
+  // see the current callbacks rather than the ones from their closure.
+  const handlers = useRef({ onPick, onHover, onDragStart, onDragMove, onDragEnd });
+  handlers.current = { onPick, onHover, onDragStart, onDragMove, onDragEnd };
 
   useEffect(() => {
     const canvas = ref.current;
@@ -42,6 +51,7 @@ export function WorldView({ engine, onPick, onHover }: Props): JSX.Element {
     // --- pointer state, shared by every device ---------------------------
     const pointers = new Map<number, { x: number; y: number }>();
     let dragging = false;
+    let building = false;
     let moved = 0;
     let last = { x: 0, y: 0 };
     let pinchDist = 0;
@@ -83,6 +93,15 @@ export function WorldView({ engine, onPick, onHover }: Props): JSX.Element {
       canvas.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 1) {
+        const rr = engine.renderer;
+        if (rr && handlers.current.onDragStart) {
+          const tile = rr.pickTile(engine.buildSource(), ...toNdc(e));
+          if (tile >= 0 && handlers.current.onDragStart(tile)) {
+            building = true;
+            dragging = false;
+            return;
+          }
+        }
         dragging = true;
         moved = 0;
         last = { x: e.clientX, y: e.clientY };
@@ -99,10 +118,16 @@ export function WorldView({ engine, onPick, onHover }: Props): JSX.Element {
       if (!pointers.has(e.pointerId)) {
         // Hover: only meaningful with a real pointer, and only when idle.
         const p = pick(e);
-        onHover(p.kind === 'none' ? null : p, { x: e.clientX, y: e.clientY });
+        handlers.current.onHover(p.kind === 'none' ? null : p, { x: e.clientX, y: e.clientY });
         return;
       }
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (building) {
+        const tile = rr.pickTile(engine.buildSource(), ...toNdc(e));
+        if (tile >= 0) handlers.current.onDragMove?.(tile);
+        return;
+      }
 
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
@@ -139,12 +164,22 @@ export function WorldView({ engine, onPick, onHover }: Props): JSX.Element {
 
     const onUp = (e: PointerEvent): void => {
       const wasDragging = dragging;
+      if (building) {
+        building = false;
+        pointers.delete(e.pointerId);
+        const rr = engine.renderer;
+        if (rr) {
+          const tile = rr.pickTile(engine.buildSource(), ...toNdc(e));
+          if (tile >= 0) handlers.current.onDragEnd?.(tile);
+        }
+        return;
+      }
       pointers.delete(e.pointerId);
       if (pointers.size < 2) pinchDist = 0;
       if (pointers.size === 0) dragging = false;
       // A drag that moved a few pixels is still a click. Anything more was a
       // pan, and panning must never select something.
-      if (wasDragging && moved < 8) onPick(pick(e));
+      if (wasDragging && moved < 8) handlers.current.onPick(pick(e));
     };
 
     const onWheel = (e: WheelEvent): void => {
@@ -212,7 +247,7 @@ export function WorldView({ engine, onPick, onHover }: Props): JSX.Element {
       window.removeEventListener('keydown', onKey);
       engine.detach();
     };
-  }, [engine, onPick, onHover]);
+  }, [engine]);
 
   return <canvas ref={ref} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />;
 }

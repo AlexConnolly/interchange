@@ -120,10 +120,13 @@ export class Router {
   find(
     g: Graph, assets: AssetTable, costs: RouteCosts,
     fromNode: number, toNode: number, company: number,
-    size: number,
+    size: number, mode = 0,
   ): CachedRoute | null {
     const cache = this.caches[company] ?? this.caches[AUTHORITY];
-    const key = fromNode * 1048576 + toNode;
+    // The mode is part of the key, not a filter applied to a shared answer: a
+    // lorry and a locomotive between the same two places take different routes
+    // and neither can use the other's.
+    const key = (fromNode * 1048576 + toNode) * 8 + mode;
     const hit = cache.get(key);
     if (hit && hit.graphVersion === g.version && hit.costVersion === this.costVersion) {
       this.hits++;
@@ -174,6 +177,7 @@ export class Router {
       const end = g.nodeOutStart[node + 1];
       for (let i = start; i < end; i++) {
         const link = g.outLinks[i];
+        if (g.linkMode[link] !== mode) continue;
         const to = g.linkTo[link];
         const ng = gn + this.linkCost(g, assets, costs, link, company);
         if (this.visitStamp[to] === stamp && this.gScore[to] <= ng) continue;

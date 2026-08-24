@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { SPEED_STEPS, CHARTER_NAMES, TICKS_PER_DAY } from '@interchange/sim';
+import { SPEED_STEPS, CHARTER_NAMES, TICKS_PER_DAY, Cmd, Mode } from '@interchange/sim';
 import { OverlayMode } from '@interchange/render';
 import { content } from '@interchange/data';
 import { Engine } from './engine.ts';
 import { WorldView, type Picked } from './WorldView.tsx';
-import { CharterPanel, Contracts, Finance, Fleet, FleetList, Inspector, Services } from './panels.tsx';
+import { BuildPalette, CharterPanel, Contracts, Finance, Fleet, FleetList, Inspector, Ownership, Services } from './panels.tsx';
+import { applyPreview, clearPreview, emptyBuildState, updatePlan } from './build.ts';
+import { JunctionLab } from './JunctionLab.tsx';
 import { Perf } from './Perf.tsx';
 import { ArtReview } from './ArtReview.tsx';
 import { money, num, shortMoney } from './format.ts';
 
 const C = content();
 
-type Window_ = 'services' | 'contracts' | 'fleet' | 'finance' | 'charter' | null;
+type Window_ = 'services' | 'contracts' | 'fleet' | 'finance' | 'charter' | 'build' | 'ownership' | null;
 
 /**
  * A region is a seed and a size, so a region is a URL. `?seed=1860&size=512`
@@ -128,8 +130,14 @@ function Game({ engine }: { engine: Engine }): JSX.Element {
   const [rightWindow, setRightWindow] = useState<Window_>('charter');
   const [activeService, setActiveService] = useState(-1);
   const [showDepot, setShowDepot] = useState(false);
+  const [labNode, setLabNode] = useState(-1);
   const [hover, setHover] = useState<{ text: string; x: number; y: number } | null>(null);
   const lastEventTick = useRef(0);
+  // Build state lives in a ref: the drag handlers are installed once and the
+  // plan changes many times a second, so putting it in React state would mean
+  // a re-render per tile crossed.
+  const build = useRef(emptyBuildState());
+  const [buildTick, setBuildTick] = useState(0);
 
   useEffect(() => engine.subscribe(() => force((n) => n + 1)), [engine]);
 
@@ -143,7 +151,60 @@ function Game({ engine }: { engine: Engine }): JSX.Element {
     r.camState.z = y;
   }, [engine]);
 
+  const onDragStart = useCallback((tile: number) => {
+    const b = build.current;
+    if (!b.selection && !b.demolish) return false;
+    b.fromTile = tile;
+    b.toTile = -1;
+    updatePlan(engine, b, tile);
+    applyPreview(engine, b);
+    return true;
+  }, [engine]);
+
+  const onDragMove = useCallback((tile: number) => {
+    const b = build.current;
+    if (b.fromTile < 0) return;
+    if (b.demolish) {
+      // Demolition is a straight line rather than a route: you are taking up
+      // what is there, not planning something new.
+      const size = engine.world.config.size;
+      b.path = lineBetween(b.fromTile, tile, size);
+      b.plan = null;
+      applyPreview(engine, b);
+      engine.renderer?.setPreview(b.path, null, null, false, size);
+      return;
+    }
+    if (updatePlan(engine, b, tile)) {
+      applyPreview(engine, b);
+      setBuildTick((n) => n + 1);
+    }
+  }, [engine]);
+
+  const onDragEnd = useCallback((tile: number) => {
+    const b = build.current;
+    if (b.fromTile < 0) return;
+    if (b.demolish && b.path) {
+      engine.issue(Cmd.DemolishWay, Mode.Road, 0, 0, 0, [...b.path]);
+      engine.issue(Cmd.DemolishWay, Mode.Rail, 0, 0, 0, [...b.path]);
+    } else if (b.selection && b.plan && b.plan.ok && b.path) {
+      engine.issue(Cmd.BuildWay, b.selection.mode, b.selection.cls, 0, 0, [...b.path]);
+    }
+    clearPreview(engine, b);
+    setBuildTick((n) => n + 1);
+    void tile;
+  }, [engine]);
+
   const onPick = useCallback((p: Picked) => {
+    if (p.kind === 'tile' && p.tile >= 0) {
+      const gph = engine.world.graph;
+      for (let mode = 0; mode < 2; mode++) {
+        const n = gph.nodeAt(mode, p.tile);
+        if (n >= 0 && gph.nodeOutStart[n + 1] - gph.nodeOutStart[n] >= 3) {
+          setLabNode(n);
+          return;
+        }
+      }
+    }
     setPicked(p);
     if (engine.renderer) engine.renderer.selectedVehicle = p.kind === 'vehicle' ? p.id : -1;
     if (p.kind !== 'none') setRightWindow(null);
@@ -178,7 +239,8 @@ function Game({ engine }: { engine: Engine }): JSX.Element {
 
   return (
     <div className="app">
-      <WorldView engine={engine} onPick={onPick} onHover={onHover} />
+      <WorldView engine={engine} onPick={onPick} onHover={onHover}
+        onDragStart={onDragStart} onDragMove={onDragMove} onDragEnd={onDragEnd} />
 
       <div className="hud">
         <div className="topbar">
@@ -225,6 +287,29 @@ function Game({ engine }: { engine: Engine }): JSX.Element {
           <RailButton label="Services" icon="⇄" on={leftWindow === 'services'} onClick={() => setLeftWindow(leftWindow === 'services' ? null : 'services')} />
           <RailButton label="Contracts" icon="§" on={leftWindow === 'contracts'} onClick={() => setLeftWindow(leftWindow === 'contracts' ? null : 'contracts')} />
           <RailButton label="Fleet" icon="⬒" on={leftWindow === 'fleet'} onClick={() => setLeftWindow(leftWindow === 'fleet' ? null : 'fleet')} />
+          <RailButton label="Construction" icon="⌂" on={leftWindow === 'build'} onClick={() => {
+            setLeftWindow(leftWindow === 'build' ? null : 'build');
+            if (leftWindow === 'build') { build.current.selection = null; build.current.demolish = false; clearPreview(engine, build.current); }
+          }} />
+          <RailButton label="Ownership" icon="§§" on={leftWindow === 'ownership'} onClick={() => setLeftWindow(leftWindow === 'ownership' ? null : 'ownership')} />
+          <RailButton label="Junction Lab — the busiest junction on your network" icon="✳" on={labNode >= 0} onClick={() => {
+            if (labNode >= 0) { setLabNode(-1); return; }
+            // The busiest junction with something to arbitrate. Opening the
+            // Lab on a two-arm node would be opening it on a straight road.
+            const gph = engine.world.graph;
+            let best = -1;
+            let bestFlow = -1;
+            for (let i = 0; i < gph.nodeCount; i++) {
+              const arms = gph.nodeOutStart[i + 1] - gph.nodeOutStart[i];
+              if (arms < 3) continue;
+              let flow = 0;
+              for (let k = gph.nodeOutStart[i]; k < gph.nodeOutStart[i + 1]; k++) {
+                flow += gph.linkFlowPrev[gph.outLinks[k]] + gph.linkFlow[gph.outLinks[k]];
+              }
+              if (flow > bestFlow) { bestFlow = flow; best = i; }
+            }
+            if (best >= 0) setLabNode(best);
+          }} />
           <div style={{ height: 8 }} />
           <RailButton label="Congestion overlay" icon="◍" on={overlay === OverlayMode.Congestion} onClick={() => engine.setOverlay(overlay === OverlayMode.Congestion ? OverlayMode.None : OverlayMode.Congestion)} />
           <RailButton label="Ownership overlay" icon="◈" on={overlay === OverlayMode.Ownership} onClick={() => engine.setOverlay(overlay === OverlayMode.Ownership ? OverlayMode.None : OverlayMode.Ownership)} />
@@ -234,6 +319,27 @@ function Game({ engine }: { engine: Engine }): JSX.Element {
         {leftWindow === 'services' && <Services engine={engine} active={activeService} setActive={setActiveService} onFocus={focus} />}
         {leftWindow === 'contracts' && <Contracts engine={engine} onFocus={focus} />}
         {leftWindow === 'fleet' && <FleetList engine={engine} onSelect={(id) => onPick({ kind: 'vehicle', id, tile: -1 })} />}
+        {leftWindow === 'build' && (
+          <BuildPalette
+            engine={engine}
+            state={build.current}
+            onSelect={(mode, cls) => {
+              const b = build.current;
+              b.selection = b.selection?.cls === cls ? null : { mode, cls };
+              b.demolish = false;
+              clearPreview(engine, b);
+              setBuildTick((n) => n + 1);
+            }}
+            onDemolish={() => {
+              const b = build.current;
+              b.demolish = !b.demolish;
+              b.selection = null;
+              clearPreview(engine, b);
+              setBuildTick((n) => n + 1);
+            }}
+          />
+        )}
+        {leftWindow === 'ownership' && <Ownership engine={engine} onFocus={focus} />}
 
         {picked.kind !== 'none'
           ? <Inspector engine={engine} picked={picked} activeService={activeService} onFocus={focus} />
@@ -258,8 +364,24 @@ function Game({ engine }: { engine: Engine }): JSX.Element {
       {overlay !== OverlayMode.None && <OverlayLegend mode={overlay} />}
       {hover && <div className="tooltip" style={{ left: hover.x, top: hover.y - 10 }}>{hover.text}</div>}
       {showDepot && <Fleet engine={engine} onClose={() => setShowDepot(false)} />}
+      {labNode >= 0 && <JunctionLab engine={engine} node={labNode} onClose={() => setLabNode(-1)} />}
     </div>
   );
+}
+
+/** Tiles on a straight line between two, for demolition. */
+function lineBetween(a: number, b: number, size: number): Int32Array {
+  const ax = a % size;
+  const ay = (a / size) | 0;
+  const bx = b % size;
+  const by = (b / size) | 0;
+  const steps = Math.max(Math.abs(bx - ax), Math.abs(by - ay));
+  const out = new Int32Array(steps + 1);
+  for (let i = 0; i <= steps; i++) {
+    const t = steps === 0 ? 0 : i / steps;
+    out[i] = Math.round(ay + (by - ay) * t) * size + Math.round(ax + (bx - ax) * t);
+  }
+  return out;
 }
 
 function RailButton({ label, icon, on, onClick }: { label: string; icon: string; on: boolean; onClick: () => void }): JSX.Element {

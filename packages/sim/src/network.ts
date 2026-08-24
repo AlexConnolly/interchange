@@ -48,6 +48,14 @@ export class WayLayer {
   /** Position of the tile along its link's chain, for vehicle remapping. */
   readonly linkOffset: Uint16Array;
   /**
+   * Formation level, in height units. A way sits on this, not on the ground —
+   * which is where embankments, cuttings, bridges and tunnels come from, and
+   * why a railway has to find the valley. See construction.ts.
+   */
+  readonly level: Int16Array;
+  /** WayFlag bits: embankment, cutting, bridge, tunnel. */
+  readonly flags: Uint8Array;
+  /**
    * Tiles that must become graph nodes whatever their degree: the access
    * point of an industry, a station, a depot. Without this a colliery halfway
    * along a straight road is invisible to the graph, because a degree-two tile
@@ -67,6 +75,8 @@ export class WayLayer {
     this.link = new Int32Array(n).fill(NONE);
     this.linkOffset = new Uint16Array(n);
     this.terminal = new Uint8Array(n);
+    this.level = new Int16Array(n);
+    this.flags = new Uint8Array(n);
   }
 
   has(tile: number): boolean {

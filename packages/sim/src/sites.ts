@@ -10,7 +10,7 @@
  * because they were fighting a fire elsewhere stops taking risks.
  */
 
-import { MAX_SITES, MAX_TOWNS, TICKS_PER_DAY, AUTHORITY } from './constants.ts';
+import { MAX_SITES, MAX_TOWNS, MODE_COUNT, TICKS_PER_DAY, AUTHORITY } from './constants.ts';
 import { NONE } from './network.ts';
 import type { Hasher } from './hash.ts';
 
@@ -36,8 +36,14 @@ export class SiteTable {
   readonly y = new Int32Array(MAX_SITES);
   readonly tile = new Int32Array(MAX_SITES);
   readonly owner = new Int16Array(MAX_SITES);
-  /** Network node the site loads and unloads at. */
-  readonly node = new Int32Array(MAX_SITES).fill(NONE);
+  /**
+   * Network node the site loads and unloads at, per mode.
+   *
+   * Per mode rather than one node, because a colliery with a siding and a road
+   * spur is served by both and a rail vehicle cannot use the road one. This is
+   * the join that makes the later acts multi-modal without a second code path.
+   */
+  readonly nodes = new Int32Array(MAX_SITES * MODE_COUNT).fill(NONE);
   readonly state = new Uint8Array(MAX_SITES);
   /** Ticks until the next production cycle completes. */
   readonly cycle = new Int32Array(MAX_SITES);
@@ -99,6 +105,21 @@ export class SiteTable {
     return id;
   }
 
+  /** The node this site is served from on a given mode, or NONE. */
+  nodeOf(site: number, mode: number): number {
+    return this.nodes[site * MODE_COUNT + mode];
+  }
+
+  setNode(site: number, mode: number, node: number): void {
+    this.nodes[site * MODE_COUNT + mode] = node;
+  }
+
+  /** True if the site can be reached at all, on any mode. */
+  connected(site: number): boolean {
+    for (let m = 0; m < MODE_COUNT; m++) if (this.nodes[site * MODE_COUNT + m] !== NONE) return true;
+    return false;
+  }
+
   stockOf(site: number, cargo: number): number {
     return this.stock[site * this.cargoCount + cargo];
   }
@@ -129,7 +150,7 @@ export class TownTable {
   readonly tile = new Int32Array(MAX_TOWNS);
   readonly population = new Int32Array(MAX_TOWNS);
   readonly character = new Uint8Array(MAX_TOWNS);
-  readonly node = new Int32Array(MAX_TOWNS).fill(NONE);
+  readonly nodes = new Int32Array(MAX_TOWNS * MODE_COUNT).fill(NONE);
   names: string[] = [];
   /** Rolling 0..100 measure of how well the town is served. Drives growth. */
   readonly served = new Uint8Array(MAX_TOWNS);
@@ -147,6 +168,14 @@ export class TownTable {
     this.cargoCount = cargoCount;
     this.stock = new Int32Array(MAX_TOWNS * cargoCount);
     this.demand = new Int32Array(MAX_TOWNS * cargoCount);
+  }
+
+  nodeOf(town: number, mode: number): number {
+    return this.nodes[town * MODE_COUNT + mode];
+  }
+
+  setNode(town: number, mode: number, node: number): void {
+    this.nodes[town * MODE_COUNT + mode] = node;
   }
 
   alloc(x: number, y: number, tile: number, name: string, population: number, character: number): number {

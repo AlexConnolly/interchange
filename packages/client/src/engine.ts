@@ -194,6 +194,8 @@ export class Engine {
         wayDir: w.layers.map((l) => l.dir),
         wayAsset: w.layers.map((l) => l.asset),
         wayLink: w.layers.map((l) => l.link),
+        wayLevel: w.layers.map((l) => l.level),
+        wayFlags: w.layers.map((l) => l.flags),
         assetOwner: w.assets.owner,
         assetCondition: w.assets.condition,
         linkFlowPrev: w.graph.linkFlowPrev,

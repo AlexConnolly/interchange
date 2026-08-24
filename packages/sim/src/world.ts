@@ -12,7 +12,7 @@
 import {
   ACCEL, AUTHORITY, CELLS_PER_TILE, Control, DIR_BIT, DIR_DX, DIR_DY,
   DIR_OPPOSITE, FLOW_WINDOW, HASH_INTERVAL, MAX_COMPANIES, MAX_VEHICLES,
-  MODE_COUNT, Mode, PATH_LATENCY_TICKS, SPEED_STEPS, START_YEAR,
+  MODE_COUNT, MODE_NAMES, Mode, PATH_LATENCY_TICKS, SPEED_STEPS, START_YEAR,
   TICKS_PER_DAY, TICKS_PER_YEAR, DAYS_PER_MONTH, DAYS_PER_YEAR,
 } from './constants.ts';
 import { Cmd, CommandQueue, type Command } from './commands.ts';
@@ -33,6 +33,7 @@ import {
   stepSites, stepTowns, type RecipeTables,
 } from './sites.ts';
 import { generateTerrain, SEA_LEVEL, type Terrain, type WorldConfig } from './terrain.ts';
+import { alignForRadius, layAlignment, planAlignment, removeWayTile, type Alignment } from './construction.ts';
 import {
   VState, VehicleTable, buildNodeGeometry, projectVehicles, stepTraffic,
   type NodeGeometry, type TrafficStats,
@@ -49,6 +50,8 @@ interface PathRequest {
   fromNode: number;
   toNode: number;
   dueTick: number;
+  /** Routing is per mode: a lorry cannot use a railway. */
+  mode: number;
 }
 
 export interface TickReport {
@@ -104,6 +107,7 @@ export class World {
   private vehicleCapacity = new Int32Array(256);
   private vehicleTransfer = new Int32Array(256);
   private vehicleRunning = new Float64Array(256);
+  private vehicleMode = new Uint8Array(256);
   private cargoPrice = new Int32Array(64);
   private recipes: RecipeTables;
   private townDemandPerThousand: Int32Array;
@@ -151,6 +155,7 @@ export class World {
       this.wayWear[i] = w.wear;
     });
     content.vehicles.forEach((v, i) => {
+      this.vehicleMode[i] = Math.max(0, MODE_NAMES.indexOf(v.mode as never));
       this.vehicleSpeed[i] = v.speed;
       this.vehicleCapacity[i] = v.capacity;
       this.vehicleTransfer[i] = v.transferRate;
@@ -252,6 +257,19 @@ export class World {
 
   /** Retrace the network and re-attach everything that points into it. */
   rebuild(): void {
+    // Anywhere a service can stop has to be a graph node on every mode that
+    // reaches it, or a siding laid past a colliery is traced straight through
+    // and the colliery is invisible to the railway.
+    for (let s = 0; s < this.sites.count; s++) {
+      const tile = this.siteAccessTile[s];
+      if (tile === NONE) continue;
+      for (const layer of this.layers) if (layer.cls[tile] !== NO_WAY) layer.terminal[tile] = 1;
+    }
+    for (let t = 0; t < this.towns.count; t++) {
+      const tile = this.townAccessTile[t];
+      if (tile === NONE) continue;
+      for (const layer of this.layers) if (layer.cls[tile] !== NO_WAY) layer.terminal[tile] = 1;
+    }
     rebuildGraph(this.graph, this.layers, this.assets);
     this.geometryVersion = -1;
     this.router.clear();
@@ -260,18 +278,22 @@ export class World {
     this.nodeTownOf.clear();
     for (let s = 0; s < this.sites.count; s++) {
       const tile = this.siteAccessTile[s];
-      const node = tile === NONE ? NONE : this.graph.nodeAt(Mode.Road, tile);
-      this.sites.node[s] = node;
-      if (node !== NONE) {
-        this.nodeSiteOf.set(node, s);
-        this.graph.nodeSite[node] = s;
+      for (let m = 0; m < MODE_COUNT; m++) {
+        const node = tile === NONE ? NONE : this.graph.nodeAt(m, tile);
+        this.sites.setNode(s, m, node);
+        if (node !== NONE) {
+          this.nodeSiteOf.set(node, s);
+          this.graph.nodeSite[node] = s;
+        }
       }
     }
     for (let t = 0; t < this.towns.count; t++) {
       const tile = this.townAccessTile[t];
-      const node = tile === NONE ? NONE : this.graph.nodeAt(Mode.Road, tile);
-      this.towns.node[t] = node;
-      if (node !== NONE) this.nodeTownOf.set(node, t);
+      for (let m = 0; m < MODE_COUNT; m++) {
+        const node = tile === NONE ? NONE : this.graph.nodeAt(m, tile);
+        this.towns.setNode(t, m, node);
+        if (node !== NONE) this.nodeTownOf.set(node, t);
+      }
     }
 
     // Any vehicle on the network has lost its link. Park it at the nearest
@@ -405,10 +427,10 @@ export class World {
    * tick on every machine whether the search took two milliseconds or forty.
    * risks.md R2.
    */
-  requestPath(vehicle: number, fromNode: number, toNode: number): void {
+  requestPath(vehicle: number, fromNode: number, toNode: number, mode: number = Mode.Road): void {
     if (fromNode === NONE || toNode === NONE) return;
     this.vehicles.pathDueTick[vehicle] = this.tick + PATH_LATENCY_TICKS;
-    this.pathQueue.push({ vehicle, fromNode, toNode, dueTick: this.tick + PATH_LATENCY_TICKS });
+    this.pathQueue.push({ vehicle, fromNode, toNode, mode, dueTick: this.tick + PATH_LATENCY_TICKS });
     this.stats.pathRequests++;
   }
 
@@ -426,7 +448,7 @@ export class World {
       if (!this.vehicles.alive[v]) continue;
       const route = this.router.find(
         this.graph, this.assets, this.routeCosts,
-        req.fromNode, req.toNode, this.vehicles.company[v], this.config.size,
+        req.fromNode, req.toNode, this.vehicles.company[v], this.config.size, req.mode,
       );
       this.stats.pathsResolved++;
       if (!route || route.links.length === 0) {
@@ -529,7 +551,10 @@ export class World {
       const kind = svcT.stopKind[si];
       const isTown = kind === 1;
       const target = svcT.stopTarget[si];
-      const stopNode = kind === 2 ? target : isTown ? this.towns.node[target] : this.sites.node[target];
+      const mode = this.vehicleMode[v.type[id]];
+      const stopNode = kind === 2 ? target
+        : isTown ? this.towns.nodeOf(target, mode)
+        : this.sites.nodeOf(target, mode);
       if (stopNode === NONE) {
         v.dwell[id] = TICKS_PER_DAY;
         continue;
@@ -542,7 +567,7 @@ export class World {
           v.targetNode[id] = stopNode;
         } else {
           v.state[id] = VState.Idle;
-          this.requestPath(id, from, stopNode);
+          this.requestPath(id, from, stopNode, mode);
           continue;
         }
       }
@@ -552,13 +577,13 @@ export class World {
         v.orderIndex[id] = (stopIdx + 1) % svcT.stopCount[svc];
         const ns = svc * MAX_STOPS + v.orderIndex[id];
         const nn = svcT.stopKind[ns] === 2 ? svcT.stopTarget[ns]
-          : svcT.stopKind[ns] === 1 ? this.towns.node[svcT.stopTarget[ns]]
-          : this.sites.node[svcT.stopTarget[ns]];
+          : svcT.stopKind[ns] === 1 ? this.towns.nodeOf(svcT.stopTarget[ns], mode)
+          : this.sites.nodeOf(svcT.stopTarget[ns], mode);
         if (nn === NONE || nn === v.targetNode[id]) {
           v.dwell[id] = TICKS_PER_DAY / 2;
         } else {
           v.state[id] = VState.Idle;
-          this.requestPath(id, v.targetNode[id], nn);
+          this.requestPath(id, v.targetNode[id], nn, mode);
         }
         continue;
       }
@@ -644,13 +669,13 @@ export class World {
       const nextKind = svcT.stopKind[nextSi];
       const nextTarget = svcT.stopTarget[nextSi];
       const nextNode = nextKind === 2 ? nextTarget
-        : nextKind === 1 ? this.towns.node[nextTarget]
-        : this.sites.node[nextTarget];
+        : nextKind === 1 ? this.towns.nodeOf(nextTarget, mode)
+        : this.sites.nodeOf(nextTarget, mode);
       if (nextNode === NONE || nextNode === v.targetNode[id]) {
         v.dwell[id] = TICKS_PER_DAY / 2;
         continue;
       }
-      this.requestPath(id, v.targetNode[id], nextNode);
+      this.requestPath(id, v.targetNode[id], nextNode, mode);
     }
 
     this.admitQueued();
@@ -1061,6 +1086,17 @@ export class World {
       case Cmd.ListAsset:
         if (this.assets.owner[c.a] === c.issuer) this.assets.forSale[c.a] = c.b ? 1 : 0;
         break;
+      case Cmd.BuildWay:
+        // Tile list in `data`, because a route is the one payload that will
+        // not fit in four integers. Still a few hundred bytes in the log.
+        if (Array.isArray(c.data)) this.buildWay(c.issuer, c.a, c.b, c.data);
+        break;
+      case Cmd.DemolishWay:
+        if (Array.isArray(c.data)) this.demolishWay(c.issuer, c.a, c.data);
+        break;
+      case Cmd.SellAsset:
+        this.sellAsset(c.a, c.issuer);
+        break;
       case Cmd.SetNodeControl:
         if (c.a < this.graph.nodeCount) this.graph.nodeControl[c.a] = c.b;
         break;
@@ -1079,6 +1115,99 @@ export class World {
   /** Phase 2 and later attach here rather than editing the switch above. */
   applyExtended: ((c: Command) => void) | null = null;
 
+  // ---------------------------------------------------------- construction
+
+  /**
+   * The route a way would take between two tiles, as tile indices.
+   *
+   * The same hierarchical search the region generator uses, so the road the
+   * player is shown is the road the authority would have built — which means
+   * an alignment that looks sensible *is* sensible, and the player is not
+   * fighting a router with different opinions from their own.
+   */
+  proposeRoute(fromTile: number, toTile: number, cls = -1): Int32Array | null {
+    const path = this.tileRouter.route(fromTile, toTile);
+    if (!path) return null;
+    const minRadius = cls >= 0 ? (this.content.ways[cls]?.minRadius ?? 0) : 0;
+    return minRadius > 0 ? alignForRadius(path, minRadius, this.config.size) : path;
+  }
+
+  /** Plan an alignment without committing it: the estimate the player sees. */
+  planWay(mode: number, cls: number, path: ArrayLike<number>, company = this.player): Alignment {
+    const way = this.content.ways[cls];
+    return planAlignment(
+      this.terrain, this.layers[mode], path, cls,
+      {
+        buildCost: way.buildCost,
+        maxGradient: way.maxGradient,
+        minRadius: way.minRadius,
+        bridgeCostPct: way.bridgeCostPct,
+        tunnelCostPct: way.tunnelCostPct,
+      },
+      company,
+      (asset) => this.assets.owner[asset],
+    );
+  }
+
+  /**
+   * Lay a way. design.md §3.5: from Act II you can build, therefore own,
+   * therefore charge — so this is also where the first asset a company owns
+   * comes from, and where the rent line in the income statement starts.
+   */
+  buildWay(company: number, mode: number, cls: number, path: ArrayLike<number>): boolean {
+    const way = this.content.ways[cls];
+    if (!way) return false;
+    if (this.companies.charter[company] < Charter.Construction) {
+      this.onEvent?.('refused', 'You have no construction charter. The authority builds the roads.');
+      return false;
+    }
+    if (way.era > this.era) return false;
+    const plan = this.planWay(mode, cls, path, company);
+    if (!plan.ok) {
+      this.onEvent?.('refused', plan.problem);
+      return false;
+    }
+    if (this.companies.cash[company] < plan.totalCost) {
+      this.onEvent?.('refused', `Not enough cash: that alignment costs ${Math.round(plan.totalCost / 100)}.`);
+      return false;
+    }
+
+    const asset = this.assets.alloc(mode, cls, company, way.publicCharge, this.tick);
+    if (asset === NONE) return false;
+    const laid = layAlignment(this.layers[mode], this.config.size, plan, cls, asset);
+    this.assets.tiles[asset] = laid;
+    this.assets.buildCost[asset] = plan.totalCost;
+    if (laid === 0) {
+      // Entirely over existing formation: no new asset, just an upgrade.
+      this.assets.count--;
+    }
+    this.companies.post(company, Line.Construction, plan.totalCost);
+    this.rebuild();
+    this.router.invalidate();
+    return true;
+  }
+
+  /** Take a way up again. Only your own, and you get nothing back for it —
+   *  the earth stays moved and the materials are scrap. */
+  demolishWay(company: number, mode: number, tiles: ArrayLike<number>): number {
+    const layer = this.layers[mode];
+    let removed = 0;
+    for (let i = 0; i < tiles.length; i++) {
+      const tile = tiles[i];
+      const asset = layer.asset[tile];
+      if (asset !== NONE && this.assets.owner[asset] !== company) continue;
+      if (removeWayTile(layer, this.config.size, tile)) {
+        removed++;
+        if (asset !== NONE) this.assets.tiles[asset]--;
+      }
+    }
+    if (removed > 0) {
+      this.rebuild();
+      this.router.invalidate();
+    }
+    return removed;
+  }
+
   /** Two bare-node waypoints. Only the performance and balance harnesses use
    *  this; it exists so they do not need an industry at every junction. */
   stressNodeStops(service: number, a: number, b: number): void {
@@ -1096,7 +1225,9 @@ export class World {
     this.vehicles.length[id] = def.cells;
     this.vehicles.boughtTick[id] = this.tick;
     this.vehicles.state[id] = VState.Idle;
-    const node = atSite >= 0 && atSite < this.sites.count ? this.sites.node[atSite] : NONE;
+    const node = atSite >= 0 && atSite < this.sites.count
+      ? this.sites.nodeOf(atSite, this.vehicleMode[typeIndex])
+      : NONE;
     this.vehicles.targetNode[id] = node;
     this.companies.post(company, Line.VehiclePurchase, def.cost);
     return id;
@@ -1186,6 +1317,26 @@ export class World {
     }
   }
 
+  /**
+   * Sell an asset back to the authority.
+   *
+   * At the same valuation a buyer would pay, less a discount — the authority
+   * is a buyer of last resort and prices like one. This exists mainly so a
+   * player who overbuilt has a way out that is not insolvency.
+   */
+  sellAsset(asset: number, seller: number): boolean {
+    if (asset < 0 || asset >= this.assets.count) return false;
+    if (this.assets.owner[asset] !== seller) return false;
+    const price = Math.round(this.assets.valuation(asset, this.content.balance.valuationPct) * 0.7);
+    this.assets.owner[asset] = AUTHORITY;
+    this.assets.charge[asset] = this.content.ways[this.assets.cls[asset]].publicCharge;
+    this.assets.forSale[asset] = 0;
+    this.companies.post(seller, Line.AssetTrade, price);
+    this.recomputeLinkCharges();
+    this.router.invalidate();
+    return true;
+  }
+
   /** design.md §3.2: buy flips a cost into an income and hands you the rate. */
   buyAsset(asset: number, buyer: number): boolean {
     if (asset < 0 || asset >= this.assets.count) return false;
@@ -1194,8 +1345,11 @@ export class World {
     if (owner !== AUTHORITY && !this.assets.forSale[asset] && !this.companies.bankrupt[owner]) return false;
     const price = this.assets.valuation(asset, this.content.balance.valuationPct);
     if (this.companies.cash[buyer] < price) return false;
-    this.companies.post(buyer, Line.AssetTrade, price);
-    this.companies.cash[buyer] -= 0; // post already moved cash
+    // A purchase is an expenditure for the buyer and income for the seller.
+    // `post` on the AssetTrade line is signed as income, so the buyer's side
+    // is posted through Construction — the money has to leave, and it has to
+    // leave on a line that reads as capital rather than as trading.
+    this.companies.post(buyer, Line.Construction, price);
     if (owner !== AUTHORITY) this.companies.post(owner, Line.AssetTrade, price);
     this.assets.owner[asset] = buyer;
     this.assets.forSale[asset] = 0;

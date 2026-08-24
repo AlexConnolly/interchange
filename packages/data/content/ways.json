@@ -10,6 +10,10 @@
     "upkeep": 600,
     "wear": 34,
     "publicCharge": 4,
+    "maxGradient": 95,
+    "minRadius": 0,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#8a7a5e"
   },
   {
@@ -23,6 +27,10 @@
     "upkeep": 1400,
     "wear": 18,
     "publicCharge": 7,
+    "maxGradient": 80,
+    "minRadius": 0,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#9a9086"
   },
   {
@@ -36,6 +44,10 @@
     "upkeep": 2600,
     "wear": 10,
     "publicCharge": 9,
+    "maxGradient": 70,
+    "minRadius": 1,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#5f6066"
   },
   {
@@ -49,6 +61,10 @@
     "upkeep": 5800,
     "wear": 7,
     "publicCharge": 12,
+    "maxGradient": 55,
+    "minRadius": 2,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#54555b"
   },
   {
@@ -62,6 +78,10 @@
     "upkeep": 11000,
     "wear": 5,
     "publicCharge": 16,
+    "maxGradient": 45,
+    "minRadius": 3,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#4a4b51"
   },
   {
@@ -75,6 +95,10 @@
     "upkeep": 2200,
     "wear": 14,
     "publicCharge": 10,
+    "maxGradient": 30,
+    "minRadius": 2,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#6a5f52"
   },
   {
@@ -88,6 +112,10 @@
     "upkeep": 4000,
     "wear": 10,
     "publicCharge": 14,
+    "maxGradient": 20,
+    "minRadius": 4,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#5c5348"
   },
   {
@@ -101,6 +129,10 @@
     "upkeep": 7400,
     "wear": 10,
     "publicCharge": 16,
+    "maxGradient": 20,
+    "minRadius": 4,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#554d43"
   },
   {
@@ -114,6 +146,10 @@
     "upkeep": 9600,
     "wear": 8,
     "publicCharge": 20,
+    "maxGradient": 18,
+    "minRadius": 5,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#4e5a5e"
   },
   {
@@ -127,6 +163,10 @@
     "upkeep": 20000,
     "wear": 6,
     "publicCharge": 34,
+    "maxGradient": 12,
+    "minRadius": 9,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#495a66"
   },
   {
@@ -140,6 +180,10 @@
     "upkeep": 3000,
     "wear": 4,
     "publicCharge": 8,
+    "maxGradient": 2,
+    "minRadius": 3,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#3f6f8c"
   },
   {
@@ -153,6 +197,10 @@
     "upkeep": 0,
     "wear": 0,
     "publicCharge": 0,
+    "maxGradient": 999,
+    "minRadius": 0,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#2f5f80"
   },
   {
@@ -166,6 +214,10 @@
     "upkeep": 0,
     "wear": 0,
     "publicCharge": 0,
+    "maxGradient": 999,
+    "minRadius": 0,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#5b7f9c"
   },
   {
@@ -179,6 +231,10 @@
     "upkeep": 2600,
     "wear": 6,
     "publicCharge": 6,
+    "maxGradient": 120,
+    "minRadius": 0,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#7d7468"
   },
   {
@@ -192,6 +248,10 @@
     "upkeep": 1800,
     "wear": 4,
     "publicCharge": 3,
+    "maxGradient": 200,
+    "minRadius": 0,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#8d8f96"
   },
   {
@@ -205,6 +265,10 @@
     "upkeep": 2000,
     "wear": 20,
     "publicCharge": 2,
+    "maxGradient": 140,
+    "minRadius": 0,
+    "bridgeCostPct": 600,
+    "tunnelCostPct": 1200,
     "colour": "#7a7060"
   }
 ]

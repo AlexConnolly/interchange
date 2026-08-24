@@ -27,9 +27,9 @@ if (w.graph.linkCount === 0) {
 // Sites with no network node cannot be served at all, which is a worldgen bug
 // rather than a gameplay problem, so it is worth failing loudly on.
 let orphanSites = 0;
-for (let s = 0; s < w.sites.count; s++) if (w.sites.node[s] === NONE) orphanSites++;
+for (let s = 0; s < w.sites.count; s++) if (!w.sites.connected(s)) orphanSites++;
 let orphanTowns = 0;
-for (let t = 0; t < w.towns.count; t++) if (w.towns.node[t] === NONE) orphanTowns++;
+for (let t = 0; t < w.towns.count; t++) if (w.towns.nodeOf(t, 0) === NONE) orphanTowns++;
 console.log(`  unreachable: ${orphanSites}/${w.sites.count} sites, ${orphanTowns}/${w.towns.count} towns`);
 
 // --- set up one service by hand: find a producer and a matching consumer ---
@@ -42,7 +42,7 @@ let to = -1;
 let cargo = -1;
 let bestDist = Infinity;
 for (let a = 0; a < w.sites.count; a++) {
-  if (w.sites.node[a] === NONE) continue;
+  if (!w.sites.connected(a)) continue;
   // Origin must be an extraction site. A processing site only has whatever
   // its own inputs let it make, so a service run off one moves exactly as
   // much as its starting stock and then stops — correct behaviour, and
@@ -53,7 +53,7 @@ for (let a = 0; a < w.sites.count; a++) {
     const ci = content.cargoIndex.get(id);
     if (ci === undefined) continue;
     for (let b = 0; b < w.sites.count; b++) {
-      if (b === a || w.sites.node[b] === NONE) continue;
+      if (b === a || !w.sites.connected(b)) continue;
       if (content.industries[w.sites.def[b]].recipe.inputs[id] === undefined) continue;
       const d = Math.hypot(w.sites.x[a] - w.sites.x[b], w.sites.y[a] - w.sites.y[b]);
       if (d < bestDist) {

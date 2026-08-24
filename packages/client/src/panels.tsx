@@ -18,6 +18,7 @@ import { content } from '@interchange/data';
 import { money, num, pct, shortMoney, signClass, tonnes, days } from './format.ts';
 import type { Engine } from './engine.ts';
 import type { Picked } from './WorldView.tsx';
+import { availableWays, type BuildState } from './build.ts';
 
 const C = content();
 
@@ -95,7 +96,7 @@ export function Inspector({
             <dt>Service rate</dt><dd className={w.sites.satisfaction[s] > 55 ? 'pos' : 'warnc'}>{pct(w.sites.satisfaction[s])}</dd>
             {def.kind === 'extraction' && <><dt>Richness</dt><dd>{pct(w.sites.richness[s])}</dd></>}
             <dt>Shipped out</dt><dd>{tonnes(w.sites.shipped[s])}</dd>
-            <dt>Connected</dt><dd>{w.sites.node[s] === NONE ? <span className="neg">no road</span> : 'yes'}</dd>
+            <dt>Connected</dt><dd>{w.sites.connected(s) ? 'yes' : <span className="neg">no way reaches it</span>}</dd>
           </dl>
           {outputs.length > 0 && (
             <>
@@ -610,6 +611,168 @@ export function CharterPanel({ engine }: { engine: Engine }): JSX.Element {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+
+// ------------------------------------------------------------- construction
+
+/**
+ * The build palette, and the estimate.
+ *
+ * The estimate is the point. design.md §13: terrain is a cost, not a paint
+ * tool — so the player is told what the ridge costs before they buy it, and
+ * the earthworks are itemised rather than folded into one number, because
+ * "£40,000, of which £31,000 is a viaduct" is a different sentence from
+ * "£40,000" and leads to a different decision.
+ */
+export function BuildPalette({
+  engine, state, onSelect, onDemolish,
+}: {
+  engine: Engine;
+  state: BuildState;
+  onSelect: (mode: number, cls: number) => void;
+  onDemolish: () => void;
+}): JSX.Element {
+  const w = engine.world;
+  const ways = availableWays(w);
+  const canBuild = w.companies.charter[w.player] >= 1;
+  const byMode = new Map<number, typeof ways>();
+  for (const way of ways) {
+    const list = byMode.get(way.mode) ?? [];
+    list.push(way);
+    byMode.set(way.mode, list);
+  }
+
+  return (
+    <div className="window left">
+      <h2>Construction</h2>
+      <div className="body">
+        {!canBuild && (
+          <div style={{ padding: '12px 10px', fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
+            You hold no construction charter. Every road in the region belongs to
+            the authority and you pay to use it. Deliver enough to be taken
+            seriously and they will let you lay your own.
+          </div>
+        )}
+        {canBuild && [...byMode.entries()].map(([mode, list]) => (
+          <div key={mode}>
+            <div className="ledger"><div className="head">{mode === 1 ? 'Rail' : 'Road'}</div></div>
+            {list.map((way) => (
+              <div
+                key={way.id}
+                className={`row click ${state.selection?.cls === way.index ? 'selected' : ''}`}
+                onClick={() => onSelect(way.mode, way.index)}
+              >
+                <div className="grow">
+                  <div className="title">{way.name}</div>
+                  <div className="sub">{money(way.cost)} per tile on the flat</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+        {canBuild && (
+          <div className="row">
+            <button className={`btn tiny ${state.demolish ? 'danger' : ''}`} onClick={onDemolish}>
+              {state.demolish ? 'Demolishing — click to stop' : 'Demolish'}
+            </button>
+          </div>
+        )}
+        {state.plan && (
+          <>
+            <div className="ledger"><div className="head">Estimate</div></div>
+            <dl className="kv">
+              <dt>Length</dt><dd>{state.plan.tiles.length} tiles</dd>
+              <dt>Steepest gradient</dt>
+              <dd className={state.plan.ok ? '' : 'neg'}>1 in {state.plan.steepest > 0 ? Math.round(64 / state.plan.steepest) : '∞'}</dd>
+              {state.plan.earthworks > 0 && (<><dt>Cut and fill</dt><dd>{state.plan.earthworks} tiles</dd></>)}
+              {state.plan.bridges > 0 && (<><dt>Bridge</dt><dd className="warnc">{state.plan.bridges} tiles</dd></>)}
+              {state.plan.tunnels > 0 && (<><dt>Tunnel</dt><dd className="warnc">{state.plan.tunnels} tiles</dd></>)}
+              {state.plan.reused > 0 && (<><dt>Over existing</dt><dd>{state.plan.reused} tiles</dd></>)}
+              <dt>Total</dt>
+              <dd className={w.companies.cash[w.player] >= state.plan.totalCost ? '' : 'neg'}>
+                {money(state.plan.totalCost)}
+              </dd>
+            </dl>
+            {!state.plan.ok && (
+              <div style={{ padding: '0 10px 10px', fontSize: 11.5, color: 'var(--bad)' }}>{state.plan.problem}</div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Ownership. design.md §3.2's triangle, made operable: pay is the default and
+ * costs nothing to choose, buy is a button with a price on it, and bypass is
+ * the construction palette.
+ */
+export function Ownership({ engine, onFocus }: { engine: Engine; onFocus: (x: number, y: number) => void }): JSX.Element {
+  const w = engine.world;
+  const rows: number[] = [];
+  for (let a = 0; a < w.assets.count; a++) {
+    if (w.assets.tiles[a] <= 0) continue;
+    rows.push(a);
+  }
+  // Yours first, then whatever is earning most from you.
+  rows.sort((a, b) => {
+    const mine = (x: number): number => (w.assets.owner[x] === w.player ? 0 : 1);
+    return mine(a) - mine(b) || w.assets.revenuePrev[b] - w.assets.revenuePrev[a];
+  });
+
+  return (
+    <div className="window left">
+      <h2>Ownership <span className="dim mono">{rows.filter((a) => w.assets.owner[a] === w.player).length} yours</span></h2>
+      <div className="body">
+        {rows.slice(0, 60).map((a) => {
+          const owner = w.assets.owner[a];
+          const mine = owner === w.player;
+          const price = w.assets.valuation(a, C.balance.valuationPct);
+          const way = C.ways[w.assets.cls[a]];
+          const canBuy = !mine && w.companies.charter[w.player] >= 1;
+          return (
+            <div className="row" key={a}>
+              <div className="grow">
+                <div className="title">
+                  {way.name} <span className="dim">· {w.assets.tiles[a]} tiles</span>
+                </div>
+                <div className="sub">
+                  <span style={{ color: mine ? 'var(--owned)' : owner === 0 ? 'var(--public)' : 'var(--rival)' }}>
+                    {w.companies.names[owner] ?? 'unknown'}
+                  </span>
+                  {' · '}{money(w.assets.charge[a])}/tile
+                  {' · '}{w.assets.passesPrev[a]} passes
+                  {' · '}earned {shortMoney(w.assets.revenuePrev[a])}
+                </div>
+              </div>
+              {mine ? (
+                <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                  <button className="btn tiny" onClick={() => engine.issue(Cmd.SetCharge, a, Math.max(0, w.assets.charge[a] - 2))}>−</button>
+                  <button className="btn tiny" onClick={() => engine.issue(Cmd.SetCharge, a, w.assets.charge[a] + 2)}>+</button>
+                </div>
+              ) : (
+                <button className="btn tiny" disabled={!canBuy || w.companies.cash[w.player] < price}
+                  onClick={() => engine.issue(Cmd.BuyAsset, a)}>
+                  Buy {shortMoney(price)}
+                </button>
+              )}
+            </div>
+          );
+        })}
+        {rows.length === 0 && (
+          <div style={{ padding: '12px 10px', fontSize: 12, color: 'var(--ink-dim)' }}>Nothing built yet.</div>
+        )}
+      </div>
+      <div className="legend">
+        <span className="dim">
+          Raise a charge and traffic leaves. That is the whole damper: revenue is charge times
+          volume, and volume falls as charge rises.
+        </span>
       </div>
     </div>
   );

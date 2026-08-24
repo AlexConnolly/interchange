@@ -174,22 +174,22 @@ const vehicles: VSpec[] = [
 // -------------------------------------------------------------- way classes
 
 const ways = [
-  { id: 'track', name: 'Dirt track', mode: 'road', era: 1, speedLimit: SPEED(0.055), lanes: 1, buildCost: P(90), upkeep: P(6), wear: 34, publicCharge: 4, colour: '#8a7a5e' },
-  { id: 'macadam', name: 'Macadam road', mode: 'road', era: 1, speedLimit: SPEED(0.085), lanes: 1, buildCost: P(260), upkeep: P(14), wear: 18, publicCharge: 7, colour: '#9a9086' },
-  { id: 'tarmac', name: 'Tarmac road', mode: 'road', era: 3, speedLimit: SPEED(0.14), lanes: 2, buildCost: P(620), upkeep: P(26), wear: 10, publicCharge: 9, colour: '#5f6066' },
-  { id: 'dual', name: 'Dual carriageway', mode: 'road', era: 4, speedLimit: SPEED(0.18), lanes: 4, buildCost: P(1500), upkeep: P(58), wear: 7, publicCharge: 12, colour: '#54555b' },
-  { id: 'motorway', name: 'Motorway', mode: 'road', era: 4, speedLimit: SPEED(0.22), lanes: 6, buildCost: P(3200), upkeep: P(110), wear: 5, publicCharge: 16, colour: '#4a4b51' },
-  { id: 'rail-light', name: 'Light railway', mode: 'rail', era: 1, speedLimit: SPEED(0.10), lanes: 1, buildCost: P(420), upkeep: P(22), wear: 14, publicCharge: 10, colour: '#6a5f52' },
-  { id: 'rail-standard', name: 'Standard gauge', mode: 'rail', era: 2, speedLimit: SPEED(0.20), lanes: 1, buildCost: P(900), upkeep: P(40), wear: 10, publicCharge: 14, colour: '#5c5348' },
-  { id: 'rail-double', name: 'Double track', mode: 'rail', era: 2, speedLimit: SPEED(0.22), lanes: 2, buildCost: P(1700), upkeep: P(74), wear: 10, publicCharge: 16, colour: '#554d43' },
-  { id: 'rail-electric', name: 'Electrified rail', mode: 'rail', era: 5, speedLimit: SPEED(0.30), lanes: 2, buildCost: P(2600), upkeep: P(96), wear: 8, publicCharge: 20, colour: '#4e5a5e' },
-  { id: 'rail-high-speed', name: 'High-speed line', mode: 'rail', era: 6, speedLimit: SPEED(0.45), lanes: 2, buildCost: P(6400), upkeep: P(200), wear: 6, publicCharge: 34, colour: '#495a66' },
-  { id: 'canal', name: 'Canal', mode: 'water', era: 1, speedLimit: SPEED(0.045), lanes: 1, buildCost: P(1100), upkeep: P(30), wear: 4, publicCharge: 8, colour: '#3f6f8c' },
-  { id: 'seaway', name: 'Sea lane', mode: 'water', era: 1, speedLimit: SPEED(0.16), lanes: 4, buildCost: 0, upkeep: 0, wear: 0, publicCharge: 0, colour: '#2f5f80' },
-  { id: 'airway', name: 'Air corridor', mode: 'air', era: 3, speedLimit: SPEED(1.0), lanes: 8, buildCost: 0, upkeep: 0, wear: 0, publicCharge: 0, colour: '#5b7f9c' },
-  { id: 'pipeline', name: 'Pipeline', mode: 'pipe', era: 4, speedLimit: SPEED(0.30), lanes: 1, buildCost: P(800), upkeep: P(26), wear: 6, publicCharge: 6, colour: '#7d7468' },
-  { id: 'transmission', name: 'Transmission line', mode: 'wire', era: 3, speedLimit: SPEED(4.0), lanes: 1, buildCost: P(520), upkeep: P(18), wear: 4, publicCharge: 3, colour: '#8d8f96' },
-  { id: 'conveyor', name: 'Conveyor', mode: 'conveyor', era: 3, speedLimit: SPEED(0.05), lanes: 1, buildCost: P(340), upkeep: P(20), wear: 20, publicCharge: 2, colour: '#7a7060' },
+  { id: 'track', name: 'Dirt track', mode: 'road', era: 1, speedLimit: SPEED(0.055), lanes: 1, buildCost: P(90), upkeep: P(6), wear: 34, publicCharge: 4, maxGradient: 95, minRadius: 0, colour: '#8a7a5e' },
+  { id: 'macadam', name: 'Macadam road', mode: 'road', era: 1, speedLimit: SPEED(0.085), lanes: 1, buildCost: P(260), upkeep: P(14), wear: 18, publicCharge: 7, maxGradient: 80, minRadius: 0, colour: '#9a9086' },
+  { id: 'tarmac', name: 'Tarmac road', mode: 'road', era: 3, speedLimit: SPEED(0.14), lanes: 2, buildCost: P(620), upkeep: P(26), wear: 10, publicCharge: 9, maxGradient: 70, minRadius: 1, colour: '#5f6066' },
+  { id: 'dual', name: 'Dual carriageway', mode: 'road', era: 4, speedLimit: SPEED(0.18), lanes: 4, buildCost: P(1500), upkeep: P(58), wear: 7, publicCharge: 12, maxGradient: 55, minRadius: 2, colour: '#54555b' },
+  { id: 'motorway', name: 'Motorway', mode: 'road', era: 4, speedLimit: SPEED(0.22), lanes: 6, buildCost: P(3200), upkeep: P(110), wear: 5, publicCharge: 16, maxGradient: 45, minRadius: 3, colour: '#4a4b51' },
+  { id: 'rail-light', name: 'Light railway', mode: 'rail', era: 1, speedLimit: SPEED(0.10), lanes: 1, buildCost: P(420), upkeep: P(22), wear: 14, publicCharge: 10, maxGradient: 30, minRadius: 2, colour: '#6a5f52' },
+  { id: 'rail-standard', name: 'Standard gauge', mode: 'rail', era: 2, speedLimit: SPEED(0.20), lanes: 1, buildCost: P(900), upkeep: P(40), wear: 10, publicCharge: 14, maxGradient: 20, minRadius: 4, colour: '#5c5348' },
+  { id: 'rail-double', name: 'Double track', mode: 'rail', era: 2, speedLimit: SPEED(0.22), lanes: 2, buildCost: P(1700), upkeep: P(74), wear: 10, publicCharge: 16, maxGradient: 20, minRadius: 4, colour: '#554d43' },
+  { id: 'rail-electric', name: 'Electrified rail', mode: 'rail', era: 5, speedLimit: SPEED(0.30), lanes: 2, buildCost: P(2600), upkeep: P(96), wear: 8, publicCharge: 20, maxGradient: 18, minRadius: 5, colour: '#4e5a5e' },
+  { id: 'rail-high-speed', name: 'High-speed line', mode: 'rail', era: 6, speedLimit: SPEED(0.45), lanes: 2, buildCost: P(6400), upkeep: P(200), wear: 6, publicCharge: 34, maxGradient: 12, minRadius: 9, colour: '#495a66' },
+  { id: 'canal', name: 'Canal', mode: 'water', era: 1, speedLimit: SPEED(0.045), lanes: 1, buildCost: P(1100), upkeep: P(30), wear: 4, publicCharge: 8, maxGradient: 2, minRadius: 3, colour: '#3f6f8c' },
+  { id: 'seaway', name: 'Sea lane', mode: 'water', era: 1, speedLimit: SPEED(0.16), lanes: 4, buildCost: 0, upkeep: 0, wear: 0, publicCharge: 0, maxGradient: 999, minRadius: 0, colour: '#2f5f80' },
+  { id: 'airway', name: 'Air corridor', mode: 'air', era: 3, speedLimit: SPEED(1.0), lanes: 8, buildCost: 0, upkeep: 0, wear: 0, publicCharge: 0, maxGradient: 999, minRadius: 0, colour: '#5b7f9c' },
+  { id: 'pipeline', name: 'Pipeline', mode: 'pipe', era: 4, speedLimit: SPEED(0.30), lanes: 1, buildCost: P(800), upkeep: P(26), wear: 6, publicCharge: 6, maxGradient: 120, minRadius: 0, colour: '#7d7468' },
+  { id: 'transmission', name: 'Transmission line', mode: 'wire', era: 3, speedLimit: SPEED(4.0), lanes: 1, buildCost: P(520), upkeep: P(18), wear: 4, publicCharge: 3, maxGradient: 200, minRadius: 0, colour: '#8d8f96' },
+  { id: 'conveyor', name: 'Conveyor', mode: 'conveyor', era: 3, speedLimit: SPEED(0.05), lanes: 1, buildCost: P(340), upkeep: P(20), wear: 20, publicCharge: 2, maxGradient: 140, minRadius: 0, colour: '#7a7060' },
 ];
 
 // ------------------------------------------------------------- industries

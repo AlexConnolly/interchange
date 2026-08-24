@@ -70,6 +70,10 @@ export interface RenderSource {
   wayDir: Uint8Array[];
   wayAsset: Int32Array[];
   wayLink: Int32Array[];
+  /** Formation level per tile, per mode. A way sits on this, not the ground. */
+  wayLevel: Int16Array[];
+  /** Embankment / cutting / bridge / tunnel bits. */
+  wayFlags: Uint8Array[];
   assetOwner: Int16Array;
   assetCondition: Uint8Array;
   linkFlowPrev: Int32Array;
@@ -155,6 +159,7 @@ export class Renderer {
   private siteMeshes = new Map<number, ThreeMesh>();
   private townMeshes = new Map<number, ThreeMesh>();
   private sea: ThreeMesh | null = null;
+  private previewMesh: ThreeMesh | null = null;
   private overlayVersion = 0;
   private wayVersion = 0;
   private cols = 0;
@@ -206,6 +211,49 @@ export class Renderer {
   resize(width: number, height: number): void {
     this.renderer.setSize(width, height, false);
     this.updateCamera(width / height);
+  }
+
+  /**
+   * A ghost alignment, drawn over the world while the player is dragging one
+   * out. Rebuilt whenever it changes rather than every frame: a drag produces
+   * a new route only when the cursor crosses a tile boundary.
+   */
+  setPreview(
+    tiles: ArrayLike<number> | null,
+    levels: ArrayLike<number> | null,
+    flags: ArrayLike<number> | null,
+    ok: boolean,
+    size: number,
+  ): void {
+    if (this.previewMesh) {
+      this.scene.remove(this.previewMesh);
+      this.previewMesh.geometry.dispose();
+      this.previewMesh = null;
+    }
+    if (!tiles || tiles.length === 0) return;
+    const m = new Mesh(tiles.length * 40);
+    // The semantic set, and nothing else: a legal alignment is the good hue
+    // and an illegal one is the failure hue, both reserved.
+    const good: RGB = [0.36, 0.78, 0.52];
+    const bad: RGB = [0.86, 0.28, 0.24];
+    const c = ok ? good : bad;
+    for (let i = 0; i < tiles.length; i++) {
+      const tile = tiles[i];
+      const x = tile % size;
+      const y = (tile / size) | 0;
+      const level = levels ? levels[i] : 0;
+      const yy = HEIGHT_TO_WORLD(level) + 0.09;
+      m.flat(x + 0.5, yy, y + 0.5, 0.34, 0.34, c, 0.85);
+      const f = flags ? flags[i] : 0;
+      // A marker on anything that is not ordinary construction, so the player
+      // sees the expensive tiles before they see the bill.
+      if (f !== 0) m.box(x + 0.5, yy + 0.10, y + 0.5, 0.09, 0.09, 0.09, 0.02, c, c, c, 1);
+    }
+    const mesh = new ThreeMesh(m.build(), this.material);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 5;
+    this.scene.add(mesh);
+    this.previewMesh = mesh;
   }
 
   /** Recolour everything. Cheap enough to call on a mode change. */
@@ -380,13 +428,19 @@ export class Renderer {
     for (let mode = 0; mode < src.wayClass.length; mode++) {
       const cls = src.wayClass[mode];
       const dir = src.wayDir[mode];
+      const wayLevel = src.wayLevel[mode];
+      const wayFlags = src.wayFlags[mode];
       if (!cls) continue;
       for (let y = y0; y < y1; y++) {
         for (let x = x0; x < x1; x++) {
           const tile = y * size + x;
           const c = cls[tile];
           if (c === 255) continue;
-          const yy = HEIGHT_TO_WORLD(Math.max(0, src.height[tile])) + 0.05;
+          const groundY = HEIGHT_TO_WORLD(Math.max(0, src.height[tile]));
+          // The formation, not the ground. A level of zero means the way was
+          // laid before the profile existed, so fall back to the ground.
+          const level = wayLevel[tile];
+          const yy = (level === 0 ? groundY : HEIGHT_TO_WORLD(level)) + 0.05;
           let colour = src.wayColourOf(c);
 
           if (this.overlay === OverlayMode.Ownership) {
@@ -416,15 +470,89 @@ export class Renderer {
           // what makes a junction read as a junction from above, which is the
           // thing the player is actually reading the map for.
           const half = 0.20;
-          m.flat(x + 0.5, yy, y + 0.5, half, half, colour);
-          const d = dir[tile];
-          for (let k = 0; k < 4; k++) {
-            if ((d & (1 << k)) === 0) continue;
-            m.flat(
-              x + 0.5 + DIRDX[k] * 0.25, yy, y + 0.5 + DIRDY[k] * 0.25,
-              DIRDX[k] !== 0 ? 0.25 : half, DIRDY[k] !== 0 ? 0.25 : half,
-              colour,
-            );
+          const flags = wayFlags[tile];
+          const tunnel = (flags & 8) !== 0;
+          const bridge = (flags & 4) !== 0;
+
+          if (!tunnel) {
+            const d = dir[tile];
+            if (mode === 1) {
+              // Rail: a ballast bed with sleepers across it. Two marks rather
+              // than one, because a railway drawn as a coloured band is a road
+              // in a different colour, and at playing zoom the sleeper rhythm
+              // is what actually says "railway" from above.
+              const ballast: RGB = [colour[0] * 1.25, colour[1] * 1.2, colour[2] * 1.1];
+              const railHead: RGB = [colour[0] * 0.55, colour[1] * 0.56, colour[2] * 0.6];
+              m.flat(x + 0.5, yy, y + 0.5, 0.17, 0.17, ballast);
+              for (let k = 0; k < 4; k++) {
+                if ((d & (1 << k)) === 0) continue;
+                const alongX = DIRDX[k] !== 0;
+                m.flat(
+                  x + 0.5 + DIRDX[k] * 0.25, yy, y + 0.5 + DIRDY[k] * 0.25,
+                  alongX ? 0.25 : 0.17, alongX ? 0.17 : 0.25,
+                  ballast,
+                );
+                // Two rails, set in from the ballast edge.
+                for (const off of [-0.075, 0.075]) {
+                  m.flat(
+                    x + 0.5 + DIRDX[k] * 0.25 + (alongX ? 0 : off),
+                    yy + 0.006,
+                    y + 0.5 + DIRDY[k] * 0.25 + (alongX ? off : 0),
+                    alongX ? 0.25 : 0.018, alongX ? 0.018 : 0.25,
+                    railHead,
+                  );
+                }
+              }
+            } else {
+              m.flat(x + 0.5, yy, y + 0.5, half, half, colour);
+              for (let k = 0; k < 4; k++) {
+                if ((d & (1 << k)) === 0) continue;
+                m.flat(
+                  x + 0.5 + DIRDX[k] * 0.25, yy, y + 0.5 + DIRDY[k] * 0.25,
+                  DIRDX[k] !== 0 ? 0.25 : half, DIRDY[k] !== 0 ? 0.25 : half,
+                  colour,
+                );
+              }
+            }
+          }
+
+          // Earthworks and structure. art-direction.md §11: an embankment, a
+          // cutting, a tunnel mouth and a viaduct are the most characterful
+          // things in a transport game and should read clearly from above.
+          const drop = yy - groundY;
+          if (bridge && drop > 0.02) {
+            // Piers rather than a solid wall, so a viaduct reads as a viaduct.
+            const pierColour: RGB = [colour[0] * 0.55, colour[1] * 0.55, colour[2] * 0.55];
+            m.box(x + 0.5, yy - drop / 2, y + 0.5, 0.075, drop / 2, 0.075, 0.02, pierColour);
+            m.box(x + 0.5, yy - 0.012, y + 0.5, half + 0.03, 0.022, half + 0.03, 0.015,
+              pierColour, [colour[0] * 0.8, colour[1] * 0.8, colour[2] * 0.8]);
+          } else if ((flags & 1) !== 0 && drop > 0.01) {
+            // Embankment: a batter on each side, tapering to the ground.
+            const soil: RGB = [0.30, 0.27, 0.21];
+            const soilTop: RGB = [0.38, 0.35, 0.28];
+            m.box(x + 0.5, yy - drop / 2, y + 0.5, half + drop * 0.55, drop / 2, half + drop * 0.55,
+              0.02, soil, soilTop);
+          } else if ((flags & 2) !== 0 && drop < -0.01) {
+            // Cutting: the spoil faces stand above the formation.
+            const rockFace: RGB = [0.34, 0.32, 0.29];
+            const lip = -drop;
+            m.box(x + 0.5, yy + lip / 2, y + 0.5, half + lip * 0.5, lip / 2, half + lip * 0.5,
+              0.02, rockFace, [0.40, 0.38, 0.34]);
+            m.flat(x + 0.5, yy + 0.002, y + 0.5, half, half, colour);
+          } else if (tunnel) {
+            // Only the mouth is visible: a dark portal where the way enters.
+            const portal: RGB = [0.10, 0.10, 0.11];
+            const d = dir[tile];
+            for (let k = 0; k < 4; k++) {
+              if ((d & (1 << k)) === 0) continue;
+              const nx = x + DIRDX[k];
+              const ny = y + DIRDY[k];
+              if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+              if ((wayFlags[ny * size + nx] & 8) !== 0) continue;
+              m.box(x + 0.5 + DIRDX[k] * 0.35, yy + 0.10, y + 0.5 + DIRDY[k] * 0.35,
+                DIRDX[k] !== 0 ? 0.08 : 0.24, 0.11, DIRDY[k] !== 0 ? 0.08 : 0.24, 0.02,
+                portal, [0.22, 0.22, 0.23]);
+            }
           }
         }
       }

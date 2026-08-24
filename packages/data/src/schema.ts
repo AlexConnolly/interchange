@@ -145,6 +145,22 @@ export const WayClass = z.object({
   wear: z.number().int().min(0).default(10),
   /** Default access charge the authority sets, pence per vehicle per tile. */
   publicCharge: z.number().int().min(0).default(0),
+  /**
+   * Steepest gradient the formation may climb, in height units per tile.
+   * This is what makes rail feel different from road: a lorry shrugs at a
+   * one-in-ten and a locomotive cannot start on one, so a railway has to find
+   * the valley and a road can go over the top.
+   */
+  maxGradient: z.number().int().min(1).default(60),
+  /**
+   * Minimum radius, in tiles. Zero means the way turns on the spot, which is
+   * true of a road and not of a railway.
+   */
+  minRadius: z.number().int().min(0).default(0),
+  /** Multiplier on build cost when the formation is carried on structure
+   *  rather than sitting on the ground, in percent. */
+  bridgeCostPct: z.number().int().min(100).default(600),
+  tunnelCostPct: z.number().int().min(100).default(1200),
   colour: z.string().regex(/^#[0-9a-f]{6}$/i),
 });
 export type WayClass = z.infer<typeof WayClass>;

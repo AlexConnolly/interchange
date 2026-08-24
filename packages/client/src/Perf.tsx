@@ -277,6 +277,8 @@ function sourceFor(world: ReturnType<typeof createWorld>, renderer: Renderer): P
     wayDir: world.layers.map((l) => l.dir),
     wayAsset: world.layers.map((l) => l.asset),
     wayLink: world.layers.map((l) => l.link),
+    wayLevel: world.layers.map((l) => l.level),
+    wayFlags: world.layers.map((l) => l.flags),
     assetOwner: world.assets.owner,
     assetCondition: world.assets.condition,
     linkFlowPrev: world.graph.linkFlowPrev,
