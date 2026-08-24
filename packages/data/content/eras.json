@@ -1,0 +1,180 @@
+[
+  {
+    "n": 1,
+    "name": "Horse and rail",
+    "from": 1860,
+    "to": 1890,
+    "blurb": "Everything moves at a walk, and the roads belong to somebody else.",
+    "unlocks": [
+      "dray-horse",
+      "dray-heavy",
+      "omnibus",
+      "loco-early-steam",
+      "barge-canal",
+      "track",
+      "macadam",
+      "rail-light",
+      "canal",
+      "seaway",
+      "colliery",
+      "ironstone-mine",
+      "bauxite-pit",
+      "quarry",
+      "sand-pit",
+      "clay-pit",
+      "forestry",
+      "farm",
+      "fishery",
+      "coking-plant",
+      "gasworks",
+      "steelworks",
+      "cement-works",
+      "sawmill",
+      "paper-mill",
+      "brickworks",
+      "glassworks",
+      "food-works",
+      "mill-textile",
+      "factory",
+      "power-coal",
+      "power-hydro",
+      "reservoir",
+      "treatment-works",
+      "builders-merchant",
+      "warehouse"
+    ]
+  },
+  {
+    "n": 2,
+    "name": "Steam",
+    "from": 1890,
+    "to": 1920,
+    "blurb": "Steam on the road and steam on the rails. Reliability is a wish.",
+    "unlocks": [
+      "wagon-tank",
+      "lorry-steam",
+      "loco-mainline-steam",
+      "railcar-steam",
+      "steamer-coastal",
+      "rail-standard",
+      "rail-double"
+    ]
+  },
+  {
+    "n": 3,
+    "name": "Combustion",
+    "from": 1920,
+    "to": 1950,
+    "blurb": "Diesel, tarmac, and the first aeroplanes that can carry anything.",
+    "unlocks": [
+      "lorry-diesel",
+      "tipper-diesel",
+      "tanker-road",
+      "bus-motor",
+      "tram-electric",
+      "loco-diesel",
+      "coaster-motor",
+      "air-light",
+      "tarmac",
+      "airway",
+      "transmission",
+      "conveyor",
+      "oil-rig",
+      "smelter",
+      "refinery"
+    ]
+  },
+  {
+    "n": 4,
+    "name": "Motorway",
+    "from": 1950,
+    "to": 1975,
+    "blurb": "Grade separation, articulation, and the private car arrives to compete for your road.",
+    "unlocks": [
+      "artic-1950",
+      "reefer-1955",
+      "coach-express",
+      "loco-freight-heavy",
+      "dmu-commuter",
+      "bulker",
+      "tanker-sea",
+      "air-jet-freight",
+      "air-liner",
+      "dual",
+      "motorway",
+      "pipeline",
+      "tip",
+      "resort"
+    ]
+  },
+  {
+    "n": 5,
+    "name": "Container",
+    "from": 1975,
+    "to": 2000,
+    "blurb": "Transfer cost collapses and every optimum you had is now wrong.",
+    "unlocks": [
+      "artic-box",
+      "loco-electric",
+      "emu-commuter",
+      "container-ship",
+      "ferry-ro-ro",
+      "air-widebody",
+      "rail-electric",
+      "electronics-plant",
+      "vehicle-plant",
+      "power-gas",
+      "power-nuclear",
+      "heritage-site",
+      "retail-park"
+    ]
+  },
+  {
+    "n": 6,
+    "name": "Logistics",
+    "from": 2000,
+    "to": 2030,
+    "blurb": "The last mile, high-speed rail, and demand that moves to the doorstep.",
+    "unlocks": [
+      "van-parcel",
+      "artic-modern",
+      "bus-modern",
+      "lrv-modern",
+      "hs-set",
+      "rail-high-speed",
+      "lithium-works",
+      "power-wind",
+      "distribution-centre"
+    ]
+  },
+  {
+    "n": 7,
+    "name": "Transition",
+    "from": 2030,
+    "to": 2065,
+    "blurb": "Electric fleets, intermittent generation, and the bill for a century of spoil.",
+    "unlocks": [
+      "artic-electric",
+      "loco-hydrogen",
+      "container-ultra",
+      "battery-plant",
+      "recycling",
+      "power-solar",
+      "grid-storage",
+      "desalination",
+      "remediation"
+    ]
+  },
+  {
+    "n": 8,
+    "name": "Autonomous",
+    "from": 2065,
+    "to": 2100,
+    "blurb": "Convoys that drive themselves, and freight that never lands.",
+    "unlocks": [
+      "convoy-auto",
+      "maglev-freight",
+      "air-drone"
+    ]
+  }
+]

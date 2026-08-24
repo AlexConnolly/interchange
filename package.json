@@ -1,0 +1,22 @@
+{
+  "name": "interchange",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "pnpm --filter @interchange/client build",
+    "dev": "pnpm --filter @interchange/client dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --pretty",
+    "replay": "node --experimental-strip-types packages/tools/src/replay.ts",
+    "spikes": "node --experimental-strip-types packages/tools/src/spikes.ts",
+    "balance": "node --experimental-strip-types packages/tools/src/balance.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "@types/node": "^22.10.2"
+  }
+}

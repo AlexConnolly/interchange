@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "jsx": "react-jsx",
+    "paths": {
+      "@interchange/sim": ["./packages/sim/src/index.ts"],
+      "@interchange/data": ["./packages/data/src/index.ts"],
+      "@interchange/render": ["./packages/render/src/index.ts"]
+    },
+    "baseUrl": "."
+  },
+  "include": ["packages/*/src/**/*.ts", "packages/*/src/**/*.tsx", "packages/*/*.ts"]
+}

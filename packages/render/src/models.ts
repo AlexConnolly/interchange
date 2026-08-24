@@ -1,0 +1,636 @@
+/**
+ * The model library. Every asset is a function.
+ *
+ * art-direction.md §9's rule is the one to hold on to here: **construction
+ * language changes across eras, form language does not.** Era 1 is timber,
+ * iron, rivets, tall and narrow, with the mechanism on the outside. Era 4 is
+ * pressed steel, welded, enclosed, horizontal. Era 8 is composite, sealed,
+ * seamless, symmetrical. All of them are flat-shaded chamfered forms on the
+ * same palette with three values and one accent — so an 1890 steam lorry can
+ * stand beside a 2070 autonomous convoy and read as two things from the same
+ * world, three centuries apart.
+ *
+ * Every ownable model reserves a `livery` colour that the caller tints per
+ * company, and pairs it with a *pattern* — a band, a flash, a roof panel — so
+ * that company identity survives desaturation and fourteen pixels (§10).
+ */
+
+import { Mesh } from './geometry.ts';
+import { INDUSTRY_FAMILY, TOWN, shade, type RGB, type Livery } from './palette.ts';
+
+const IRON: RGB = [0.16, 0.17, 0.18];
+const IRON_LIT: RGB = [0.28, 0.29, 0.30];
+const TIMBER: RGB = [0.36, 0.26, 0.16];
+const TIMBER_LIT: RGB = [0.46, 0.34, 0.21];
+const STEEL: RGB = [0.42, 0.45, 0.48];
+const GLASS: RGB = [0.22, 0.29, 0.34];
+const LAMP: RGB = [1.0, 0.84, 0.45];
+const BRASS: RGB = [0.55, 0.42, 0.18];
+
+/** Which construction language an era speaks. */
+export function eraBand(era: number): 0 | 1 | 2 {
+  return era <= 2 ? 0 : era <= 5 ? 1 : 2;
+}
+
+export interface ModelParams {
+  cls: string;
+  era: number;
+  livery: Livery;
+  /** True for the authored far LOD — a second, simpler silhouette whose only
+   *  job is to say "lorry" at fourteen pixels. Not a decimation (§7). */
+  far: boolean;
+}
+
+export function buildVehicle(p: ModelParams): Mesh {
+  const m = new Mesh();
+  if (p.far) return farVehicle(m, p);
+  switch (p.cls) {
+    case 'dray': dray(m, p); break;
+    case 'lorry': case 'van': case 'tipper': case 'tanker': lorry(m, p); break;
+    case 'artic': artic(m, p); break;
+    case 'bus': case 'coach': bus(m, p); break;
+    case 'tram': tram(m, p); break;
+    case 'loco': loco(m, p); break;
+    case 'unit': multipleUnit(m, p); break;
+    case 'barge': barge(m, p); break;
+    case 'coaster': case 'bulker': case 'ferry': ship(m, p, 1.7); break;
+    case 'container-ship': ship(m, p, 2.6); break;
+    case 'light-freight': case 'airliner': case 'widebody': aircraft(m, p); break;
+    case 'drone': drone(m, p); break;
+    default: lorry(m, p); break;
+  }
+  return m;
+}
+
+/**
+ * The far LOD: a second, simpler silhouette whose only job is to say "lorry"
+ * at fourteen pixels (art-direction.md 7). A design task, not an optimisation
+ * task — which is why it is a separate function rather than a decimation of
+ * the near model, and why it keeps the *proportions* that distinguish the
+ * classes and throws away everything else.
+ *
+ * No chamfers. A two-degree cut plane is most of the near model's triangle
+ * budget and is invisible at six pixels. Roughly forty triangles each.
+ */
+function farVehicle(m: Mesh, p: ModelParams): Mesh {
+  const L = p.livery;
+  const dark = shade(L.colour, 0.62);
+  const pale: RGB = [0.86, 0.86, 0.84];
+  switch (p.cls) {
+    case 'dray':
+      // Two short blocks with a gap: cart, then horse. The gap is the read.
+      m.box(0, 0.13, -0.07, 0.085, 0.055, 0.15, 0, L.colour, L.accent);
+      m.box(0, 0.15, 0.28, 0.05, 0.075, 0.12, 0, dark);
+      break;
+    case 'lorry': case 'van': case 'tipper': case 'tanker':
+      // A low bonnet in front of a taller box. One step in the roof line is
+      // the whole difference between a lorry and a bus at this size.
+      m.box(0, 0.11, 0.24, 0.10, 0.075, 0.10, 0, dark, L.accent);
+      m.box(0, 0.17, -0.06, 0.11, 0.135, 0.22, 0, L.colour, L.accent);
+      break;
+    case 'artic':
+      m.box(0, 0.15, 0.40, 0.11, 0.115, 0.11, 0, dark, L.accent);
+      m.box(0, 0.22, 0.00, 0.12, 0.105, 0.30, 0, L.colour, L.accent);
+      break;
+    case 'bus': case 'coach':
+      // Tall, uniform, no step. A bus is a box on end compared with a lorry.
+      m.box(0, 0.23, 0, 0.115, 0.185, 0.36, 0, L.colour, L.accent);
+      break;
+    case 'tram':
+      // A bus that is shorter and has something on the roof.
+      m.box(0, 0.21, 0, 0.10, 0.165, 0.30, 0, L.colour, L.accent);
+      m.box(0, 0.39, -0.02, 0.04, 0.02, 0.10, 0, dark);
+      break;
+    case 'loco':
+      // A long low body with one raised block: that bump is "engine", and it
+      // is what stops a locomotive reading as a carriage.
+      m.box(0, 0.15, -0.04, 0.105, 0.105, 0.40, 0, L.colour, L.accent);
+      m.box(0, 0.30, -0.26, 0.10, 0.075, 0.13, 0, dark);
+      break;
+    case 'unit':
+      // Long, low, even, with a nose. A train that is all one height.
+      m.box(0, 0.17, -0.06, 0.10, 0.115, 0.44, 0, L.colour, L.accent);
+      m.wedge(0, 0.17, 0.46, 0.10, 0.115, 0.10, 0.45, dark, L.accent);
+      break;
+    case 'barge':
+      // Very low and very wide. Nothing else in the game has this profile.
+      m.box(0, 0.045, 0, 0.19, 0.045, 0.46, 0, dark, L.colour);
+      break;
+    case 'coaster': case 'bulker': case 'ferry':
+      m.box(0, 0.07, 0.05, 0.20, 0.07, 0.62, 0, dark, L.colour);
+      m.wedge(0, 0.07, 0.80, 0.20, 0.07, 0.16, 0.3, dark, L.colour);
+      m.box(0, 0.20, -0.42, 0.13, 0.065, 0.14, 0, pale);
+      break;
+    case 'container-ship':
+      m.box(0, 0.09, 0.10, 0.27, 0.09, 1.00, 0, dark, L.colour);
+      m.wedge(0, 0.09, 1.24, 0.27, 0.09, 0.22, 0.25, dark, L.colour);
+      m.box(0, 0.26, -0.72, 0.17, 0.08, 0.18, 0, pale);
+      // Two stacks, so the deck load reads as cargo rather than as a lid.
+      m.box(0, 0.18, 0.30, 0.22, 0.05, 0.34, 0, shade(L.colour, 0.8));
+      m.box(0, 0.18, -0.20, 0.22, 0.05, 0.28, 0, shade(L.colour, 0.8));
+      break;
+    case 'light-freight': case 'airliner': case 'widebody':
+      m.box(0, 0.10, 0, 0.055, 0.055, 0.34, 0, L.colour, L.accent);
+      m.box(0, 0.10, 0.02, 0.32, 0.012, 0.08, 0, pale);
+      m.box(0, 0.10, -0.30, 0.12, 0.012, 0.05, 0, pale);
+      m.box(0, 0.16, -0.30, 0.010, 0.06, 0.06, 0, L.accent);
+      break;
+    case 'drone':
+      m.box(0, 0.06, 0, 0.05, 0.018, 0.05, 0, L.colour);
+      m.box(0, 0.06, 0, 0.11, 0.010, 0.011, 0, dark);
+      m.box(0, 0.06, 0, 0.011, 0.010, 0.11, 0, dark);
+      break;
+    default:
+      m.box(0, 0.17, 0, 0.11, 0.10, 0.28, 0, L.colour, L.accent);
+      break;
+  }
+  return m;
+}
+
+// ------------------------------------------------------------------- road
+
+function wheels(m: Mesh, count: number, z0: number, dz: number, r: number, halfWidth: number, y: number): void {
+  for (let i = 0; i < count; i++) {
+    const z = z0 + i * dz;
+    m.cylX(-halfWidth, y + r, z, r, 0.035, 7, IRON);
+    m.cylX(halfWidth, y + r, z, r, 0.035, 7, IRON);
+  }
+}
+
+function dray(m: Mesh, p: ModelParams): void {
+  const L = p.livery;
+  const w = 0.10;
+  // Cart: a plank body on tall spoked wheels, sitting high and narrow. The
+  // proportion is the whole read at this size — a dray that is as wide as it
+  // is tall looks like a modern van.
+  m.box(0, 0.13, -0.03, w, 0.045, 0.20, 0.012, TIMBER, TIMBER_LIT, shade(TIMBER, 0.8));
+  if (!p.far) {
+    m.box(0, 0.175, -0.16, w * 0.95, 0.04, 0.045, 0.01, L.colour, L.accent, L.colour);
+    // Shafts running forward to the horse.
+    m.box(-w * 0.6, 0.135, 0.24, 0.008, 0.008, 0.10, 0, TIMBER);
+    m.box(w * 0.6, 0.135, 0.24, 0.008, 0.008, 0.10, 0, TIMBER);
+  }
+  wheels(m, 2, -0.13, 0.20, 0.075, w + 0.012, 0.0);
+  // Horse: a body, a neck and a head. Four legs are invisible at size and cost
+  // a quarter of the model, so they are two blocks.
+  const hz = 0.40;
+  m.box(0, 0.15, hz, 0.045, 0.055, 0.11, 0.02, [0.30, 0.22, 0.16], [0.38, 0.29, 0.20]);
+  if (!p.far) {
+    m.box(0, 0.195, hz + 0.10, 0.032, 0.045, 0.035, 0.012, [0.26, 0.19, 0.14]);
+    m.box(0, 0.225, hz + 0.145, 0.024, 0.028, 0.04, 0.01, [0.24, 0.17, 0.13]);
+    m.box(0, 0.055, hz - 0.05, 0.030, 0.045, 0.022, 0, [0.22, 0.16, 0.12]);
+    m.box(0, 0.055, hz + 0.06, 0.030, 0.045, 0.022, 0, [0.22, 0.16, 0.12]);
+  }
+}
+
+function lorry(m: Mesh, p: ModelParams): void {
+  const band = eraBand(p.era);
+  const L = p.livery;
+  const w = 0.12;
+  const bodyTop = band === 0 ? 0.30 : band === 1 ? 0.26 : 0.24;
+
+  if (band === 0) {
+    // Steam lorry: chimney, exposed boiler, a cab like a shed.
+    m.box(0, 0.16, -0.10, w, 0.09, 0.20, 0.015, L.colour, L.accent, shade(L.colour, 0.78));
+    m.box(0, 0.22, 0.16, w * 0.8, 0.09, 0.10, 0.015, TIMBER, TIMBER_LIT);
+    if (!p.far) {
+      m.cyl(0, 0.30, 0.20, 0.022, 0.026, 0.12, 6, IRON, IRON_LIT);
+      m.box(0, 0.14, 0.29, w * 0.7, 0.055, 0.05, 0.01, IRON, IRON_LIT);
+      m.box(0, 0.255, 0.145, w * 0.55, 0.006, 0.055, 0, GLASS, GLASS, GLASS, 0.35);
+    }
+    wheels(m, 3, -0.20, 0.20, 0.058, w + 0.012, 0.0);
+  } else {
+    // Pressed steel: enclosed, horizontal, a cab and a box.
+    m.box(0, 0.055 + bodyTop / 2, -0.08, w, bodyTop / 2, 0.22, 0.018, L.colour, L.accent, shade(L.colour, 0.8));
+    m.box(0, 0.05 + bodyTop * 0.42, 0.20, w * 0.94, bodyTop * 0.42, 0.10, 0.02, shade(L.colour, 0.9), L.accent);
+    if (!p.far) {
+      m.box(0, 0.055 + bodyTop * 0.72, 0.288, w * 0.8, 0.028, 0.012, 0, GLASS, GLASS, GLASS, 0.4);
+      // Livery band, so the company reads with the colour removed.
+      if (L.pattern === 1) m.box(0, 0.055 + bodyTop * 0.55, -0.08, w + 0.004, 0.018, 0.22, 0, L.accent);
+      if (L.pattern === 2) m.box(0, 0.055 + bodyTop - 0.004, -0.08, w * 0.9, 0.008, 0.20, 0, L.accent);
+      m.box(-w * 0.6, 0.10, 0.30, 0.016, 0.012, 0.006, 0, LAMP, LAMP, LAMP, 1);
+      m.box(w * 0.6, 0.10, 0.30, 0.016, 0.012, 0.006, 0, LAMP, LAMP, LAMP, 1);
+    }
+    wheels(m, 3, -0.22, 0.22, 0.055, w + 0.010, 0.0);
+  }
+}
+
+function artic(m: Mesh, p: ModelParams): void {
+  const L = p.livery;
+  const w = 0.13;
+  const band = eraBand(p.era);
+  // Tractor unit, then a gap, then the trailer. The gap is what says
+  // "articulated" at fourteen pixels; without it this is a long lorry.
+  m.box(0, 0.20, 0.34, w * 0.95, 0.10, 0.13, 0.02, shade(L.colour, 0.92), L.accent);
+  m.box(0, 0.245, 0.02, w, 0.115, 0.30, 0.02, L.colour, L.accent, shade(L.colour, 0.82));
+  if (!p.far) {
+    m.box(0, 0.29, 0.462, w * 0.78, 0.03, 0.014, 0, GLASS, GLASS, GLASS, 0.4);
+    if (L.pattern === 3) {
+      // Diagonal flash: three descending blocks read as a stripe at size and
+      // as a shape when the colour is taken away.
+      for (let i = 0; i < 3; i++) m.box(0, 0.20 + i * 0.035, -0.05 + i * 0.07, w + 0.004, 0.018, 0.035, 0, L.accent);
+    }
+    if (L.pattern === 4) {
+      m.box(0, 0.30, 0.02, w + 0.004, 0.012, 0.30, 0, L.accent);
+      m.box(0, 0.19, 0.02, w + 0.004, 0.012, 0.30, 0, L.accent);
+    }
+    if (band === 2) m.box(0, 0.365, 0.30, w * 0.6, 0.03, 0.08, 0.02, shade(L.colour, 0.8));
+  }
+  wheels(m, 2, 0.30, 0.12, 0.05, w + 0.008, 0.0);
+  wheels(m, 3, -0.20, 0.11, 0.05, w + 0.008, 0.0);
+}
+
+function bus(m: Mesh, p: ModelParams): void {
+  const L = p.livery;
+  const band = eraBand(p.era);
+  const w = 0.125;
+  const h = band === 0 ? 0.20 : 0.17;
+  m.box(0, 0.06 + h, 0, w, h, 0.36, 0.022, L.colour, L.accent, shade(L.colour, 0.82));
+  if (!p.far) {
+    // A window band is what makes a bus a bus rather than a van.
+    m.box(0, 0.09 + h * 1.25, 0, w + 0.003, 0.030, 0.30, 0, GLASS, GLASS, GLASS, 0.35);
+    m.box(0, 0.09 + h * 0.55, 0, w + 0.004, 0.012, 0.34, 0, L.accent);
+    if (band === 0) m.box(0, 0.06 + h * 2 + 0.012, 0, w * 0.9, 0.012, 0.32, 0, TIMBER);
+  }
+  wheels(m, 2, -0.22, 0.42, 0.05, w + 0.008, 0.0);
+}
+
+function tram(m: Mesh, p: ModelParams): void {
+  const L = p.livery;
+  const w = 0.11;
+  m.box(0, 0.20, 0, w, 0.12, 0.44, 0.022, L.colour, L.accent, shade(L.colour, 0.82));
+  if (!p.far) {
+    m.box(0, 0.255, 0, w + 0.003, 0.032, 0.38, 0, GLASS, GLASS, GLASS, 0.35);
+    // Pantograph: the one detail that says electric from directly above.
+    m.box(0, 0.335, -0.06, 0.006, 0.012, 0.05, 0, IRON);
+    m.box(0, 0.345, 0.02, w * 0.5, 0.004, 0.006, 0, IRON_LIT);
+  }
+  wheels(m, 2, -0.16, 0.32, 0.036, w, 0.0);
+}
+
+// ------------------------------------------------------------------- rail
+
+function loco(m: Mesh, p: ModelParams): void {
+  const band = eraBand(p.era);
+  const L = p.livery;
+  const w = 0.115;
+  if (band === 0) {
+    // Steam: a boiler barrel, a chimney, a cab, and a tender. Tall, narrow,
+    // and with the mechanism showing — which is the whole era-1 language.
+    m.cylX(0, 0.185, 0.10, 0.085, 0.30, 8, L.colour);
+    m.box(0, 0.075, 0.10, w, 0.05, 0.20, 0.012, IRON, IRON_LIT);
+    m.box(0, 0.215, -0.16, w * 0.95, 0.105, 0.10, 0.015, shade(L.colour, 0.86), L.accent);
+    if (!p.far) {
+      m.cyl(0, 0.26, 0.235, 0.028, 0.036, 0.075, 7, IRON, IRON_LIT);
+      m.cyl(0, 0.255, 0.14, 0.024, 0.024, 0.035, 6, BRASS, BRASS);
+      m.box(0, 0.25, -0.115, w * 0.7, 0.026, 0.008, 0, GLASS, GLASS, GLASS, 0.4);
+      m.box(0, 0.09, 0.285, w * 0.8, 0.03, 0.02, 0.006, IRON);
+      m.box(0, 0.13, -0.34, w * 0.9, 0.055, 0.11, 0.015, TIMBER, TIMBER_LIT);
+      m.box(0, 0.145, 0.30, 0.012, 0.012, 0.01, 0, LAMP, LAMP, LAMP, 1);
+    }
+    wheels(m, 4, -0.16, 0.13, 0.062, w + 0.006, 0.0);
+  } else if (band === 1) {
+    // Diesel-electric: a slab hood, a cab at each end, horizontal emphasis.
+    m.box(0, 0.175, 0, w, 0.095, 0.46, 0.02, L.colour, L.accent, shade(L.colour, 0.8));
+    if (!p.far) {
+      m.box(0, 0.245, 0.30, w * 0.95, 0.045, 0.12, 0.02, shade(L.colour, 0.88), L.accent);
+      m.box(0, 0.255, 0.418, w * 0.8, 0.026, 0.010, 0, GLASS, GLASS, GLASS, 0.4);
+      m.box(0, 0.135, 0, w + 0.004, 0.014, 0.44, 0, L.accent);
+      m.box(0, 0.10, 0.474, w * 0.5, 0.014, 0.008, 0, LAMP, LAMP, LAMP, 1);
+    }
+    m.box(0, 0.075, 0, w * 0.92, 0.03, 0.44, 0.01, IRON);
+    wheels(m, 6, -0.22, 0.09, 0.048, w + 0.004, 0.0);
+  } else {
+    // Sealed and aerodynamic: one continuous body, a raked nose, no mechanism.
+    m.box(0, 0.175, -0.06, w, 0.095, 0.40, 0.035, L.colour, L.accent, shade(L.colour, 0.84));
+    m.wedge(0, 0.175, 0.40, w, 0.095, 0.12, 0.45, shade(L.colour, 0.94), L.accent);
+    if (!p.far) {
+      m.box(0, 0.215, 0, w + 0.003, 0.026, 0.36, 0, GLASS, GLASS, GLASS, 0.3);
+      m.box(0, 0.12, 0.50, w * 0.4, 0.012, 0.01, 0, LAMP, LAMP, LAMP, 1);
+    }
+    m.box(0, 0.07, 0, w * 0.9, 0.026, 0.42, 0.01, IRON);
+    wheels(m, 6, -0.22, 0.09, 0.042, w + 0.003, 0.0);
+  }
+}
+
+function multipleUnit(m: Mesh, p: ModelParams): void {
+  const band = eraBand(p.era);
+  const L = p.livery;
+  const w = 0.115;
+  const len = 0.52;
+  m.box(0, 0.185, 0, w, 0.105, len, band === 2 ? 0.045 : 0.025, L.colour, L.accent, shade(L.colour, 0.82));
+  if (band === 2) m.wedge(0, 0.185, len + 0.09, w, 0.105, 0.10, 0.4, shade(L.colour, 0.94), L.accent);
+  if (!p.far) {
+    m.box(0, 0.235, 0, w + 0.003, 0.034, len * 0.86, 0, GLASS, GLASS, GLASS, 0.35);
+    m.box(0, 0.125, 0, w + 0.004, 0.014, len * 0.9, 0, L.accent);
+    if (band >= 1) {
+      m.box(0, 0.30, -0.10, 0.006, 0.014, 0.05, 0, IRON);
+      m.box(0, 0.312, -0.02, w * 0.5, 0.004, 0.006, 0, IRON_LIT);
+    }
+  }
+  m.box(0, 0.075, 0, w * 0.9, 0.026, len * 0.94, 0.01, IRON);
+  wheels(m, 4, -0.34, 0.226, 0.042, w + 0.003, 0.0);
+}
+
+// ------------------------------------------------------------------ water
+
+function barge(m: Mesh, p: ModelParams): void {
+  const L = p.livery;
+  const w = 0.16;
+  m.box(0, 0.05, -0.05, w, 0.05, 0.42, 0.02, shade(L.colour, 0.7), L.colour);
+  m.wedge(0, 0.05, 0.44, w, 0.05, 0.10, 0.35, shade(L.colour, 0.75), L.colour);
+  if (!p.far) {
+    m.box(0, 0.115, -0.34, w * 0.7, 0.045, 0.08, 0.015, TIMBER, TIMBER_LIT);
+    m.box(0, 0.085, 0.05, w * 0.82, 0.02, 0.30, 0, [0.20, 0.17, 0.13]);
+  }
+}
+
+function ship(m: Mesh, p: ModelParams, scale: number): void {
+  const band = eraBand(p.era);
+  const L = p.livery;
+  const w = 0.20 * (scale / 1.7);
+  const len = 0.55 * scale;
+  // Hull: a slab with a pinched bow. The sheer line is one chamfer.
+  m.box(0, 0.06, -0.08 * scale, w, 0.06, len * 0.7, 0.025, shade(L.colour, 0.55), shade(L.colour, 0.75));
+  m.wedge(0, 0.06, len * 0.72 - 0.08 * scale, w, 0.06, len * 0.3, 0.28, shade(L.colour, 0.6), shade(L.colour, 0.8));
+  if (!p.far) {
+    // Superstructure aft, which is where it has been since about 1950 and is
+    // most of what says "ship" rather than "boat" from above.
+    m.box(0, 0.16, -len * 0.62, w * 0.7, 0.06, 0.10 * scale, 0.02, [0.86, 0.86, 0.84], [0.94, 0.94, 0.92]);
+    m.box(0, 0.235, -len * 0.62, w * 0.5, 0.022, 0.06 * scale, 0.01, GLASS, GLASS, GLASS, 0.35);
+    if (band === 0) {
+      m.cyl(0, 0.24, -len * 0.5, 0.022, 0.026, 0.10, 6, IRON, IRON_LIT);
+    } else {
+      m.box(0, 0.28, -len * 0.66, 0.022, 0.045, 0.03, 0.008, L.accent);
+    }
+    if (scale > 2) {
+      // Container stacks: the cargo is the silhouette on a box boat.
+      for (let i = -2; i <= 2; i++) {
+        for (let k = -1; k <= 1; k++) {
+          const c: RGB = ((i + k) & 1) === 0 ? [0.62, 0.32, 0.24] : [0.24, 0.40, 0.52];
+          m.box(k * w * 0.55, 0.14, i * 0.19, w * 0.24, 0.035, 0.085, 0.006, c, [c[0] * 1.2, c[1] * 1.2, c[2] * 1.2]);
+        }
+      }
+    }
+  }
+}
+
+// -------------------------------------------------------------------- air
+
+function aircraft(m: Mesh, p: ModelParams): void {
+  const L = p.livery;
+  const band = eraBand(p.era);
+  const fuse = band === 0 ? 0.055 : 0.075;
+  const len = band === 0 ? 0.34 : 0.55;
+  const span = band === 0 ? 0.44 : 0.62;
+  m.cylX(0, 0.10, 0, fuse, 0.0, 6, L.colour);
+  // The fuselage as a prism about Z rather than X, since the plane points +Z.
+  m.box(0, 0.10, 0, fuse, fuse, len, fuse * 0.9, L.colour, L.accent, shade(L.colour, 0.86));
+  m.wedge(0, 0.10, len + 0.09, fuse, fuse * 0.9, 0.10, 0.25, shade(L.colour, 0.95), L.accent);
+  m.box(0, 0.10, 0.02, span / 2, 0.012, 0.09, 0.01, [0.86, 0.87, 0.88], [0.94, 0.95, 0.96]);
+  m.box(0, 0.10, -len * 0.9, span * 0.22, 0.010, 0.05, 0.008, [0.86, 0.87, 0.88]);
+  m.box(0, 0.155, -len * 0.9, 0.010, 0.055, 0.06, 0.01, L.accent);
+  if (!p.far && band >= 1) {
+    m.box(-span * 0.24, 0.075, 0.05, 0.024, 0.024, 0.05, 0.012, IRON, IRON_LIT);
+    m.box(span * 0.24, 0.075, 0.05, 0.024, 0.024, 0.05, 0.012, IRON, IRON_LIT);
+  }
+}
+
+function drone(m: Mesh, p: ModelParams): void {
+  const L = p.livery;
+  m.box(0, 0.06, 0, 0.05, 0.02, 0.09, 0.012, L.colour, L.accent);
+  for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as [number, number][]) {
+    m.box(dx * 0.085, 0.075, dz * 0.085, 0.006, 0.005, 0.006, 0, IRON);
+    m.cyl(dx * 0.085, 0.080, dz * 0.085, 0.038, 0.038, 0.004, 8, [0.3, 0.31, 0.33]);
+  }
+}
+
+// -------------------------------------------------------------- industries
+
+export const SiteVisual = { Thriving: 0, Struggling: 1, Dead: 2 } as const;
+
+/**
+ * An industry is a kit, not a model (art-pipeline.md §4.4): a headframe, spoil
+ * heaps, conveyors and sheds placed by rule so that no two mines look
+ * identical and all of them look related.
+ *
+ * The three visual states from art-direction.md §6 are the same kit with a
+ * different material set and one or two swapped parts — a parameter, not a new
+ * asset. That is the whole reason the cost of forty industries times three
+ * states is affordable.
+ */
+export function buildIndustry(kit: string, state: number, seed: number, footprint: number): Mesh {
+  const m = new Mesh();
+  const base = INDUSTRY_FAMILY[kit] ?? INDUSTRY_FAMILY.works;
+  const dead = state === SiteVisual.Dead;
+  const struggling = state === SiteVisual.Struggling;
+  // Dead sites lose saturation and gain weeds; struggling ones dim.
+  const k = dead ? 0.55 : struggling ? 0.82 : 1.0;
+  const body: RGB = [base[0] * k, base[1] * k, base[2] * k];
+  const lit: RGB = [Math.min(1, body[0] * 1.35), Math.min(1, body[1] * 1.35), Math.min(1, body[2] * 1.35)];
+  const glow = dead ? 0 : struggling ? 0.3 : 1;
+  // Plan is smaller and height is larger than instinct says, because at an
+  // orthographic 35 degrees a ground length along the view axis arrives at
+  // 0.57 of itself while height arrives at 0.82 (art-direction.md §1). A shed
+  // authored square in plan reads as a slab; the same volume stood up reads as
+  // a building.
+  const S = footprint * 0.32;
+
+  let r = seed | 1;
+  const rnd = (): number => {
+    r = (Math.imul(r, 1103515245) + 12345) & 0x7fffffff;
+    return r / 0x7fffffff;
+  };
+  // Straight for order, irregular for age (art-direction §4): a dead site
+  // leans and loses its symmetry, which is a mechanic rendered as form.
+  const lean = dead ? 0.07 : struggling ? 0.02 : 0;
+
+  switch (kit) {
+    case 'mine': {
+      // Headframe: tall and narrow, and at 35 degrees it will read taller than
+      // it is authored, which is exactly what a headframe should do.
+      m.box(0, 0.05, 0, S * 0.7, 0.05, S * 0.7, 0.03, shade(body, 0.8), body);
+      // A headframe is the tallest thing for miles and it should dominate. At
+      // this camera it will read taller still than authored, which is right.
+      const hh = 1.05 * (dead ? 0.85 : 1);
+      for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as [number, number][]) {
+        m.box(dx * S * 0.24 + lean * hh, 0.10 + hh / 2, dz * S * 0.24, 0.022, hh / 2, 0.022, 0.006, IRON, IRON_LIT);
+      }
+      m.box(lean * hh * 2, 0.10 + hh, 0, S * 0.30, 0.035, S * 0.30, 0.02, IRON, IRON_LIT);
+      m.cylX(lean * hh * 2, 0.10 + hh + 0.06, 0, 0.055, S * 0.20, 8, dead ? IRON : BRASS);
+      m.box(S * 0.70, 0.20, S * 0.42, S * 0.30, 0.20, S * 0.22, 0.025, body, lit);
+      m.box(S * 0.70, 0.42, S * 0.42, S * 0.32, 0.03, S * 0.24, 0.02, shade(body, 0.8), shade(body, 1.0));
+      if (!dead) m.box(S * 0.70, 0.24, S * 0.42 + S * 0.225, S * 0.14, 0.035, 0.006, 0, [1, 0.82, 0.42], [1, 0.82, 0.42], [1, 0.82, 0.42], glow);
+      // Spoil heap: the extraction penalty made visible.
+      m.cyl(-S * 0.75, 0.0, -S * 0.55, S * 0.42, S * 0.10, 0.20, 7, [0.28, 0.25, 0.21], [0.33, 0.30, 0.25]);
+      break;
+    }
+    case 'pit': {
+      m.cyl(0, 0.0, 0, S * 0.95, S * 0.55, 0.02, 8, shade(body, 0.7), shade(body, 0.85));
+      for (let i = 0; i < 3; i++) {
+        const a = rnd() * 6.28;
+        m.cyl(Math.cos(a) * S * 0.8, 0.0, Math.sin(a) * S * 0.8, S * 0.28, S * 0.06, 0.14 + rnd() * 0.08, 6, shade(body, 0.75), body);
+      }
+      m.box(S * 0.7, 0.13, -S * 0.6, S * 0.28, 0.09, S * 0.20, 0.02, body, lit);
+      break;
+    }
+    case 'works': case 'power': {
+      // A hall with a stack. Smoke rate says how hard it is working, so a cold
+      // stack is the struggling state and a leaning one is dead.
+      const hall = 0.30;
+      m.box(0, hall, 0, S * 0.78, hall, S * 0.46, 0.035, body, lit, shade(body, 0.78));
+      // A pitched roof, because a flat-topped box at this angle is a slab and
+      // the ridge line is most of what says "works" from above.
+      m.box(0, hall * 2 + 0.035, 0, S * 0.80, 0.035, S * 0.48, 0.03, shade(body, dead ? 0.6 : 0.86), shade(body, dead ? 0.7 : 1.05));
+      m.box(0, hall * 2 + 0.10, 0, S * 0.34, 0.06, S * 0.50, 0.03, shade(body, dead ? 0.55 : 0.74));
+      // A lower annexe, so the silhouette steps rather than being one mass.
+      m.box(-S * 0.98, 0.17, S * 0.34, S * 0.30, 0.17, S * 0.30, 0.03, shade(body, 0.88), lit);
+      const sh = kit === 'power' ? 1.45 : 1.05;
+      m.cyl(S * 0.58 + lean * sh, 0.05, -S * 0.42, 0.05, 0.036, sh * (dead ? 0.72 : 1), 8, [0.30, 0.29, 0.27], [0.38, 0.36, 0.34]);
+      if (!dead) {
+        m.cyl(S * 0.58 + lean * sh, 0.05 + sh, -S * 0.42, 0.055, 0.05, 0.05, 8, [0.24, 0.23, 0.22]);
+        // Lit windows along the hall: three values and one accent, and the
+        // accent is the only emissive surface.
+        m.box(0, hall * 0.95, S * 0.47, S * 0.55, 0.045, 0.008, 0, [1, 0.82, 0.42], [1, 0.82, 0.42], [1, 0.82, 0.42], glow);
+        m.box(0, hall * 0.95, -S * 0.47, S * 0.55, 0.045, 0.008, 0, [1, 0.82, 0.42], [1, 0.82, 0.42], [1, 0.82, 0.42], glow);
+      }
+      if (kit === 'power') {
+        // Cooling tower: the one silhouette nobody mistakes for anything else.
+        m.cyl(-S * 0.7, 0.05, S * 0.55, 0.20, 0.15, 0.62, 10, [0.68, 0.68, 0.66], [0.76, 0.76, 0.74]);
+        m.cyl(-S * 0.7, 0.62, S * 0.55, 0.15, 0.185, 0.14, 10, [0.60, 0.60, 0.58], [0.70, 0.70, 0.68]);
+      }
+      break;
+    }
+    case 'yard': case 'shed': case 'retail': {
+      // A row of bays with a saw-tooth roof: the repeat is the read.
+      for (let i = 0; i < 3; i++) {
+        const dx = (i - 1) * S * 0.68;
+        m.box(dx, 0.20, 0, S * 0.28, 0.20, S * 0.46, 0.028, body, lit, shade(body, 0.78));
+        m.box(dx, 0.425, 0, S * 0.30, 0.028, S * 0.48, 0.02, shade(body, 0.70), shade(body, 0.95));
+        if (!dead) m.box(dx, 0.24, S * 0.47, S * 0.20, 0.035, 0.008, 0, [1, 0.82, 0.42], [1, 0.82, 0.42], [1, 0.82, 0.42], glow);
+      }
+      if (!dead) {
+        for (let i = 0; i < 4; i++) {
+          m.box(-S * 0.7 + i * S * 0.35, 0.045, S * 0.75, S * 0.12, 0.045, S * 0.10, 0.01, TIMBER, TIMBER_LIT);
+        }
+      }
+      break;
+    }
+    case 'farm': {
+      m.box(-S * 0.4, 0.18, -S * 0.4, S * 0.22, 0.18, S * 0.22, 0.02, TOWN.wall, TOWN.stone);
+      m.box(-S * 0.4, 0.40, -S * 0.4, S * 0.25, 0.05, S * 0.25, 0.02, TOWN.roof, shade(TOWN.roof, 1.3));
+      m.box(S * 0.42, 0.16, S * 0.14, S * 0.30, 0.16, S * 0.20, 0.02, TIMBER, TIMBER_LIT);
+      m.box(S * 0.42, 0.36, S * 0.14, S * 0.32, 0.04, S * 0.22, 0.02, shade(TIMBER, 0.7), TIMBER);
+      // Field strips: the one place a flat plane is the right answer.
+      for (let i = 0; i < 4; i++) {
+        const c: RGB = i % 2 === 0 ? [0.52, 0.50, 0.28] : [0.44, 0.46, 0.26];
+        m.box(0, 0.006, -S * 0.7 + i * S * 0.45, S * 0.95, 0.006, S * 0.2, 0, c);
+      }
+      break;
+    }
+    case 'wharf': case 'rig': {
+      m.box(0, 0.045, 0, S * 0.9, 0.045, S * 0.4, 0.02, TIMBER, TIMBER_LIT);
+      m.box(-S * 0.4, 0.14, 0, S * 0.22, 0.09, S * 0.22, 0.02, body, lit);
+      m.box(S * 0.45, 0.30 + lean, S * 0.05, 0.018, 0.26, 0.018, 0.006, IRON, IRON_LIT);
+      m.box(S * 0.45, 0.55, S * 0.05, 0.10, 0.014, 0.014, 0, IRON_LIT);
+      break;
+    }
+    case 'water': {
+      m.cyl(0, 0.0, 0, S * 0.85, S * 0.85, 0.06, 10, [0.24, 0.42, 0.54], [0.28, 0.50, 0.64]);
+      m.box(S * 0.6, 0.12, -S * 0.5, S * 0.26, 0.10, S * 0.2, 0.02, body, lit);
+      break;
+    }
+    case 'wind': {
+      for (let i = 0; i < 3; i++) {
+        const dx = (i - 1) * S * 0.7;
+        m.cyl(dx, 0.0, (i % 2) * S * 0.4 - S * 0.2, 0.020, 0.013, 0.85, 7, [0.86, 0.87, 0.89], [0.92, 0.93, 0.95]);
+        for (let b = 0; b < 3; b++) {
+          const a = (b / 3) * 6.283 + i;
+          m.box(dx + Math.cos(a) * 0.16, 0.85 + Math.sin(a) * 0.16, (i % 2) * S * 0.4 - S * 0.2, 0.16, 0.012, 0.006, 0, [0.90, 0.91, 0.93]);
+        }
+      }
+      break;
+    }
+    case 'solar': {
+      for (let i = 0; i < 4; i++) {
+        for (let j = 0; j < 3; j++) {
+          m.box(-S * 0.7 + i * S * 0.46, 0.05, -S * 0.6 + j * S * 0.6, S * 0.20, 0.006, S * 0.24, 0, [0.11, 0.13, 0.20], [0.16, 0.20, 0.30]);
+          m.box(-S * 0.7 + i * S * 0.46, 0.025, -S * 0.6 + j * S * 0.6, 0.008, 0.025, 0.008, 0, IRON);
+        }
+      }
+      break;
+    }
+    case 'resort': {
+      for (let i = 0; i < 3; i++) {
+        m.box((i - 1) * S * 0.55, 0.14 + i * 0.02, (i % 2) * S * 0.3, S * 0.24, 0.13 + i * 0.02, S * 0.26, 0.025, [0.92, 0.90, 0.85], [0.98, 0.97, 0.94]);
+        m.box((i - 1) * S * 0.55, 0.29 + i * 0.04, (i % 2) * S * 0.3, S * 0.26, 0.02, S * 0.28, 0.012, [0.30, 0.58, 0.52]);
+      }
+      m.box(0, 0.008, -S * 0.7, S * 0.5, 0.008, S * 0.22, 0, [0.28, 0.62, 0.68]);
+      break;
+    }
+    default: {
+      m.box(0, 0.26, 0, S * 0.72, 0.26, S * 0.46, 0.03, body, lit, shade(body, 0.8));
+      m.box(0, 0.545, 0, S * 0.74, 0.03, S * 0.48, 0.025, shade(body, 0.8), shade(body, 1.02));
+      m.cyl(S * 0.52 + lean, 0.05, -S * 0.34, 0.045, 0.034, 0.85, 7, [0.30, 0.29, 0.27]);
+      if (!dead) m.box(0, 0.24, S * 0.47, S * 0.48, 0.04, 0.008, 0, [1, 0.82, 0.42], [1, 0.82, 0.42], [1, 0.82, 0.42], glow);
+      break;
+    }
+  }
+  return m;
+}
+
+// ------------------------------------------------------------------ towns
+//
+// You influence towns; you do not place houses (features.md, out of scope). So
+// a town is generated massing rather than authored buildings — but it still
+// has to grow visibly, because a town that never changes shape is a cargo sink
+// with a name.
+
+export function buildTownBlock(seed: number, size: number, era: number, night: boolean): Mesh {
+  const m = new Mesh();
+  let r = seed | 1;
+  const rnd = (): number => {
+    r = (Math.imul(r, 1103515245) + 12345) & 0x7fffffff;
+    return r / 0x7fffffff;
+  };
+  const band = eraBand(era);
+  const count = Math.max(3, Math.min(22, Math.round(size)));
+  for (let i = 0; i < count; i++) {
+    const x = (rnd() - 0.5) * 1.7;
+    const z = (rnd() - 0.5) * 1.7;
+    const w = 0.11 + rnd() * 0.07;
+    const d = 0.11 + rnd() * 0.07;
+    // Later eras build taller and flatter; era 1 is all pitched roofs.
+    const h = (band === 0 ? 0.15 : band === 1 ? 0.21 : 0.30) * (0.6 + rnd() * 1.1);
+    const wallTone = 0.85 + rnd() * 0.3;
+    const wall: RGB = [TOWN.wall[0] * wallTone, TOWN.wall[1] * wallTone, TOWN.wall[2] * wallTone];
+    m.box(x, h, z, w, h, d, 0.012, wall, [wall[0] * 1.12, wall[1] * 1.12, wall[2] * 1.12], TOWN.wallDark);
+    if (band === 0 || rnd() < 0.4) {
+      m.box(x, h * 2 + 0.030, z, w * 1.06, 0.030, d * 1.06, 0.018, TOWN.roof, shade(TOWN.roof, 1.35));
+    }
+    // Lit windows carry the night. The floor on legibility (§13) is that this
+    // is emissive, so the town still reads when the shading flattens.
+    if (night && rnd() < 0.75) {
+      m.box(x, h * 1.15, z + d + 0.002, w * 0.55, h * 0.22, 0.004, 0, TOWN.window, TOWN.window, TOWN.window, 1);
+    }
+  }
+  return m;
+}
+
+/** Vegetation is massing, not individual plants (art-direction §11). */
+export function buildTreeClump(seed: number): Mesh {
+  const m = new Mesh();
+  let r = seed | 1;
+  const rnd = (): number => {
+    r = (Math.imul(r, 1103515245) + 12345) & 0x7fffffff;
+    return r / 0x7fffffff;
+  };
+  for (let i = 0; i < 5; i++) {
+    const x = (rnd() - 0.5) * 0.8;
+    const z = (rnd() - 0.5) * 0.8;
+    const h = 0.10 + rnd() * 0.09;
+    const g = 0.24 + rnd() * 0.12;
+    m.cyl(x, 0, z, 0.075 + rnd() * 0.03, 0.012, h, 6, [g * 0.55, g, g * 0.5], [g * 0.75, g * 1.25, g * 0.7]);
+  }
+  return m;
+}

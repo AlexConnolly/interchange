@@ -1,0 +1,10 @@
+{
+  "name": "@interchange/tools",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@interchange/sim": "workspace:*",
+    "@interchange/data": "workspace:*"
+  }
+}

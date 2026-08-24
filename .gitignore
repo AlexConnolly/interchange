@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.vite/
+coverage/
+art/out/
+art/__pycache__/
+packages/client/public/models/
+.tunnel-*.log

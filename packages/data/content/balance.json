@@ -1,0 +1,18 @@
+{
+  "startingCash": 240000,
+  "interestBps": 620,
+  "creditLimitPct": 140,
+  "contractSlots": 6,
+  "contractIntervalDays": 9,
+  "latePenaltyPct": 40,
+  "reliabilityWeight": 35,
+  "valuationPct": 320,
+  "tollElasticity": 140,
+  "valueOfTime": 26,
+  "declineBelowPct": 55,
+  "closeBelowPct": 22,
+  "declineDays": 45,
+  "graceDays": 60,
+  "townGrowthPerDay": 4,
+  "regulatorSharePct": 58
+}
