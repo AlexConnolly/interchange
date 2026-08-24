@@ -1,0 +1,1126 @@
+<title>Interchange Build Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap">
+
+<style>
+  :root {
+    --paper:   #E9EDF1;
+    --sheet:   #FDFEFE;
+    --ink:     #11171D;
+    --ink-mid: #46525E;
+    --ink-soft:#6C7986;
+    --rule:    #C3CDD6;
+    --rule-fine:#DDE4EA;
+    --accent:  #B60F63;
+    --accent-wash: rgba(182, 15, 99, 0.09);
+    --ok:      #1B6540;
+    --warn:    #8A5A00;
+    --crit:    #A31C21;
+
+    --col: 66ch;
+    --f-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --f-body: "Newsreader", Georgia, "Times New Roman", serif;
+    --f-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:   #0D1216;
+      --sheet:   #141A20;
+      --ink:     #E3E9EF;
+      --ink-mid: #A3B0BC;
+      --ink-soft:#7C8996;
+      --rule:    #2B343D;
+      --rule-fine:#1F272E;
+      --accent:  #FF63AC;
+      --accent-wash: rgba(255, 99, 172, 0.12);
+      --ok:      #5FCB94;
+      --warn:    #E0A94E;
+      --crit:    #FF7A7A;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:   #0D1216;
+    --sheet:   #141A20;
+    --ink:     #E3E9EF;
+    --ink-mid: #A3B0BC;
+    --ink-soft:#7C8996;
+    --rule:    #2B343D;
+    --rule-fine:#1F272E;
+    --accent:  #FF63AC;
+    --accent-wash: rgba(255, 99, 172, 0.12);
+    --ok:      #5FCB94;
+    --warn:    #E0A94E;
+    --crit:    #FF7A7A;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet {
+    max-width: 1080px;
+    margin: 0 auto;
+    background: var(--sheet);
+    border-left: 1px solid var(--rule-fine);
+    border-right: 1px solid var(--rule-fine);
+    padding: 0 clamp(20px, 5vw, 64px) 96px;
+  }
+
+  /* ---------- title block ---------- */
+
+  .titleblock {
+    border-bottom: 2px solid var(--ink);
+    padding: clamp(36px, 6vw, 68px) 0 0;
+    margin-bottom: 56px;
+  }
+  .stamp {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 18px;
+  }
+  .titleblock h1 {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: clamp(40px, 7.5vw, 76px);
+    line-height: 0.98;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+    margin: 0 0 20px;
+  }
+  .titleblock .standfirst {
+    font-size: clamp(19px, 2.4vw, 23px);
+    line-height: 1.48;
+    color: var(--ink-mid);
+    max-width: 56ch;
+    margin: 0 0 40px;
+  }
+  .meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    border-top: 1px solid var(--rule);
+  }
+  .meta div {
+    padding: 14px 16px 16px 0;
+    border-right: 1px solid var(--rule-fine);
+  }
+  .meta div:last-child { border-right: 0; }
+  .meta dt, .meta .k {
+    font-family: var(--f-mono);
+    font-size: 10px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin: 0 0 5px;
+  }
+  .meta .v {
+    font-family: var(--f-mono);
+    font-size: 13px;
+    color: var(--ink);
+    margin: 0;
+  }
+
+  /* ---------- sections ---------- */
+
+  .sec { margin: 0 0 72px; }
+  .sec > :is(p, h2, h3, ul, ol, .note, .lede, .tbl-note) {
+    max-width: var(--col);
+    margin-inline: auto;
+  }
+
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin: 0 auto 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule-fine);
+  }
+  .eyebrow .ref { color: var(--accent); font-weight: 500; }
+
+  .sec h2 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: clamp(27px, 3.6vw, 36px);
+    line-height: 1.12;
+    letter-spacing: -0.018em;
+    text-wrap: balance;
+    margin: 0 0 20px;
+  }
+  .sec h3 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 19px;
+    letter-spacing: -0.005em;
+    text-wrap: balance;
+    margin: 34px 0 8px;
+  }
+  .sec p { margin: 0 0 18px; }
+  .lede { font-size: 19px; color: var(--ink-mid); }
+
+  .sec ul, .sec ol { margin: 0 0 20px; padding-left: 1.15em; }
+  .sec li { margin-bottom: 9px; }
+  .sec li::marker { color: var(--accent); }
+
+  strong { font-weight: 600; }
+  .mono { font-family: var(--f-mono); font-size: 0.85em; letter-spacing: -0.01em; }
+  figcaption i { font-style: italic; color: var(--ink); }
+  em.term {
+    font-style: normal;
+    font-family: var(--f-mono);
+    font-size: 0.86em;
+    background: var(--accent-wash);
+    padding: 1px 5px;
+    color: var(--ink);
+  }
+
+  .note {
+    border-left: 2px solid var(--accent);
+    background: var(--accent-wash);
+    padding: 16px 20px;
+    margin: 0 auto 24px;
+    font-size: 16px;
+  }
+  .note p { margin: 0 0 10px; }
+  .note p:last-child { margin: 0; }
+  .note .lbl {
+    font-family: var(--f-mono);
+    font-size: 10px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 7px;
+  }
+
+  /* ---------- acts ---------- */
+
+  .acts { display: grid; gap: 1px; background: var(--rule-fine); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); margin: 30px 0 28px; }
+  .act { background: var(--sheet); padding: 22px clamp(14px, 3vw, 26px); display: grid; grid-template-columns: 3.2rem minmax(0,1fr); gap: 0 20px; align-items: start; }
+  .act .numeral {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: 30px;
+    line-height: 1;
+    color: var(--accent);
+    letter-spacing: -0.03em;
+  }
+  .act h3 { margin: 0 0 3px; font-size: 20px; }
+  .act .years { font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.08em; color: var(--ink-soft); display: block; margin-bottom: 9px; }
+  .act p { margin: 0 0 8px; max-width: 62ch; font-size: 16px; }
+  .act p:last-child { margin: 0; }
+  .act .verb { font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-mid); }
+
+  /* ---------- is / is not ---------- */
+
+  .isnot {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+    gap: 1px;
+    background: var(--rule-fine);
+    border: 1px solid var(--rule);
+    margin: 30px 0 26px;
+  }
+  .isnot > div { background: var(--sheet); padding: 20px clamp(16px, 2.5vw, 24px) 24px; }
+  .isnot h4 {
+    font-family: var(--f-mono);
+    font-weight: 500;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule-fine);
+  }
+  .isnot h4.yes { color: var(--ok); }
+  .isnot h4.no { color: var(--crit); }
+  .isnot ul { margin: 0; padding-left: 1.05em; font-size: 15.5px; line-height: 1.5; }
+  .isnot li { margin-bottom: 11px; }
+  .isnot li:last-child { margin-bottom: 0; }
+  .isnot li::marker { color: var(--ink-soft); }
+  .isnot li b { font-weight: 600; }
+
+  /* ---------- figures ---------- */
+
+  figure {
+    margin: 34px 0 34px;
+    border: 1px solid var(--rule);
+    background: var(--sheet);
+  }
+  figure .frame { padding: 22px clamp(12px, 2.5vw, 26px) 10px; overflow-x: auto; }
+  figure svg { display: block; width: 100%; max-width: 100%; height: auto; min-width: 560px; color: var(--ink); }
+  figcaption {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--ink-mid);
+    padding: 12px clamp(12px, 2.5vw, 26px) 16px;
+    border-top: 1px solid var(--rule-fine);
+  }
+  figcaption b { color: var(--accent); font-weight: 500; }
+
+  .svg-box { fill: none; stroke: currentColor; stroke-width: 1.25; }
+  .svg-box-key { fill: var(--accent-wash); stroke: var(--accent); stroke-width: 1.5; }
+  .svg-box-dim { fill: none; stroke: currentColor; stroke-width: 1; stroke-dasharray: 4 3; opacity: 0.55; }
+  .svg-line { stroke: currentColor; stroke-width: 1.25; fill: none; }
+  .svg-line-key { stroke: var(--accent); stroke-width: 1.5; fill: none; }
+  .svg-line-bad { stroke: var(--crit); stroke-width: 1.5; fill: none; }
+  .t { font-family: "IBM Plex Mono", monospace; font-size: 12px; fill: currentColor; }
+  .t-name { font-family: "Archivo", sans-serif; font-size: 13px; font-weight: 600; fill: currentColor; letter-spacing: 0.02em; }
+  .t-sm { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; fill: currentColor; opacity: 0.72; }
+  .t-key { font-family: "IBM Plex Mono", monospace; font-size: 11px; fill: var(--accent); }
+  .t-bad { font-family: "IBM Plex Mono", monospace; font-size: 11px; fill: var(--crit); }
+  .t-hdr { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: 0.14em; fill: currentColor; opacity: 0.6; }
+
+  /* ---------- tables ---------- */
+
+  .tbl-wrap { overflow-x: auto; margin: 26px 0 14px; border: 1px solid var(--rule); }
+  table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 15px; }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--rule-fine); vertical-align: top; }
+  thead th {
+    font-family: var(--f-mono);
+    font-size: 10px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    border-bottom: 1px solid var(--rule);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.mono, th.mono { font-family: var(--f-mono); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .tbl-note { font-family: var(--f-mono); font-size: 12px; color: var(--ink-soft); margin: 0 auto 24px; }
+
+  .pill {
+    font-family: var(--f-mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+    display: inline-block;
+  }
+  .pill.crit { color: var(--crit); }
+  .pill.high { color: var(--warn); }
+  .pill.med  { color: var(--ink-mid); }
+
+  /* ---------- phases ---------- */
+
+  .phases { border-top: 1px solid var(--rule); margin: 30px 0 20px; }
+  .phase {
+    display: grid;
+    grid-template-columns: 4.6rem minmax(0, 1fr) 8.5rem;
+    gap: 0 22px;
+    padding: 20px 0;
+    border-bottom: 1px solid var(--rule-fine);
+    align-items: start;
+  }
+  .phase .pnum {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    padding-top: 4px;
+  }
+  .phase h3 { margin: 0 0 6px; font-size: 18px; }
+  .phase p { margin: 0 0 8px; font-size: 16px; max-width: 58ch; }
+  .phase p:last-child { margin: 0; }
+  .phase .gate { font-family: var(--f-mono); font-size: 12px; color: var(--ink-soft); line-height: 1.5; padding-top: 4px; }
+  .phase .gate b { display: block; font-weight: 500; color: var(--ink-mid); text-transform: uppercase; font-size: 10px; letter-spacing: 0.12em; margin-bottom: 4px; }
+  @media (max-width: 720px) {
+    .phase { grid-template-columns: 3.4rem minmax(0,1fr); }
+    .phase .gate { grid-column: 2; padding-top: 10px; }
+  }
+
+  /* ---------- decisions strip ---------- */
+
+  .decisions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 1px;
+    background: var(--rule-fine);
+    border: 1px solid var(--rule);
+    margin: 0 0 12px;
+  }
+  .decisions div { background: var(--sheet); padding: 15px 18px 17px; }
+  .decisions .k {
+    font-family: var(--f-mono);
+    font-size: 10px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin: 0 0 6px;
+  }
+  .decisions .v { font-size: 15.5px; line-height: 1.4; margin: 0; color: var(--ink); }
+
+  /* ---------- closing ---------- */
+
+  .ask { border: 2px solid var(--ink); padding: clamp(22px, 4vw, 34px); margin-top: 12px; }
+  .ask h3 { margin-top: 0; }
+  .ask ol { padding-left: 1.2em; }
+
+  hr.rule { border: 0; border-top: 1px solid var(--rule); margin: 0 0 44px; }
+
+  a { color: var(--accent); text-underline-offset: 3px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="sheet">
+
+  <header class="titleblock">
+    <p class="stamp">Concept + technical plan &nbsp;/&nbsp; revision A</p>
+    <h1>Interchange</h1>
+    <p class="standfirst">An isometric, browser-based transport and development sim that starts you with one cart and ends with you shaping a region's whole economy. Freeways' junction craft, wearing Transport Tycoon's clothes, over an economy where every road has an owner — and you can pay them, buy them out, or build around them.</p>
+    <div class="meta">
+      <div><p class="k">Working title</p><p class="v">Interchange</p></div>
+      <div><p class="k">Genre</p><p class="v">Transport / development sim</p></div>
+      <div><p class="k">Platform</p><p class="v">Web — desktop + tablet</p></div>
+      <div><p class="k">Span</p><p class="v">1860 – 2100</p></div>
+      <div><p class="k">Status</p><p class="v">Spec — no build until sign-off</p></div>
+    </div>
+  </header>
+
+  <section class="sec">
+    <p class="eyebrow"><span class="ref">01</span> Verdict</p>
+    <h2>No, you're not crazy. But the thing that kills this project isn't ambition — it's ordering.</h2>
+    <p class="lede">Everything you described is buildable in a browser today. Individually simulated vehicles, a thousand-tile region, six transport modes, a live economy — none of that is research. It is all known engineering, and the browser has been fast enough for about four years now.</p>
+    <p>What kills projects in this genre is that the fun arrives last. You build terrain, then rendering, then pathfinding, then economy, then balance — and eighteen months in you finally play it and discover the core loop is flat. Transport Tycoon-likes are littered with corpses that died at 80% complete because nobody could tell whether the game was good until everything was finished.</p>
+    <p>So the plan below has one organising principle: <strong>every phase ends in a game you can actually play.</strong> Act I — one region, roads only, a handful of contracts — is a complete, finishable, genuinely fun game. If we build that and it isn't fun, we've learned it for a fraction of the cost. If it is fun, everything after it is addition rather than hope.</p>
+    <p>The other thing worth saying plainly: the historic reason this genre is expensive is content. Hundreds of vehicles across eras, dozens of industries, thousands of balance numbers, art for all of it. That cost has genuinely collapsed — and in your case it has already collapsed once, because the modelling pipeline in <span class="mono">tribewars/art</span> is most of the answer and it exists. That is what "AI-first" buys here, and it's the difference between a five-year project and a realistic one.</p>
+  </section>
+
+  <hr class="rule">
+
+  <section class="sec">
+    <p class="eyebrow"><span class="ref">02</span> Decisions locked</p>
+    <h2>What we settled</h2>
+    <p>These came out of the questions and everything downstream assumes them. They're recorded here so we can tell later whether a problem is a bug or a consequence.</p>
+    <div class="decisions">
+      <div><p class="k">Player role</p><p class="v">Haulier → magnate arc, across four acts</p></div>
+      <div><p class="k">Core verb</p><p class="v">Tile and node placement</p></div>
+      <div><p class="k">The spine</p><p class="v">Everything is owned; pay, buy or bypass</p></div>
+      <div><p class="k">Simulation</p><p class="v">Every vehicle real, with LOD headroom</p></div>
+      <div><p class="k">World</p><p class="v">One large continuous region</p></div>
+      <div><p class="k">Time</p><p class="v">Eras, 1860 → 2100, with obsolescence</p></div>
+      <div><p class="k">Art</p><p class="v">Low-poly 3D, orthographic camera</p></div>
+      <div><p class="k">Pressure</p><p class="v">Solvency, decay, rivals, objectives — all four</p></div>
+      <div><p class="k">Day-one support</p><p class="v">Accounts, cloud saves, data-driven content, touch, shared worlds</p></div>
+      <div><p class="k">AI's role</p><p class="v">Generates content and builds the game — not an agent inside the sim</p></div>
+      <div><p class="k">Success</p><p class="v">A real product people play</p></div>
+    </div>
+    <p class="tbl-note">Dropping LLM-driven agents from the simulation was the single best call in that set — it removes the only genuinely unsolved problem from the board.</p>
+  </section>
+
+  <hr class="rule">
+
+  <section class="sec">
+    <p class="eyebrow"><span class="ref">03</span> The game</p>
+    <h2>Four acts, four different games, one continuous save</h2>
+    <p>The role you chose — haulier becoming magnate — is the most work, but it solves three problems at once. It's a natural tutorial, so nothing needs explaining out of context. It's natural pacing, so systems arrive when you have room for them. And it means the first act can ship on its own without feeling like a demo.</p>
+    <p>Progression is diegetic: you're granted <em class="term">charters</em> by the regional authority. Each charter is a licence to do a category of thing you previously could only pay someone else to do.</p>
+
+    <div class="acts">
+      <div class="act">
+        <div class="numeral">I</div>
+        <div>
+          <h3>Carrier</h3>
+          <span class="years">1860 – 1900 &nbsp;·&nbsp; ~2 hours &nbsp;·&nbsp; ships as a standalone game</span>
+          <p>You own vehicles, not infrastructure. Roads exist and they're bad. Industries exist and they don't care about you. You bid on haulage contracts — <span class="mono">40 t/week of ore, Kestrel Pit to Ardmore Wharf, 12 weeks</span> — and you learn the hard arithmetic of the genre: capacity, round-trip time, maintenance, and the fact that a full load out and an empty load back is half a business.</p>
+          <p class="verb">Verb: buy vehicles, assign routes, read a timetable</p>
+        </div>
+      </div>
+      <div class="act">
+        <div class="numeral">II</div>
+        <div>
+          <h3>Operator</h3>
+          <span class="years">1890 – 1950 &nbsp;·&nbsp; construction charter</span>
+          <p>You may now lay road and rail. Depots, stations, signalling, gradients, gauge. The game becomes topology — where the line goes matters more than what runs on it. This is where the Junction Lab unlocks and where rivals start bidding against you for the same contracts.</p>
+          <p class="verb">Verb: lay alignment, place nodes, shape junctions</p>
+        </div>
+      </div>
+      <div class="act">
+        <div class="numeral">III</div>
+        <div>
+          <h3>Industrialist</h3>
+          <span class="years">1930 – 2000 &nbsp;·&nbsp; extraction charter</span>
+          <p>You may found industry. This is where the three-network problem becomes the game: a mine produces nothing until it has power, water and workers, and each of those is a different network you have to build. Processing chains open up — ore to smelter to steel to goods — and decay starts to bite, because an industry you stop serving closes.</p>
+          <p class="verb">Verb: site industry, run utilities, balance a supply chain</p>
+        </div>
+      </div>
+      <div class="act">
+        <div class="numeral">IV</div>
+        <div>
+          <h3>Developer</h3>
+          <span class="years">1980 – 2100 &nbsp;·&nbsp; land charter</span>
+          <p>Towns, tourism, airports, deep-water ports, the energy transition, waste. You're shaping what the region <em>is</em>, and rivals are shaping it against you. There's no single score — you're measured on tonnage, population served, prosperity and environment, and you cannot max all four.</p>
+          <p class="verb">Verb: develop land, set the region's direction</p>
+        </div>
+      </div>
+    </div>
+
+    <p>One save carries through. The map you learned in Act I with a horse dray is the map you're running a maglev across in Act IV, and the awkward river crossing you bodged in 1874 is still there annoying you in 2031. That continuity is worth a great deal and costs almost nothing.</p>
+  </section>
+
+  <hr class="rule">
+
+  <section class="sec">
+    <p class="eyebrow"><span class="ref">04</span> The spine</p>
+    <h2>Everything has an owner, and using it costs you money</h2>
+    <p class="lede">This is the connective tissue the design was missing, and it is the single best idea in the concept. Every piece of fixed infrastructure — road, bridge, tunnel, rail alignment, station, wharf, runway, lock, pipeline, transmission line — has an owner and an access charge. Use someone else's and you pay. Own it and you stop paying <em>and</em> everyone else's traffic starts paying you.</p>
+    <p>The regional authority owns whatever nobody else does. Public roads are the default, and public roads are bad.</p>
+
+    <figure>
+      <div class="frame">
+        <svg viewBox="0 0 880 362" role="img" aria-label="One toll bridge presented three ways: paying the owner forever, buying it so rivals pay you, or building a bypass that strands the owner's asset.">
+          <text class="t-hdr" x="0" y="14">ONE BRIDGE, THREE LIVE OPTIONS — AND THIS IS FRACTAL</text>
+
+          <defs>
+            <marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+            </marker>
+            <marker id="ar4-key" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"></path>
+            </marker>
+          </defs>
+
+          <text class="t-hdr" x="0" y="66">PAY</text>
+          <line class="svg-line" x1="112" y1="72" x2="774" y2="72" marker-end="url(#ar4)"></line>
+          <rect class="svg-box" x="392" y="52" width="112" height="40"></rect>
+          <text class="t-sm" x="448" y="69" text-anchor="middle">TOLL BRIDGE</text>
+          <text class="t-sm" x="448" y="84" text-anchor="middle">Vale Haulage</text>
+          <text class="t-bad" x="112" y="108">Minus 4 pounds every crossing, for ever. They set the rate.</text>
+
+          <text class="t-hdr" x="0" y="164">BUY</text>
+          <line class="svg-line-key" x1="112" y1="170" x2="774" y2="170" marker-end="url(#ar4-key)"></line>
+          <rect class="svg-box-key" x="392" y="150" width="112" height="40"></rect>
+          <text class="t-sm" x="448" y="167" text-anchor="middle">TOLL BRIDGE</text>
+          <text class="t-key" x="448" y="182" text-anchor="middle">YOURS</text>
+          <line class="svg-line" x1="600" y1="128" x2="600" y2="164" marker-end="url(#ar4)"></line>
+          <text class="t-sm" x="612" y="140">rival traffic</text>
+          <text class="t-key" x="112" y="206">Plus a fee from every rival crossing. Now you set the rate.</text>
+
+          <text class="t-hdr" x="0" y="262">BYPASS</text>
+          <line class="svg-line-key" x1="112" y1="268" x2="300" y2="268"></line>
+          <line class="svg-box-dim" x1="300" y1="268" x2="596" y2="268"></line>
+          <rect class="svg-box-dim" x="392" y="248" width="112" height="40"></rect>
+          <text class="t-sm" x="448" y="272" text-anchor="middle">STRANDED</text>
+          <path class="svg-line-key" d="M 300 268 L 340 312 L 556 312 L 596 268"></path>
+          <line class="svg-line-key" x1="596" y1="268" x2="774" y2="268" marker-end="url(#ar4-key)"></line>
+          <text class="t-key" x="112" y="344">You pay nobody, and their expensive asset now earns nothing.</text>
+        </svg>
+      </div>
+      <figcaption>The same three options exist for one bridge and for an entire trunk corridor, which is what makes this a spine rather than a feature. <b>The bypass is what stops the whole thing snowballing:</b> charge too much and traffic simply leaves, so revenue is charge multiplied by volume and volume falls as charge rises — a curve the player feels rather than reads.</figcaption>
+    </figure>
+
+    <h3>Why this fixes the structure</h3>
+    <ul>
+      <li><strong>It makes Act I's powerlessness mean something.</strong> You can only pay. The access-charge line on your P&amp;L is a permanent ache, and it turns the construction charter from a menu unlock into a genuine reward.</li>
+      <li><strong>It tells the arc in numbers.</strong> Act I income is 100% haulage. Act IV income might be 60% rent. The haulier-to-magnate story is visible in the income statement with no narration at all.</li>
+      <li><strong>It gives rivals a fair way to hurt you.</strong> A rival buying the bridge your northern operation depends on is a real attack — and you could have bought it.</li>
+      <li><strong>It makes multiplayer work.</strong> This is the big one. Contract-racing would have been thin. Ownership <em>entangles</em> players: I use your line, you use my port. Co-operation and competition become the same system, with access agreements, deliberate mutual dependency, and the standing threat of a buyout.</li>
+      <li><strong>Insolvency stops being a modal dialog.</strong> A failed company's assets go to auction, and everyone reacts. Including when it's yours.</li>
+    </ul>
+
+    <h3>It isn't invented</h3>
+    <p>Turnpike trusts, railway running powers and track access charges — still exactly how UK rail works — port dues, landing fees, canal tolls, electricity transmission and wheeling charges, water abstraction licences. Infrastructure economics has always been this game, which is most of why it will feel right rather than gamey.</p>
+
+    <div class="note">
+      <span class="lbl">The two costs, stated honestly</span>
+      <p><strong>It wants to snowball.</strong> Buy, earn, buy more. Two diegetic dampers: traffic leaves if you gouge, and purchase price is a multiple of recent earnings, so a profitable road is expensive precisely <em>because</em> it is profitable. From era five the authority also gains teeth — open access, charge caps, compulsory purchase, competition referrals. A dominant player earns a regulator, which is both historically accurate and a much better Act IV antagonist than another company.</p>
+      <p><strong>It costs pathfinding.</strong> Access charges mean route cost is money as well as time, and charges differ per company — so every company sees a different cost graph and routing caches are keyed per company. The topology is shared and only edge weights differ, but this is a real multiplier and it is now an explicit Phase 0 spike. It also turns "how many companies share a world" into a performance question as well as an art one.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section class="sec">
+    <p class="eyebrow"><span class="ref">05</span> Signature mechanics</p>
+    <h2>Four things that make this not just Transport Tycoon again</h2>
+    <p>You picked tile placement over freehand drawing, which is the right call for six transport modes — but it does throw away the thing that made Freeways special. So we put it back deliberately, in one contained place.</p>
+
+    <h3>The Junction Lab</h3>
+    <p>Roads and rails are placed on the grid. But any node where two or more alignments meet can be opened into a dedicated editor, where you shape the interchange freehand: priority rules, signals, roundabout, grade separation, slip roads, stacking. The simulation runs your junction with real vehicles at higher resolution and reports throughput, mean delay and worst-case queue.</p>
+    <p>This is the soul of the game and it should be protected accordingly. It's where the tactile joy lives, it's where mastery lives, and it's the thing players will screenshot. It also scales: a rail junction with signalling is a genuinely different and harder puzzle than a road one.</p>
+
+    <h3>Three networks over one map</h3>
+    <p>Most games in this genre have one network. This has three, and they interact. <strong>Transport</strong> moves things. <strong>Utility</strong> — the power grid and water pipelines — moves capacity. <strong>Demand</strong> — people, jobs, tourists, retail — is what makes a place worth connecting at all. Almost every interesting decision touches at least two of them.</p>
+
+    <figure>
+      <div class="frame">
+        <svg viewBox="0 0 880 396" role="img" aria-label="A mine site requiring power, water and labour from three separate networks before it produces ore, and reducing the amenity value that a nearby resort depends on.">
+          <text class="t-hdr" x="0" y="14">ONE SITE, THREE NETWORKS, ONE UNINTENDED CONSEQUENCE</text>
+
+          <rect class="svg-box" x="30" y="60" width="212" height="56"></rect>
+          <text class="t-name" x="44" y="82">POWER PLANT</text>
+          <text class="t-sm" x="44" y="99">grid supply 4.2 MW</text>
+
+          <rect class="svg-box" x="30" y="236" width="212" height="56"></rect>
+          <text class="t-name" x="44" y="258">RESERVOIR</text>
+          <text class="t-sm" x="44" y="275">pipeline 900 m3/day</text>
+
+          <rect class="svg-box" x="638" y="60" width="212" height="56"></rect>
+          <text class="t-name" x="652" y="82">GLENMORE TOWN</text>
+          <text class="t-sm" x="652" y="99">240 workers, 35 min commute</text>
+
+          <rect class="svg-box" x="638" y="236" width="212" height="56"></rect>
+          <text class="t-name" x="652" y="258">ARDMORE WHARF</text>
+          <text class="t-sm" x="652" y="275">export, 60 t/week capacity</text>
+
+          <rect class="svg-box-key" x="334" y="146" width="212" height="76"></rect>
+          <text class="t-name" x="350" y="172">KESTREL PIT</text>
+          <text class="t-sm" x="350" y="190">bauxite, capacity 40 t/week</text>
+          <text class="t-key" x="350" y="208">output 0 until all three met</text>
+
+          <rect class="svg-box-dim" x="334" y="312" width="212" height="54"></rect>
+          <text class="t-name" x="350" y="334">LOCH VAINE RESORT</text>
+          <text class="t-sm" x="350" y="351">visitor revenue -22%</text>
+
+          <defs>
+            <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+            </marker>
+            <marker id="ar-key" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"></path>
+            </marker>
+            <marker id="ar-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--crit)"></path>
+            </marker>
+          </defs>
+
+          <line class="svg-line" x1="242" y1="92" x2="326" y2="160" marker-end="url(#ar)"></line>
+          <text class="t-sm" x="248" y="122">utility</text>
+
+          <line class="svg-line" x1="242" y1="262" x2="326" y2="206" marker-end="url(#ar)"></line>
+          <text class="t-sm" x="248" y="252">utility</text>
+
+          <line class="svg-line" x1="638" y1="92" x2="554" y2="160" marker-end="url(#ar)"></line>
+          <text class="t-sm" x="576" y="122" text-anchor="end">demand</text>
+
+          <line class="svg-line-key" x1="546" y1="206" x2="630" y2="258" marker-end="url(#ar-key)"></line>
+          <text class="t-key" x="632" y="222" text-anchor="end">ore, transport</text>
+
+          <line class="svg-line-bad" x1="440" y1="222" x2="440" y2="304" marker-end="url(#ar-bad)"></line>
+          <text class="t-bad" x="452" y="270">amenity -18</text>
+        </svg>
+      </div>
+      <figcaption>Three inbound edges from three different networks, and the pit produces nothing until all three are satisfied. The fourth edge is the one that makes the game interesting: <b>opening the pit devalues the resort you also own.</b> Nothing scripts this — amenity is a terrain-derived field, and tourism revenue reads it.</figcaption>
+    </figure>
+
+    <h3>Extraction against amenity</h3>
+    <p>Every tile carries an amenity value derived from terrain — water, elevation, tree cover, distance from industry. Tourism industries earn against it. Extraction industries destroy it. Open a bauxite pit above a lake valley and the resort down the shore starts losing money, and you own both.</p>
+    <p>This is the game's central tension and it is worth being deliberate about, because it does two things. Mechanically, it stops the optimal strategy from being "industrialise everything" — there's a real, quantified cost to the obvious move. And it means the game has something to say without ever having to say it.</p>
+
+    <h3>Obsolescence</h3>
+    <p>Eras retire your vehicles and, more importantly, your assumptions. A route that printed money with steam is a liability once a rival is running diesel on a parallel alignment. Standing still is a losing move, and the game applies that pressure on a calendar you can see coming, which makes it fair.</p>
+
+    <div class="note">
+      <span class="lbl">On rivals</span>
+      <p>Rival firms are not special. They're headless clients issuing exactly the same commands a human issues, into exactly the same simulation. Difficulty is their capital and their planning horizon, never a cheat. This has a nice property: anything a rival can do, you can do — and if a rival does something clever, it's because the game genuinely permits it.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section class="sec">
+    <p class="eyebrow"><span class="ref">06</span> Art direction</p>
+    <h2>An operating diagram that happens to be a place</h2>
+    <p class="lede">"Low-poly 3D" describes a dozen incompatible looks, so this needs settling properly rather than being left to emerge. The game is about the legibility of systems, so the world should feel like a beautifully drafted technical object that has weather and time of day and several thousand things moving through it — precise, matte, unfussy, with nothing on screen that isn't telling you something.</p>
+    <p>Warmth comes from <strong>light and life</strong> — low sun, steam, headlights, smoke drifting, the sheer density of movement — and never from texture noise or decorative clutter. Colour is <strong>earned</strong>: the land is restrained and desaturated, and saturation is spent on the things that carry meaning. Vehicles are the most saturated things on screen and they are also the things that move, which is what makes a busy network beautiful rather than merely busy.</p>
+
+    <h3>The camera decides everything, and it decides it differently than Tribe Wars</h3>
+    <p>For an orthographic camera at elevation <span class="mono">θ</span>, a world-vertical length arrives on screen at <span class="mono">cos(θ)</span>, a ground length across the view at very nearly 1.0, and a ground length along the view axis at <span class="mono">sin(θ)</span>.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Elevation</th><th class="mono">Height arrives at</th><th class="mono">Across view</th><th class="mono">Along view</th><th>Consequence</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">30°</td><td class="mono">0.87</td><td class="mono">1.00</td><td class="mono">0.50</td><td>Classic 2:1 game-iso; flattens usefully for reading long alignments</td></tr>
+          <tr><td class="mono">35° <span class="pill med">proposed</span></td><td class="mono">0.82</td><td class="mono">1.00</td><td class="mono">0.57</td><td>Compromise; to be confirmed in Phase 0 with real geometry</td></tr>
+          <tr><td class="mono">40°</td><td class="mono">0.77</td><td class="mono">1.00</td><td class="mono">0.64</td><td>More ground, less dominance from tall structures</td></tr>
+          <tr><td class="mono">58°</td><td class="mono">0.53</td><td class="mono">1.00</td><td class="mono">0.85</td><td>Tribe Wars. Height nearly halves, so they author deliberately too thin</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>So our correction runs <em>opposite</em> to theirs. <strong>Height survives; footprint does not.</strong> Chimneys, cranes, headframes, masts and gantries will read taller and more dominant than authored, and long low things — a rake of wagons, a barge, a shed — lose nearly half their length along one axis.</p>
+    <div class="note">
+      <span class="lbl">Port the method, never the constant</span>
+      <p>Their document's trig is mislabelled — it says <span class="mono">sin(58) = 0.85</span> where the relevant figure is <span class="mono">cos(58) = 0.53</span>, which is why the prose immediately says "roughly half" and the code bakes in 0.78. The conclusion is right because it came from measurement, and measurement is the part to copy: build a reference at a known proportion, render it through the real pipeline at the real camera, count the pixels. Once, in Phase 0, before anything else is modelled. Every asset depends on that number.</p>
+    </div>
+
+    <h3>What it is, and what it deliberately is not</h3>
+    <div class="isnot">
+      <div>
+        <h4 class="yes">It is</h4>
+        <ul>
+          <li><b>Flat shading on chamfered forms.</b> Facets break against the light and hold an outline against a busy background.</li>
+          <li><b>One grown mesh, not stacked primitives.</b> A pile of intersecting solids has no continuous surface, so every junction is a hard collision.</li>
+          <li><b>Detail as geometry.</b> There is no texture budget for painted detail. If a thing needs to read, it reads as shape.</li>
+          <li><b>Three values and one accent</b> per object, and the accent is the only emissive surface — so things stay readable in fog, at dusk and under snow.</li>
+          <li><b>Straight for order, irregular for age.</b> New infrastructure is crisp and symmetric; neglected infrastructure sags and leans. Form carrying a mechanic.</li>
+          <li><b>Water as the one large saturated field.</b> It anchors the composition, so get it right early.</li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="no">It is not</h4>
+        <ul>
+          <li><b>Not cel-shaded with ink outlines.</b> The closest call, since Tribe Wars uses a toon ramp well — but theirs is thirty units in a forest. Twenty thousand outlined vehicles is noise, not style.</li>
+          <li><b>Not photoreal or a PBR showcase.</b> Invisible at 1x zoom, and a different game at 12x.</li>
+          <li><b>Not voxel.</b> Reads as a building toy and cannot express a curved slip road, which is the thing we most need to express.</li>
+          <li><b>Not flat-vector infographic.</b> No form to catch light, and the world stops being a place.</li>
+          <li><b>Not cozy-pastel.</b> A lovely genre that cannot carry industrial scale or read at density.</li>
+          <li><b>Not gritty realism.</b> Grime is the enemy of legibility, and both 1860 and 2100 have to be legible.</li>
+          <li><b>No floating icons by default.</b> Icons are an overlay you turn on. The resting state is a place.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>The three tests</h3>
+    <p>Every asset passes all three or it goes back.</p>
+    <ul>
+      <li><strong>The 14-pixel test.</strong> Render at the size it occupies at maximum zoom-out. Can you still tell what <em>class</em> of thing it is — lorry, train, ship, plane? A consequence follows: at that size a decimated mesh is a smear, so <strong>the far LOD is deliberately authored</strong>, a second simpler function in the same build script. That's a design task, not an optimisation task.</li>
+      <li><strong>The removed-colour test.</strong> Flat black on white. If two things need their palette to be told apart, the shapes have failed and no amount of colour rescues them.</li>
+      <li><strong>The neighbour test.</strong> Never judge an asset alone on a checker floor — judge it in the arrangement it ships in. The most useful note in the Tribe Wars repo records four beautifully detailed towers being a net loss because nobody had ever seen them next to the crude wall they stood on.</li>
+    </ul>
+
+    <h3>State must be visible in the world, not only in the UI</h3>
+    <p>A jammed junction should look jammed. A dying industry should look dying — cold stack, empty yard, weeds — and a thriving one should look thriving. This means <strong>every industry needs three visual states rather than one model</strong>, which is a real cost that has to be budgeted from the first industry instead of retrofitted to forty. In practice it's usually the same kit with a different material set and one or two swapped parts, so it's a parameter rather than a new asset.</p>
+
+    <h3>Livery, and why the company count is an art decision</h3>
+    <p>Tribe Wars bakes faction colour into the material, which is right for two fixed sides. We have several companies in one world all running the same lorry, so every model reserves a material slot the renderer tints per company at draw time. Which gives the rule: <strong>construction says what it is, livery says whose it is, and you must be able to tell both apart with the colour removed.</strong></p>
+    <p>That last clause is the hard one. Colour alone cannot carry identity — colourblind players, fog, dusk, and at 14 pixels a tinted region is a handful of pixels. So livery is a <em>pattern plus</em> a colour: a band, a flash, a roof panel. Four companies is comfortable. Eight is a genuine constraint on the entire scheme.</p>
+
+    <h3>Eight eras that have to look like one game</h3>
+    <p>The biggest art risk in the project, and the rule is short: <strong>construction language changes across eras; form language does not.</strong> Timber, iron and exposed mechanism gives way to pressed steel and welding, then to sealed composite — but all of it is flat-shaded chamfered form on the same palette discipline. The check is automated: a per-cargo-class lineup rendered across all eight eras. If the progression doesn't read as a progression in one picture, the roster is wrong.</p>
+  </section>
+
+  <hr class="rule">
+
+  <section class="sec">
+    <p class="eyebrow"><span class="ref">07</span> Architecture</p>
+    <h2>One decision the whole project hangs from</h2>
+    <p>You asked for individually simulated vehicles <em>and</em> shared worlds. That is the hardest pair on the board, because the naive approach to multiplayer — one authoritative server streaming world state to clients — is completely impossible here. Twenty thousand vehicles at twenty ticks a second is tens of megabytes per second, per player.</p>
+    <p>The answer is the one real-time strategy games have used since the nineties: <strong>deterministic lockstep</strong>. Don't send the world. Send the handful of decisions that changed it, and let every machine compute the identical world for itself.</p>
+
+    <figure>
+      <div class="frame">
+        <svg viewBox="0 0 880 330" role="img" aria-label="Comparison of streaming full world state, which sends tens of megabytes per second, against deterministic lockstep, which sends only player commands at a few hundred bytes per second.">
+          <text class="t-hdr" x="0" y="14">WHAT ACTUALLY CROSSES THE WIRE</text>
+
+          <line class="svg-line" x1="440" y1="30" x2="440" y2="320" stroke-dasharray="3 5" opacity="0.3"></line>
+
+          <text class="t-hdr" x="0" y="58">A — STREAM THE WORLD</text>
+          <rect class="svg-box" x="0" y="82" width="112" height="52"></rect>
+          <text class="t-name" x="14" y="106">CLIENT A</text>
+          <text class="t-sm" x="14" y="122">renders only</text>
+
+          <rect class="svg-box" x="176" y="82" width="88" height="52"></rect>
+          <text class="t-name" x="190" y="106">SERVER</text>
+          <text class="t-sm" x="190" y="122">the sim</text>
+
+          <rect class="svg-box" x="308" y="82" width="112" height="52"></rect>
+          <text class="t-name" x="322" y="106">CLIENT B</text>
+          <text class="t-sm" x="322" y="122">renders only</text>
+
+          <line class="svg-line-bad" x1="118" y1="108" x2="170" y2="108" marker-end="url(#ar2-bad)"></line>
+          <line class="svg-line-bad" x1="270" y1="108" x2="302" y2="108" marker-end="url(#ar2-bad)"></line>
+
+          <defs>
+            <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+            </marker>
+            <marker id="ar2-key" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"></path>
+            </marker>
+            <marker id="ar2-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--crit)"></path>
+            </marker>
+          </defs>
+
+          <text class="t-bad" x="0" y="172">20,000 vehicle positions x 20 Hz</text>
+          <text class="t-bad" x="0" y="190">= tens of MB / second, each way</text>
+          <text class="t-sm" x="0" y="214">Saves are giant. Replays impossible.</text>
+          <text class="t-sm" x="0" y="230">Every client needs the network to see a truck move.</text>
+          <text class="t-sm" x="0" y="246">Single player pays for multiplayer it isn't using.</text>
+
+          <text class="t-hdr" x="470" y="58">B — SHARE THE COMMANDS</text>
+          <rect class="svg-box-key" x="470" y="82" width="112" height="52"></rect>
+          <text class="t-name" x="484" y="106">CLIENT A</text>
+          <text class="t-sm" x="484" y="122">full sim</text>
+
+          <rect class="svg-box" x="626" y="82" width="88" height="52"></rect>
+          <text class="t-name" x="640" y="106">RELAY</text>
+          <text class="t-sm" x="640" y="122">orders + stamps</text>
+
+          <rect class="svg-box-key" x="758" y="82" width="112" height="52"></rect>
+          <text class="t-name" x="772" y="106">CLIENT B</text>
+          <text class="t-sm" x="772" y="122">full sim</text>
+
+          <line class="svg-line-key" x1="588" y1="108" x2="620" y2="108" marker-end="url(#ar2-key)"></line>
+          <line class="svg-line-key" x1="720" y1="108" x2="752" y2="108" marker-end="url(#ar2-key)"></line>
+
+          <path class="svg-line" d="M 526 140 L 526 172 L 814 172 L 814 140" stroke-dasharray="4 3" opacity="0.6"></path>
+          <text class="t-sm" x="670" y="190" text-anchor="middle">state hash compared every 256 ticks</text>
+
+          <text class="t-key" x="470" y="222">build_road, tick 8140, player 2</text>
+          <text class="t-key" x="470" y="240">= a few hundred bytes / second</text>
+          <text class="t-sm" x="470" y="264">Saves are the command log. Replays free.</text>
+          <text class="t-sm" x="470" y="280">Single player is the same code with one client.</text>
+          <text class="t-sm" x="470" y="296">Bug reports replay the exact failure.</text>
+        </svg>
+      </div>
+      <figcaption>The right-hand design is not a multiplayer feature — it is the <b>single-player architecture</b>, which happens to make multiplayer nearly free. This is why it has to be decided now: retrofitting determinism onto a finished simulation is a rewrite.</figcaption>
+    </figure>
+
+    <h3>What determinism buys, beyond multiplayer</h3>
+    <ul>
+      <li><strong>Saves become tiny.</strong> A save is a seed plus a command log — kilobytes. Cloud saves stop being a storage problem. Periodic binary snapshots keep loading fast.</li>
+      <li><strong>Replays and timelapses are free.</strong> Watching your region grow from 1860 to 2100 in ninety seconds is a marketing asset you get for nothing.</li>
+      <li><strong>Rival AI is just a client.</strong> No separate code path, no cheating, no divergence between what the AI can do and what you can.</li>
+      <li><strong>Balance becomes measurable.</strong> The simulation runs headless at thousands of times real speed. We can run ten thousand full games overnight across a parameter sweep and find out which configurations produce a dominant strategy. This is the part that genuinely wasn't available to the people who made these games in 1994.</li>
+      <li><strong>Bugs are reproducible.</strong> A player sends a command log; we replay the precise failure. In a genre this stateful, that is worth an enormous amount.</li>
+    </ul>
+
+    <h3>The price</h3>
+    <p>Determinism is a discipline, not a feature. No floating point anywhere in simulation state — fixed-point <span class="mono">Q16.16</span> throughout. No <span class="mono">Math.random</span>, no <span class="mono">Date.now</span>, no iteration over an unordered map. And critically: <strong>anything asynchronous must apply its result at a predetermined tick, never on arrival.</strong> A pathfinding request issued at tick 8140 returns at tick 8148 on every machine, whether that machine took two milliseconds or forty.</p>
+    <p>This is enforced by a replay harness in CI from the very first commit: golden command logs replayed on Chrome, Firefox, Safari and Android, with rolling state hashes compared. It costs a day to build now. It cannot be built later.</p>
+
+    <figure>
+      <div class="frame">
+        <svg viewBox="0 0 880 300" role="img" aria-label="Runtime threading: a main thread rendering at display rate, a simulation worker running a fixed 20 hertz deterministic tick, and path workers whose results are applied at predetermined future ticks.">
+          <text class="t-hdr" x="0" y="14">RUNTIME — THREE THREADS, ONE DETERMINISTIC CORE</text>
+
+          <rect class="svg-box" x="0" y="56" width="228" height="150"></rect>
+          <text class="t-name" x="16" y="80">MAIN THREAD</text>
+          <text class="t-sm" x="16" y="102">React UI, DOM overlay</text>
+          <text class="t-sm" x="16" y="120">Three.js, ortho camera</text>
+          <text class="t-sm" x="16" y="138">input to commands</text>
+          <text class="t-sm" x="16" y="156">interpolates between ticks</text>
+          <text class="t-key" x="16" y="186">display rate, 60 Hz</text>
+
+          <rect class="svg-box-key" x="326" y="56" width="228" height="150"></rect>
+          <text class="t-name" x="342" y="80">SIM WORKER</text>
+          <text class="t-sm" x="342" y="102">ECS, typed arrays</text>
+          <text class="t-sm" x="342" y="120">fixed-point Q16.16</text>
+          <text class="t-sm" x="342" y="138">seeded PRNG only</text>
+          <text class="t-sm" x="342" y="156">mesoscopic traffic</text>
+          <text class="t-key" x="342" y="186">fixed 20 Hz, never varies</text>
+
+          <rect class="svg-box" x="652" y="56" width="228" height="150"></rect>
+          <text class="t-name" x="668" y="80">PATH WORKERS</text>
+          <text class="t-sm" x="668" y="102">hierarchical routing</text>
+          <text class="t-sm" x="668" y="120">graph rebuilt on edit</text>
+          <text class="t-sm" x="668" y="138">pure, no sim state</text>
+          <text class="t-key" x="668" y="186">async, off critical path</text>
+
+          <line class="svg-line" x1="234" y1="92" x2="318" y2="92" marker-end="url(#ar2)"></line>
+          <text class="t-sm" x="276" y="82" text-anchor="middle">commands</text>
+
+          <line class="svg-line-key" x1="318" y1="164" x2="234" y2="164" marker-end="url(#ar2-key)"></line>
+          <text class="t-key" x="276" y="182" text-anchor="middle">snapshot (SAB)</text>
+
+          <line class="svg-line" x1="560" y1="92" x2="644" y2="92" marker-end="url(#ar2)"></line>
+          <text class="t-sm" x="602" y="82" text-anchor="middle">request @ N</text>
+
+          <line class="svg-line" x1="644" y1="164" x2="560" y2="164" marker-end="url(#ar2)"></line>
+          <text class="t-sm" x="602" y="182" text-anchor="middle">applied @ N+8</text>
+
+          <text class="t-hdr" x="0" y="244">RULE</text>
+          <text class="t" x="0" y="266">The sim never waits and never reads the clock. Async results land on a tick decided when the</text>
+          <text class="t" x="0" y="284">request was made — so a fast machine and a slow machine compute exactly the same world.</text>
+        </svg>
+      </div>
+      <figcaption>Rendering is decoupled from simulation entirely: the sim writes double-buffered structure-of-arrays snapshots into a SharedArrayBuffer and the renderer interpolates between them. A dropped frame never affects the world. <b>The arrow labelled "applied @ N+8" is the one that keeps multiplayer possible.</b></figcaption>
+    </figure>
+
+    <h3>Traffic model</h3>
+    <p>Full car-following microsimulation for twenty thousand vehicles is too expensive and more precision than the game needs. We use a <strong>mesoscopic cell model</strong>: each lane is a chain of fixed-length cells, a vehicle occupies cells, junctions arbitrate with deterministic priority and signal rules. You get real queues, real spillback, real jams that emerge rather than being scripted — at a small fraction of the cost. The Junction Lab runs the identical model at higher cell resolution, so what you tune is what you get.</p>
+
+    <h3>The LOD escape hatch</h3>
+    <p>A route with stable flow and no contention for a sustained period collapses into an analytic flow record; it wakes on contention, on a network edit nearby, or on camera proximity. Crucially the sleep and wake rules live <em>in the simulation</em>, not the renderer — otherwise looking at a route would change its outcome, and determinism would be gone. Target budget: 25,000 active vehicles on desktop, around 6,000 on tablet, on a 1024 × 1024 tile region.</p>
+  </section>
+
+  <hr class="rule">
+
+  <section class="sec">
+    <p class="eyebrow"><span class="ref">08</span> Stack</p>
+    <h2>What it's built from, and why</h2>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th>Layer</th><th>Choice</th><th>Reason</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="mono">Language</td><td class="mono">TypeScript, strict</td><td>Lockstep requires client, server and tools to run byte-identical simulation code. One language is not a preference here, it's a requirement.</td></tr>
+          <tr><td class="mono">Repo</td><td class="mono">pnpm workspaces</td><td>Packages: <span class="mono">sim</span>, <span class="mono">render</span>, <span class="mono">data</span>, <span class="mono">client</span>, <span class="mono">server</span>, <span class="mono">tools</span>. <span class="mono">sim</span> has zero browser dependencies so it runs headless in Node.</td></tr>
+          <tr><td class="mono">Render</td><td class="mono">Three.js, WebGPU with WebGL2 fallback</td><td>Orthographic camera over real 3D. Curved alignments, bridges, tunnels, elevation, day/night and weather all become geometry and lighting problems rather than asset problems.</td></tr>
+          <tr><td class="mono">Simulation</td><td class="mono">Hand-rolled ECS, SoA typed arrays</td><td>No library gives you fixed-point determinism plus cache locality. This is the one place we write it ourselves, and it's maybe 2,000 lines.</td></tr>
+          <tr><td class="mono">Maths</td><td class="mono">Q16.16 fixed point</td><td>Float behaviour varies subtly across platforms. Fixed point does not. Non-negotiable inside sim state.</td></tr>
+          <tr><td class="mono">UI</td><td class="mono">React + Zustand, DOM overlay</td><td>Zero React in the render loop. UI is a layer on top, which also makes the touch layout tractable.</td></tr>
+          <tr><td class="mono">Content</td><td class="mono">JSON defs, Zod schemas, hot reload</td><td>Industries, cargo, vehicles, eras, events, contracts are all data. The schema is the contract that generated content cannot break.</td></tr>
+          <tr><td class="mono">Relay</td><td class="mono">Cloudflare Durable Objects</td><td>A Durable Object literally is a room with state — one per world. Global, cheap, stateful WebSockets without running a fleet.</td></tr>
+          <tr><td class="mono">Accounts, saves</td><td class="mono">Supabase</td><td>Postgres, auth and storage in one, and the fastest credible route to accounts and cloud saves without building a backend team.</td></tr>
+          <tr><td class="mono">Modelling</td><td class="mono">Headless Blender + Python, ported from tribewars/art</td><td>Models are programs: one grown mesh, chamfered, flat shaded, exported to glTF with a budget report. Parameterised, so one lorry function covers eight eras.</td></tr>
+          <tr><td class="mono">Asset review</td><td class="mono">Five-view render harness</td><td>Renders the exported file at game scale beside a scale reference, including silhouette, so the thing that built the model can look at it. This is what makes bulk generation safe.</td></tr>
+          <tr><td class="mono">Assets</td><td class="mono">glTF + Draco, palette atlas, livery slot</td><td>Colour lives in a locked ramp sampled by the shader rather than per-asset textures, with one material slot tinted per company at runtime.</td></tr>
+          <tr><td class="mono">Tests</td><td class="mono">Vitest, Playwright, replay harness</td><td>The replay harness is the load-bearing one: golden command logs replayed cross-platform with state hashes compared, on every commit.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="tbl-note">Touch is handled by a single pointer abstraction written on day one, plus a compact layout mode — not a separate mobile build.</p>
+  </section>
+
+  <hr class="rule">
+
+  <section class="sec">
+    <p class="eyebrow"><span class="ref">09</span> AI, concretely</p>
+    <h2>Three places it does real work, and one place it must not</h2>
+    <p>"AI-first" is easy to say and easy to waste. Here's where it actually earns its place.</p>
+
+    <h3>1 — Assets: adopt the Tribe Wars pipeline wholesale</h3>
+    <p>My first draft of this section said "text-to-3D, then a validator". That was wrong, and <span class="mono">tribewars/art</span> already contains the better answer. It should be lifted more or less intact.</p>
+    <p>The approach there is <strong>code-authored geometry</strong>: models are Python programs run through headless Blender and exported as glTF. Not primitives stacked and merged — a single mesh <em>grown</em>, in the standard game-art way, with faces selected by where they point and where they sit. The build scripts read as "take the face on the outside and pull a limb out of it" rather than as a list of coordinates.</p>
+    <p>That matters here more than it did there. A model that is a program is diffable, reviewable, and above all <em>parameterised</em> — and this game needs the same lorry across eight decades of bodywork, in a dozen liveries, at three levels of detail. Authoring that by hand is a career. Authoring it as a function with arguments is an afternoon.</p>
+
+    <figure>
+      <div class="frame">
+        <svg viewBox="0 0 880 232" role="img" aria-label="The asset loop: a Python shape script is built by headless Blender, exported as a glb with a budget report, rendered from five views at game scale, and read back as images by the agent, which then edits the script.">
+          <text class="t-hdr" x="0" y="14">THE ASSET LOOP — WHY IT CLOSES</text>
+
+          <rect class="svg-box" x="0" y="52" width="152" height="66"></rect>
+          <text class="t-name" x="12" y="76">SHAPE SCRIPT</text>
+          <text class="t-sm" x="12" y="94">python, one grown mesh</text>
+          <text class="t-sm" x="12" y="109">reviewable as text</text>
+
+          <rect class="svg-box" x="182" y="52" width="152" height="66"></rect>
+          <text class="t-name" x="194" y="76">BLENDER</text>
+          <text class="t-sm" x="194" y="94">headless, no GUI</text>
+          <text class="t-sm" x="194" y="109">hard shading enforced</text>
+
+          <rect class="svg-box" x="364" y="52" width="152" height="66"></rect>
+          <text class="t-name" x="376" y="76">GLB + REPORT</text>
+          <text class="t-sm" x="376" y="94">tris vs budget</text>
+          <text class="t-sm" x="376" y="109">floor check, height</text>
+
+          <rect class="svg-box-key" x="546" y="52" width="152" height="66"></rect>
+          <text class="t-name" x="558" y="76">FIVE RENDERS</text>
+          <text class="t-sm" x="558" y="94">front side top 3/4</text>
+          <text class="t-key" x="558" y="109">and silhouette</text>
+
+          <rect class="svg-box-key" x="728" y="52" width="152" height="66"></rect>
+          <text class="t-name" x="740" y="76">AGENT LOOKS</text>
+          <text class="t-sm" x="740" y="94">at game scale,</text>
+          <text class="t-sm" x="740" y="109">beside a ruler</text>
+
+          <defs>
+            <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+            </marker>
+            <marker id="ar3-key" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"></path>
+            </marker>
+          </defs>
+
+          <line class="svg-line" x1="152" y1="85" x2="176" y2="85" marker-end="url(#ar3)"></line>
+          <line class="svg-line" x1="334" y1="85" x2="358" y2="85" marker-end="url(#ar3)"></line>
+          <line class="svg-line-key" x1="516" y1="85" x2="540" y2="85" marker-end="url(#ar3-key)"></line>
+          <line class="svg-line-key" x1="698" y1="85" x2="722" y2="85" marker-end="url(#ar3-key)"></line>
+
+          <path class="svg-line-key" d="M 804 118 L 804 158 L 76 158 L 76 124" marker-end="url(#ar3-key)"></path>
+          <text class="t-key" x="440" y="176" text-anchor="middle">the picture is wrong, so the script changes</text>
+
+          <text class="t-sm" x="440" y="206" text-anchor="middle">Step four renders the EXPORTED file, never the Blender scene:</text>
+          <text class="t-sm" x="440" y="222" text-anchor="middle">Blender is Z-up and glTF is Y-up, so the axis bug only exists after export.</text>
+        </svg>
+      </div>
+      <figcaption>Lifted from <b>tribewars/art/shots.py</b>, whose header states the case better than I can: <i>nearly every bad model in this repo was bad in a way that is invisible in Python and obvious in a picture.</i> The loop closes because the agent can see its own output — that is the entire reason this pipeline works where a validator alone would not.</figcaption>
+    </figure>
+
+    <h3>What transfers unchanged</h3>
+    <ul>
+      <li><strong>The vocabulary layer.</strong> <span class="mono">lib.py</span> exists so build scripts read as shape descriptions, and so the two things that are easy to get wrong and expensive to notice late — hard shading everywhere, and part origins sitting on the joint they rotate about — are enforced in one place rather than remembered in fifty.</li>
+      <li><strong>Comparative shots, not solo shots.</strong> <span class="mono">lineup.py</span> renders the whole library at shipping size beside a scale figure, because a prop that is wrong alone is arguable and a prop that is wrong beside seventeen others is obvious. <span class="mono">assembly.py</span> goes further and judges things in the arrangement they actually ship in — the note in its header, that four beautifully detailed towers were a net loss because nobody had seen them next to the crude wall they stood on, is the most useful thing in that folder.</li>
+      <li><strong>Sizes read from the game's own source.</strong> The shot scripts pull heights out of the actual runtime tables, so what you review is what ships rather than what somebody intended.</li>
+      <li><strong>Three values and one accent, accent is the only emissive.</strong> At small sizes more than three tonal steps is noise, and the emissive accent is what keeps a thing readable in fog and at dusk.</li>
+      <li><strong>Save-time conversion.</strong> <span class="mono">watch.mjs</span> rebuilds on save so <span class="mono">.glb</span> stays the shipped artefact and Blender never runs in production.</li>
+    </ul>
+
+    <h3>What has to change for this game</h3>
+    <div class="note">
+      <span class="lbl">Four adaptations, one of them structural</span>
+      <p><strong>Recompute the foreshortening constant.</strong> <span class="mono">ART_DIRECTION.md</span> §1b is the single most valuable paragraph in that repo: at 58 degrees, height arrives at roughly half its authored weight, so the corner tower has every radius scaled by 0.78 and baked in — it looks wrong in Blender and correct in the game, which is the only place it has to be correct. Our camera is orthographic, so the number differs, but the <em>method</em> is identical: build a reference at a known proportion, render it, measure the pixels. This gets done in Phase 0, once, before anything else is modelled.</p>
+      <p><strong>Livery must be a runtime slot, not baked paint.</strong> Tribe Wars bakes faction colour into the material, which is right for two fixed sides. We have up to eight companies plus rivals in one world, all running the same lorry. So every model reserves a material slot named <span class="mono">livery</span> that the renderer tints per company, and the art direction rule becomes: <em>construction language says what the vehicle is, livery says whose it is, and you must be able to tell both apart with the colour removed.</em></p>
+      <p><strong>The silhouette test gets much harder.</strong> Tribe Wars designs for a 40-pixel unit. Zoomed out over a region, our vehicles are 12 to 20 pixels. Decimating a mesh does not survive that. The far LOD has to be a <em>deliberately authored</em> silhouette — a separate, simpler function in the same script — not an automatic reduction.</p>
+      <p><strong>Industries are kits, not models.</strong> A mine is not one asset; it is a headframe, spoil heaps, conveyors and sheds placed by rule so that no two mines look identical and all of them look related. That is the same box-modelling library driving a placement function rather than a single build.</p>
+    </div>
+
+    <h3>2 — Content, into the schema</h3>
+    <p>Industries, vehicle stat-lines across eras, contract text, place names, event copy, tutorial prose — generated as JSON validated against Zod. Because the schema is a hard contract, generated content is incapable of breaking the engine. Worst case it's boring, and boring is caught by review.</p>
+
+    <h3>3 — Balance, by simulation rather than intuition</h3>
+    <p>This is the one that matters most and it falls straight out of the determinism decision. The simulation runs headless at enormous speed, with AI rivals as players. So: run thousands of complete games overnight across a parameter sweep, and report which configurations produce a dominant strategy, a dead industry, a runaway snowball, or a difficulty cliff at 1912. Then tune the data and run it again.</p>
+    <p>Balancing a game this size has historically been years of human play-testing intuition. It becomes an overnight job that produces evidence.</p>
+
+    <div class="note">
+      <span class="lbl">And one place it must not go</span>
+      <p>Not inside the simulation. LLM-driven citizens or companies would be non-deterministic, unaffordable per-tick, and would have destroyed lockstep, saves, replays and multiplayer in a single stroke. Dropping that was the most valuable decision in the whole set. Rivals are ordinary planning code, and they will be better for it — a bounded, tunable, testable opponent is more fun than an unpredictable one.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section class="sec">
+    <p class="eyebrow"><span class="ref">10</span> Roadmap</p>
+    <h2>Seven phases, and every one of them ends in something playable</h2>
+    <p>Phase 0 exists because the four hardest things should be proven before anything is built on them. If any of the four fails, the design changes — and it's much cheaper to change it now.</p>
+
+    <div class="phases">
+      <div class="phase">
+        <div class="pnum">PH 0</div>
+        <div>
+          <h3>Spikes</h3>
+          <p>Determinism replay harness green across four platforms. 25,000 instanced vehicles holding 60 fps. Hierarchical pathfinding over a million-tile graph inside 2 ms. Chunked terrain streaming at region scale. Throwaway code, real answers.</p>
+          <p>Plus one art spike: port the Tribe Wars modelling library, measure the foreshortening constant for our camera, and take one lorry all the way through the loop to a silhouette at 14 pixels. Everything modelled afterwards depends on that number.</p>
+        </div>
+        <div class="gate"><b>Gate</b>All five green, or the design changes</div>
+      </div>
+      <div class="phase">
+        <div class="pnum">PH 1</div>
+        <div>
+          <h3>Act I, shipped</h3>
+          <p>One generated region. Roads only. Horse and steam vehicles. Contracts, money, interest, insolvency. Local saves. A complete two-hour game with a beginning and an end, put in front of real players.</p>
+        </div>
+        <div class="gate"><b>Gate</b>Strangers play it twice</div>
+      </div>
+      <div class="phase">
+        <div class="pnum">PH 2</div>
+        <div>
+          <h3>Rail and the Junction Lab</h3>
+          <p>Construction charter, track laying, stations, signalling, gradients. The junction editor — the piece most worth getting right. Accounts and cloud saves land here, on the back of a save format that is already tiny.</p>
+        </div>
+        <div class="gate"><b>Gate</b>Players share junction screenshots</div>
+      </div>
+      <div class="phase">
+        <div class="pnum">PH 3</div>
+        <div>
+          <h3>Industry and utilities</h3>
+          <p>Founding industries, the power grid, water networks, processing chains, the decay system. Eras one through three with real obsolescence. The economy stops being a contract board and becomes a machine.</p>
+        </div>
+        <div class="gate"><b>Gate</b>Balance sweep finds no dominant strategy</div>
+      </div>
+      <div class="phase">
+        <div class="pnum">PH 4</div>
+        <div>
+          <h3>Sea, air, towns, tourism</h3>
+          <p>Ports, airports, ferries, town growth and the amenity system — which is where the extraction-versus-tourism tension finally has teeth. Rivals become genuine competitors rather than scenery.</p>
+        </div>
+        <div class="gate"><b>Gate</b>Losing to a rival feels fair</div>
+      </div>
+      <div class="phase">
+        <div class="pnum">PH 5</div>
+        <div>
+          <h3>Shared worlds</h3>
+          <p>Lockstep multiplayer, co-operative first and competitive second, plus spectating and late-join snapshots. Small phase — the expensive work was all paid for in Phase 0.</p>
+        </div>
+        <div class="gate"><b>Gate</b>Zero desyncs over a full era run</div>
+      </div>
+      <div class="phase">
+        <div class="pnum">PH 6</div>
+        <div>
+          <h3>Scale and launch</h3>
+          <p>Full 1860–2100 era run, the generated asset library at volume, onboarding, telemetry, performance budgets per device tier, and a release.</p>
+        </div>
+        <div class="gate"><b>Gate</b>Ship</div>
+      </div>
+    </div>
+    <p class="tbl-note">No dates, deliberately — they'd be fiction until we know your available hours. Phases 0 and 5 are small; 1, 3 and 4 are the substantial ones.</p>
+  </section>
+
+  <hr class="rule">
+
+  <section class="sec">
+    <p class="eyebrow"><span class="ref">11</span> Risks</p>
+    <h2>What actually goes wrong, and what we do about it</h2>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th>Risk</th><th>Severity</th><th>Mitigation</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Determinism drifts across browsers or devices, and multiplayer desyncs</td>
+            <td><span class="pill crit">Critical</span></td>
+            <td>Fixed point only in sim state; no unordered iteration; async results applied at predetermined ticks; CI replay harness across four platforms from commit one.</td>
+          </tr>
+          <tr>
+            <td>Async pathfinding results applied on arrival rather than on a fixed tick</td>
+            <td><span class="pill crit">Critical</span></td>
+            <td>The single most likely source of desync. Enforced structurally — the sim has no API that accepts a result immediately, so it cannot be done by accident.</td>
+          </tr>
+          <tr>
+            <td>Agent count versus tablet performance</td>
+            <td><span class="pill high">High</span></td>
+            <td>Sleeping-route LOD in the sim, per-device agent budgets, and region size tiers. Proven or disproven in Phase 0, not Phase 4.</td>
+          </tr>
+          <tr>
+            <td>Scope collapse — eighteen months in, nothing playable</td>
+            <td><span class="pill high">High</span></td>
+            <td>Act-based shipping. Every phase ends in a complete game. If we stop after Phase 2 we still have a product.</td>
+          </tr>
+          <tr>
+            <td>Economy balance across four acts and eight eras</td>
+            <td><span class="pill med">Medium</span></td>
+            <td>Headless sweep harness, and everything tunable is data — so a rebalance is a JSON change, not a rebuild.</td>
+          </tr>
+          <tr>
+            <td>Generated assets drift in style as the library grows</td>
+            <td><span class="pill med">Medium</span></td>
+            <td>Palette in the shader rather than the asset; a style-contract linter with hard fails; regenerate rather than hand-fix, always.</td>
+          </tr>
+          <tr>
+            <td>Multiplayer social design — griefing, pacing, players at different acts</td>
+            <td><span class="pill med">Medium</span></td>
+            <td>Deliberately deferred to Phase 5 so it's designed against a real game. Co-operative worlds first; competitive once the economy is proven.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section class="sec">
+    <p class="eyebrow"><span class="ref">12</span> Open</p>
+    <h2>Still to agree — nothing gets built until these close</h2>
+    <p>This document is the deliverable for now. No code, no spikes, no repo, until the whole thing is signed off. These are the items still genuinely open; everything else in here is settled unless you say otherwise.</p>
+    <div class="ask">
+      <ol>
+        <li><strong>The name.</strong> <em>Interchange</em> is a working title I like — it's both the junction and the trade. <em>Overland</em> is taken. <em>Ironroad</em>, <em>Charter</em> and <em>The Long Haul</em> are the other candidates.</li>
+        <li><strong>Region flavour.</strong> A recognisable geography gives free personality — a British-ish island with a highland north and an industrial midlands, say, or a Pacific coast with mountains and deep-water inlets. Or fully fictional and generated. This affects terrain generation and the whole place-name content set.</li>
+        <li><strong>Tone.</strong> Dry and systems-forward like Workers &amp; Resources, or warm and slightly silly like Transport Tycoon Deluxe. It changes the copy, the UI voice, and how seriously the economy presents itself. It also changes the modelling: silly tolerates exaggeration that dry does not.</li>
+        <li><strong>Monetisation.</strong> Premium, free with cosmetics, or free. Worth settling early because it touches accounts, telemetry and how shared worlds are hosted — and because "cosmetics" and "livery slot" are the same feature wearing different hats.</li>
+        <li><strong>How many companies share a world.</strong> Sets the livery palette budget and how hard the silhouette-plus-colour readability problem gets. Four is comfortable; eight is a real constraint on the art direction.</li>
+        <li><strong>Whether Act I is a public release or a closed playtest.</strong> If it's public, accounts and telemetry move forward into Phase 1 and the phase gets meaningfully bigger.</li>
+        <li><strong>Sign-off on everything above.</strong> Particularly Section 05 — the deterministic core is the one decision that cannot be revisited cheaply, so it should be the one you push hardest on now.</li>
+      </ol>
+    </div>
+  </section>
+
+</div>
