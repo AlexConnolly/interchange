@@ -103,6 +103,7 @@ export class World {
   private waySpeed = new Int32Array(64);
   private wayUpkeep = new Int32Array(64);
   private wayWear = new Int32Array(64);
+  private wayLanes = new Int32Array(64);
   private vehicleSpeed = new Int32Array(256);
   private vehicleCapacity = new Int32Array(256);
   private vehicleTransfer = new Int32Array(256);
@@ -153,6 +154,7 @@ export class World {
       this.waySpeed[i] = w.speedLimit;
       this.wayUpkeep[i] = w.upkeep;
       this.wayWear[i] = w.wear;
+      this.wayLanes[i] = w.lanes;
     });
     content.vehicles.forEach((v, i) => {
       this.vehicleMode[i] = Math.max(0, MODE_NAMES.indexOf(v.mode as never));
@@ -270,7 +272,7 @@ export class World {
       if (tile === NONE) continue;
       for (const layer of this.layers) if (layer.cls[tile] !== NO_WAY) layer.terminal[tile] = 1;
     }
-    rebuildGraph(this.graph, this.layers, this.assets);
+    rebuildGraph(this.graph, this.layers, this.assets, this.wayLanes);
     this.geometryVersion = -1;
     this.router.clear();
 
@@ -478,7 +480,9 @@ export class World {
       const link = this.routePool[this.vehicles.routeStart[id]];
       const cell = this.graph.linkCellStart[link];
       if (this.graph.cells[cell] !== NONE) continue;
+      if (this.graph.linkOccupancy[link] >= this.graph.linkCapacity[link]) continue;
       this.graph.cells[cell] = id;
+      this.graph.linkOccupancy[link]++;
       this.vehicles.link[id] = link;
       this.vehicles.cell[id] = 0;
       this.vehicles.pos[id] = 0;
@@ -1238,6 +1242,7 @@ export class World {
     const link = this.vehicles.link[id];
     if (link !== NONE) {
       this.graph.cells[this.graph.linkCellStart[link] + this.vehicles.cell[id]] = NONE;
+      if (this.graph.linkOccupancy[link] > 0) this.graph.linkOccupancy[link]--;
     }
     if (refund) {
       // Depreciated: half the list price, falling with age.

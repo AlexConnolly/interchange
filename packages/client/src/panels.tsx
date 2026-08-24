@@ -19,6 +19,7 @@ import { money, num, pct, shortMoney, signClass, tonnes, days } from './format.t
 import type { Engine } from './engine.ts';
 import type { Picked } from './WorldView.tsx';
 import { availableWays, type BuildState } from './build.ts';
+import { downloadSave, localStore, saveStats, saveWorld } from './saves.ts';
 
 const C = content();
 
@@ -773,6 +774,89 @@ export function Ownership({ engine, onFocus }: { engine: Engine; onFocus: (x: nu
           Raise a charge and traffic leaves. That is the whole damper: revenue is charge times
           volume, and volume falls as charge rises.
         </span>
+      </div>
+    </div>
+  );
+}
+
+
+// ------------------------------------------------------------------- saves
+
+/**
+ * Saves. A seed plus a command log, so the whole game is a few kilobytes of
+ * text you can paste to somebody — and loading one is a replay, verified
+ * against the hashes the original recorded.
+ */
+export function Saves({
+  engine, onLoad, onClose,
+}: {
+  engine: Engine;
+  onLoad: (key: string) => void;
+  onClose: () => void;
+}): JSX.Element {
+  const [entries, setEntries] = useState(() => localStore.list());
+  const [message, setMessage] = useState('');
+  const w = engine.world;
+  const stats = saveStats(w);
+
+  const refresh = (): void => setEntries(localStore.list());
+
+  return (
+    <div className="scrim" onClick={onClose}>
+      <div className="modal" style={{ width: 'min(640px, 94vw)' }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ margin: 0, padding: '10px 14px', borderBottom: '1px solid var(--rule)', fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', display: 'flex', gap: 8 }}>
+          <span style={{ flex: 1 }}>Saved games</span>
+          <button className="btn tiny" onClick={onClose}>Close</button>
+        </h2>
+        <div className="body">
+          <div className="row">
+            <button className="btn tiny primary" onClick={() => {
+              const e = saveWorld(w, `${w.companies.names[w.player]} — ${w.year}`);
+              setMessage(e ? 'Saved.' : 'Could not save: storage is full or unavailable.');
+              refresh();
+            }}>Save now</button>
+            <button className="btn tiny" onClick={() => downloadSave(w, w.companies.names[w.player] ?? 'interchange')}>
+              Download a file
+            </button>
+            <label className="btn tiny" style={{ cursor: 'pointer' }}>
+              Load a file
+              <input type="file" accept=".json" style={{ display: 'none' }} onChange={(ev) => {
+                const file = ev.target.files?.[0];
+                if (!file) return;
+                file.text().then((text) => {
+                  localStorage.setItem('interchange.save.imported', text.replace(/^﻿/, ''));
+                  onLoad('imported');
+                });
+              }} />
+            </label>
+            <div className="grow" />
+            <span className="sub">{(stats.bytes / 1024).toFixed(1)} kB</span>
+          </div>
+          {message && <div style={{ padding: '4px 10px', fontSize: 11.5, color: 'var(--ink-dim)' }}>{message}</div>}
+          {entries.length === 0 && (
+            <div style={{ padding: '12px 10px', fontSize: 12, color: 'var(--ink-dim)' }}>
+              Nothing saved yet. The game autosaves every game year.
+            </div>
+          )}
+          {entries.map((e) => (
+            <div className="row click" key={e.key} onClick={() => onLoad(e.key)}>
+              <div className="grow">
+                <div className="title">{e.name} {e.auto && <span className="chip dim">auto</span>}</div>
+                <div className="sub">
+                  {e.year} · {money(e.cash)} · {(e.bytes / 1024).toFixed(1)} kB ·
+                  {' '}{new Date(e.savedAt).toLocaleString('en-GB')}
+                </div>
+              </div>
+              <button className="btn tiny danger" onClick={(ev) => { ev.stopPropagation(); localStore.remove(e.key); refresh(); }}>×</button>
+            </div>
+          ))}
+        </div>
+        <div className="legend">
+          <span className="dim">
+            A save is the region seed and every command you have issued. Loading one replays them and
+            checks the result against the hashes the original recorded.
+          </span>
+        </div>
       </div>
     </div>
   );

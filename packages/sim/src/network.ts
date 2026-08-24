@@ -197,6 +197,18 @@ export class Graph {
   /** Rolling traffic count, for the congestion overlay and decay. */
   readonly linkFlow = new Int32Array(MAX_LINKS);
   readonly linkFlowPrev = new Int32Array(MAX_LINKS);
+  /**
+   * How many vehicles the link may hold at once.
+   *
+   * For a road this is its cell count: vehicles pack in nose to tail. For a
+   * railway it is the number of *blocks*, because two trains may not occupy
+   * one section of single line — which is the whole of what makes signalling a
+   * puzzle rather than a decoration, and why a busy branch needs passing
+   * loops or doubling rather than more locomotives.
+   */
+  readonly linkCapacity = new Int32Array(MAX_LINKS);
+  /** Vehicles on the link right now, against that capacity. */
+  readonly linkOccupancy = new Int32Array(MAX_LINKS);
 
   /** Flattened adjacency: outgoing link ids grouped by from-node. */
   outLinks = new Int32Array(MAX_LINKS);
@@ -241,7 +253,12 @@ export interface WayCostTable {
  * in the fixed N-E-S-W order, so the node ids, link ids and adjacency ordering
  * are a pure function of the tile arrays. Nothing here iterates a Map or a Set.
  */
-export function rebuildGraph(g: Graph, layers: WayLayer[], assets: AssetTable): void {
+/** Tiles per signal block on a railway. */
+export const BLOCK_TILES = 8;
+
+export function rebuildGraph(
+  g: Graph, layers: WayLayer[], assets: AssetTable, wayLanes?: Int32Array,
+): void {
   g.nodeCount = 0;
   g.linkCount = 0;
   g.chainLen = 0;
@@ -399,12 +416,26 @@ export function rebuildGraph(g: Graph, layers: WayLayer[], assets: AssetTable): 
       g.linkAsset[id] = uniform ? asset : NONE;
       g.linkFlow[id] = 0;
       g.linkFlowPrev[id] = 0;
+      g.linkOccupancy[id] = 0;
       cellCursor += cells;
     }
   }
 
   // The reverse link walks the same chain backwards; the traffic model reads
   // it with an index flip rather than storing a second copy.
+  // Capacity, once the classes are known. Rail is blocked: a section of
+  // single line holds one train, a double holds one each way, and a longer
+  // section is divided into more blocks rather than holding more trains.
+  for (let id = 0; id < g.linkCount; id++) {
+    if (g.linkMode[id] === 1) {
+      const tiles = g.linkChainLen[id] - 1;
+      const lanes = wayLanes ? wayLanes[g.linkCls[id]] : 1;
+      g.linkCapacity[id] = Math.max(1, Math.floor(tiles / BLOCK_TILES)) * Math.max(1, lanes);
+    } else {
+      g.linkCapacity[id] = g.linkCellCount[id];
+    }
+  }
+
   g.chain = Int32Array.from(chainPool);
   g.chainLen = chainPool.length;
   g.cells = new Int32Array(Math.max(1, cellCursor)).fill(NONE);

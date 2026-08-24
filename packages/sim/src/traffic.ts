@@ -470,6 +470,7 @@ export function stepTraffic(
       if (cursor + 1 >= len) {
         // End of route. Release the cell and hand the vehicle back.
         g.cells[cellStart + cell] = NONE;
+        if (g.linkOccupancy[link] > 0) g.linkOccupancy[link]--;
         v.link[id] = NONE;
         v.speed[id] = 0;
         onArrive(id, node);
@@ -512,8 +513,13 @@ export function stepTraffic(
     for (let k = i; k < j; k++) {
       const c = order[k];
       // The exit cell has to be free whatever the rule says.
-      const nStart = g.linkCellStart[cx.nextLink[c]];
+      const next = cx.nextLink[c];
+      const nStart = g.linkCellStart[next];
       if (g.cells[nStart] !== NONE) continue;
+      // And on a railway, so does a block. This is the one place the two modes
+      // genuinely differ in the traffic model: a road takes whatever fits, a
+      // railway takes a whole section of line and holds it.
+      if (g.linkOccupancy[next] >= g.linkCapacity[next]) continue;
 
       const inIdx = cx.inIdx[c];
       const outIdx = cx.outIdx[c];
@@ -558,16 +564,18 @@ export function stepTraffic(
       const vehicle = cx.vehicle[c];
       const oldLink = cx.link[c];
       g.cells[g.linkCellStart[oldLink] + g.linkCellCount[oldLink] - 1] = NONE;
+      if (g.linkOccupancy[oldLink] > 0) g.linkOccupancy[oldLink]--;
+      g.linkOccupancy[next]++;
       g.cells[nStart] = vehicle;
-      v.link[vehicle] = cx.nextLink[c];
+      v.link[vehicle] = next;
       v.cell[vehicle] = 0;
       v.pos[vehicle] = 0;
       v.routeCursor[vehicle]++;
       v.delayTicks[vehicle] = 0;
-      g.linkFlow[cx.nextLink[c]]++;
+      g.linkFlow[next]++;
       if (cx.admittedCount < cx.admitted.length) cx.admitted[cx.admittedCount++] = c;
       stats.admitted++;
-      onEnterLink(vehicle, cx.nextLink[c]);
+      onEnterLink(vehicle, next);
     }
     i = j;
   }

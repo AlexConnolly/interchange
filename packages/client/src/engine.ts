@@ -75,6 +75,19 @@ export class Engine {
     };
   }
 
+  /**
+   * Take over a world built elsewhere — by a save being replayed, or by the
+   * multiplayer relay handing over a late-join snapshot. The engine keeps its
+   * own identity so subscribers do not have to be rewired.
+   */
+  adopt(world: World): void {
+    this.world = world;
+    this.source = null;
+    this.events.length = 0;
+    this.wireWorld();
+    this.revision++;
+  }
+
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { SPEED_STEPS, CHARTER_NAMES, TICKS_PER_DAY, Cmd, Mode } from '@interchange/sim';
+import { SPEED_STEPS, CHARTER_NAMES, TICKS_PER_DAY, Cmd, Mode, createWorld } from '@interchange/sim';
 import { OverlayMode } from '@interchange/render';
 import { content } from '@interchange/data';
 import { Engine } from './engine.ts';
 import { WorldView, type Picked } from './WorldView.tsx';
-import { BuildPalette, CharterPanel, Contracts, Finance, Fleet, FleetList, Inspector, Ownership, Services } from './panels.tsx';
+import { BuildPalette, CharterPanel, Contracts, Finance, Fleet, FleetList, Inspector, Ownership, Saves, Services } from './panels.tsx';
+import { Reports } from './Reports.tsx';
+import { loadWorld, saveWorld } from './saves.ts';
 import { applyPreview, clearPreview, emptyBuildState, updatePlan } from './build.ts';
 import { JunctionLab } from './JunctionLab.tsx';
 import { Perf } from './Perf.tsx';
@@ -123,7 +125,10 @@ function StartCard({
   );
 }
 
-function Game({ engine }: { engine: Engine }): JSX.Element {
+function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
+  // The engine is state, because loading a save replaces the world entirely
+  // and everything holding a reference to the old one has to let go of it.
+  const [engine, setEngine] = useState(initialEngine);
   const [, force] = useState(0);
   const [picked, setPicked] = useState<Picked>({ kind: 'none', id: -1, tile: -1 });
   const [leftWindow, setLeftWindow] = useState<Window_>('services');
@@ -131,6 +136,8 @@ function Game({ engine }: { engine: Engine }): JSX.Element {
   const [activeService, setActiveService] = useState(-1);
   const [showDepot, setShowDepot] = useState(false);
   const [labNode, setLabNode] = useState(-1);
+  const [showSaves, setShowSaves] = useState(false);
+  const [showReports, setShowReports] = useState(false);
   const [hover, setHover] = useState<{ text: string; x: number; y: number } | null>(null);
   const lastEventTick = useRef(0);
   // Build state lives in a ref: the drag handlers are installed once and the
@@ -140,6 +147,17 @@ function Game({ engine }: { engine: Engine }): JSX.Element {
   const [buildTick, setBuildTick] = useState(0);
 
   useEffect(() => engine.subscribe(() => force((n) => n + 1)), [engine]);
+
+  const lastAutosave = useRef(0);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const year = engine.world.year;
+      if (year === lastAutosave.current) return;
+      lastAutosave.current = year;
+      if (engine.world.tick > 0) saveWorld(engine.world, `${engine.world.companies.names[engine.world.player]} — ${year}`, true);
+    }, 4000);
+    return () => clearInterval(id);
+  }, [engine]);
 
   const w = engine.world;
   const overlay = engine.renderer?.overlay ?? OverlayMode.None;
@@ -281,6 +299,8 @@ function Game({ engine }: { engine: Engine }): JSX.Element {
             ))}
           </div>
           <button className="btn" style={{ margin: 4 }} onClick={() => setShowDepot(true)}>Depot</button>
+          <button className="btn" style={{ margin: '4px 4px 4px 0' }} onClick={() => setShowReports(true)}>Reports</button>
+          <button className="btn" style={{ margin: '4px 4px 4px 0' }} onClick={() => setShowSaves(true)}>Saves</button>
         </div>
 
         <div className="rail">
@@ -364,6 +384,25 @@ function Game({ engine }: { engine: Engine }): JSX.Element {
       {overlay !== OverlayMode.None && <OverlayLegend mode={overlay} />}
       {hover && <div className="tooltip" style={{ left: hover.x, top: hover.y - 10 }}>{hover.text}</div>}
       {showDepot && <Fleet engine={engine} onClose={() => setShowDepot(false)} />}
+      {showReports && <Reports engine={engine} onClose={() => setShowReports(false)} />}
+      {showSaves && (
+        <Saves
+          engine={engine}
+          onClose={() => setShowSaves(false)}
+          onLoad={(key) => {
+            const loaded = loadWorld(key, (cfg) => createWorld(cfg));
+            if (!loaded) return;
+            const next = new Engine(loaded.world.config);
+            // Replace the engine's world with the replayed one rather than
+            // replaying inside it, so the load either produces a whole world
+            // or leaves the current one alone.
+            next.adopt(loaded.world);
+            engine.detach();
+            setEngine(next);
+            setShowSaves(false);
+          }}
+        />
+      )}
       {labNode >= 0 && <JunctionLab engine={engine} node={labNode} onClose={() => setLabNode(-1)} />}
     </div>
   );
