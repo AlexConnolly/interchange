@@ -1,318 +1,278 @@
-# Game design
+# Design
 
-Companion to [`decisions.md`](decisions.md). Everything here follows from D1–D4, D6, D7 and D10.
-
----
-
-## 1. Structure: four acts, four charters
-
-Progression is diegetic. You are granted **charters** by the regional authority, and each charter
-is a licence to do a category of thing you could previously only pay someone else to do. One save
-carries through all four, on the same map, so the awkward river crossing you bodged in 1874 is
-still annoying you in 2031.
-
-### Act I — Carrier (1860–1900)
-
-You own vehicles, not infrastructure. Roads exist and they're bad. Industries exist and don't
-care about you. You bid on haulage contracts and learn the hard arithmetic of the genre:
-capacity, round-trip time, maintenance, and the fact that a full load out and an empty load back
-is half a business.
-
-- **Verb:** buy vehicles, assign routes, read a timetable
-- **Length:** roughly two hours
-- **Ships standalone.** This is Phase 1 and it is a complete game with a beginning and an end.
-
-### Act II — Operator (1890–1950), construction charter
-
-You may now lay road and rail. Depots, stations, signalling, gradients, gauge. The game becomes
-topology — where the line goes matters more than what runs on it. The Junction Lab unlocks here,
-and rivals start bidding against you for the same contracts.
-
-- **Verb:** lay alignment, place nodes, shape junctions
-
-### Act III — Industrialist (1930–2000), extraction charter
-
-You may found industry. The three-network problem becomes the game: a mine produces nothing until
-it has power, water and workers, and each is a different network you have to build. Processing
-chains open — ore to smelter to steel to goods. Decay starts to bite, because an industry you
-stop serving closes.
-
-- **Verb:** site industry, run utilities, balance a supply chain
-
-### Act IV — Developer (1980–2100), land charter
-
-Towns, tourism, airports, deep-water ports, the energy transition, waste. You shape what the
-region *is*, and rivals shape it against you.
-
-- **Verb:** develop land, set the region's direction
+Six systems. If something is not one of these, or does not directly serve one
+of them, it is not in the game.
 
 ---
 
-## 2. Signature mechanics
+## 0. The north star
 
-### 2.1 The Junction Lab
+**Every action you take must visibly change the district, quickly, and it must
+be obvious that it was you.**
 
-The direct Freeways inheritance, and the soul of the game.
-
-Alignments are placed on the grid. But any node where two or more meet can be opened into a
-dedicated editor where you shape the interchange freehand: priority rules, signals, roundabout,
-grade separation, slip roads, stacking. The simulation runs your junction with real vehicles at
-higher cell resolution and reports **throughput, mean delay, and 95th-percentile queue length**.
-
-- A rail junction with signalling is a genuinely different and harder puzzle than a road one, so
-  the feature scales across acts rather than being spent in Act II.
-- Junctions are saveable as **blueprints** and shareable between players. This is nearly free
-  given the command-based architecture — a blueprint is a small command sequence.
-- Protect this feature. When something has to be cut, it is not this.
-
-### 2.2 Three networks over one map
-
-Most games in this genre have one network. This has three, and they interact.
-
-| Network | Carries | Built from |
-|---|---|---|
-| **Transport** | things and people | road, rail, sea, air |
-| **Utility** | capacity | power grid, water pipeline |
-| **Demand** | why anywhere is worth connecting | people, jobs, tourists, retail |
-
-Almost every interesting decision touches at least two. A mine is the canonical example: it needs
-power and water (utility) and workers within a commute (demand) before it produces anything at
-all, and then needs a way to ship ore out (transport).
-
-### 2.3 Extraction against amenity
-
-The central tension, and it emerges from data rather than being scripted.
-
-Every tile carries an **amenity value** in 0–100, derived from elevation variance, water
-proximity, tree cover and coastline, reduced by proximity to industry (weighted by industry type
-and age) and by transport noise (weighted by mode and traffic volume).
-
-- Tourism industries earn against local amenity. Extraction industries emit an amenity penalty
-  field with a radius and falloff.
-- So: open a bauxite pit above a lake valley and the resort down the shore starts losing money,
-  and you own both.
-- **Remediation** exists in later eras — you can restore amenity, expensively and slowly. This
-  gives the late game a redemption arc rather than only a ratchet.
-
-Mechanically this stops "industrialise everything" from being the optimal strategy, by attaching
-a real quantified cost to the obvious move. It also means the game has something to say without
-ever having to say it.
-
-### 2.4 Obsolescence
-
-Eras retire your vehicles and, more importantly, your assumptions. A route that printed money
-with steam is a liability once a rival runs diesel on a parallel alignment. Standing still is a
-losing move — and the calendar is visible, so it's fair.
-
-### 2.5 Rivals
-
-Rival firms are **not special**. They are headless clients issuing exactly the same commands a
-human issues, into exactly the same simulation. Difficulty is capital, planning horizon and risk
-appetite — never a cheat.
-
-This has a nice property: anything a rival can do, you can do. If a rival does something clever,
-it's because the game genuinely permits it.
-
-Personalities are a small set of weightings — aggressive expander, route camper, undercutter —
-rather than distinct code paths.
+That is the test for every feature here and every feature proposed later. It is
+also the diagnosis of what went wrong before: four AI companies meant the
+district changed constantly for reasons that were not yours, and nineteen
+feature categories meant any single decision you made was a rounding error.
 
 ---
 
-## 3. Ownership, access charges, and the buy / build / bypass triangle
+## 1. The ladder
 
-**The spine of the game.** This is what makes the four acts one continuous story rather than four
-modes bolted together, and it is the system most other systems should hang off.
-
-### 3.1 Everything has an owner
-
-Every piece of fixed infrastructure — road, bridge, tunnel, rail alignment, station, depot,
-wharf, runway, canal lock, pipeline, transmission line — has an owner and an **access charge**.
-
-- The regional authority owns everything nobody else does. Public roads are the default, and
-  public roads are bad.
-- Using someone else's infrastructure costs you money: per vehicle, per tonne, or per unit,
-  depending on the asset class.
-- Owning it means you stop paying **and** everyone else's traffic starts paying you.
-
-### 3.2 The triangle
-
-Whenever you face an access cost you have exactly three moves. This is fractal — it applies
-identically to one bridge and to an entire trunk corridor.
-
-| Move | Cost now | Effect |
-|---|---|---|
-| **Pay** | Low | Bleeds forever, and someone else sets the rate |
-| **Buy** | High | Flips a cost into an income; you now set the rate |
-| **Bypass** | Highest | Denies the owner their revenue and strands their asset |
-
-Three genuinely live options at every scale, every time. That is a better decision structure than
-anything else in this document.
-
-### 3.3 The toll curve, which is what stops the snowball
-
-Set your charge; traffic responds. Too high and rivals route around you or build a bypass, and
-your expensive asset strands with no traffic on it. So revenue is charge x volume, and volume
-falls as charge rises — a curve the player *feels* rather than reads.
-
-Two dampers, both diegetic:
-
-1. **Traffic leaves.** The curve above. Gouging is self-punishing.
-2. **Price follows earnings.** Purchase price is a multiple of the asset's recent revenue, so a
-   profitable road is expensive precisely *because* it is profitable. You cannot cheaply buy your
-   way into a money printer.
-
-### 3.4 It is historically accurate, which is why it feels right
-
-None of this is invented. Turnpike trusts, railway running powers and track access charges (still
-exactly how UK rail works), port dues, airport landing fees, canal tolls, electricity
-transmission and wheeling charges, water abstraction licences. Infrastructure economics has
-always been this game.
-
-### 3.5 What it does to each act
-
-- **Act I** — you can only pay. You own no infrastructure and cannot. The access-charge line on
-  your P&L is a permanent ache, and it is the thing that makes the construction charter feel like
-  a reward rather than a menu unlock.
-- **Act II** — you can build, therefore own, therefore charge. First tolls collected. The moment
-  a rival's lorry pays you is the best moment in the game.
-- **Act III** — utility networks join the same system. Grid wheeling charges, water transfer
-  charges. Now the three networks share one economic language.
-- **Act IV** — your income mix shifts from operating to rent. **The arc is visible in your income
-  statement**: Act I is 100% haulage, Act IV might be 60% access charges. That is the
-  haulier-to-magnate story told in numbers, with no narration required.
-
-### 3.6 It is what makes rivals and multiplayer work
-
-A rival buying the bridge your whole northern operation depends on is a real attack — and a fair
-one, because you could have bought it.
-
-In shared worlds this is the thing that **entangles** players rather than merely racing them. I
-use your line; you use my port. Co-operation and competition stop being separate modes and become
-the same system: access agreements, reciprocal deals, deliberate mutual dependency, and the
-standing threat of a buyout. Pure contract-racing multiplayer would have been thin. This isn't.
-
-### 3.7 Regulation and the natural monopoly problem
-
-If you own everything, rivals die, nobody pays you tolls, and the region stagnates. The mechanic
-is self-limiting, which is good, but it also earns you an antagonist.
-
-From era 5 the authority gains teeth: **forced open access, charge caps, compulsory purchase for
-public benefit, and competition referrals**. A dominant player acquires a regulator. This is
-historically accurate, mechanically necessary, and gives Act IV an opponent that isn't just
-another company.
-
-Compulsory purchase cuts both ways — you can be on the receiving end, and you can lobby for it
-against someone else.
-
-### 3.8 Insolvency stops being a game-over screen
-
-A failed company's assets go to auction. Bankruptcy becomes an event in the world that other
-players and rivals respond to, rather than a modal dialog. Including yours.
-
-### 3.9 Technical consequence — flag for architecture
-
-Route cost now includes access charges, which means **every company sees a different cost graph**
-and routes are company-specific. Pathfinding results must be cached per company and invalidated
-on ownership change, charge change, or network edit. Noted in
-[`architecture.md`](architecture.md); it is the main reason the routing cache is keyed by company
-rather than shared.
-
-### 3.10 Open questions
-
-- Can you charge *differential* rates — cheaper for allies, punitive for one rival? Enormously
-  characterful, possibly too fiddly, and a griefing vector in multiplayer.
-- Are assets bought at a formula price, or at auction, or by negotiation with the owner?
-- Can infrastructure be leased rather than sold?
-- Does the authority ever build competing public infrastructure to discipline you? (I think yes,
-  and it should be terrifying.)
-
----
-
-## 4. Economy
-
-### 4.1 Cargo tiers
-
-All of this is data, defined in JSON against a schema. See
-[`content-and-balance.md`](content-and-balance.md).
-
-**Extraction** — coal, iron ore, bauxite, stone/aggregate, sand, timber, crude oil, water, fish,
-grain, livestock, lithium *(era 6+)*
-
-**Processing** — coke, steel, aluminium, cement, planks, paper, refined fuel, chemicals, food,
-textiles, glass, batteries *(era 7+)*
-
-**Terminal** — goods, electronics, luxury goods, retail stock
-
-**Passenger class** — passengers, mail, tourists
-
-**Networked, not hauled** — electricity, water, data *(era 6+)*
-
-**Negative** — waste and spoil. You must *remove* these, and from era 5 dumping carries an
-amenity and later a regulatory cost.
-
-### 4.2 Example chains
+The whole progression, in the order the player meets it:
 
 ```
-coal + iron ore          -> steel works      -> steel
-bauxite + electricity    -> smelter          -> aluminium
-timber                   -> sawmill          -> planks       -> goods
-crude oil                -> refinery         -> fuel + chemicals
-grain + livestock        -> food processing  -> food
-steel + chemicals        -> factory          -> goods
-steel + aluminium + electronics -> vehicle plant (era 5+)
-
-amenity + access + accommodation -> resort   -> visitors -> spend
+buy trucks  ->  buy yards  ->  hire other modes  ->  buy infrastructure  ->  build it
+   user ------------------------------------>  owner ------------->  producer
 ```
 
-Note that the smelter consumes **electricity**, a networked resource, not a hauled one. That is
-the join between the transport game and the utility game, and it should be introduced early in
-Act III because it's the moment the two systems visibly become one.
+Every rung is a **purchase**, and every rung changes what the binding
+constraint is. That is the design in one line: you are never solving the same
+problem twice, and you are never solving it by doing more of what worked last
+time.
 
-### 4.3 Decay
+| Rung | The constraint before | The constraint after |
+|---|---|---|
+| Trucks | you have no capacity | your yard is too far from the work |
+| Yards | your yard is too far from the work | your best routes are congested |
+| Modes | congestion on the road | the line costs you a fee per wagon |
+| Buy infrastructure | you pay to use everything | you own it, and it needs maintaining |
+| Build infrastructure | what exists is the wrong shape | you decide the shape |
 
-Industries carry a rolling service-satisfaction rate.
-
-1. Below threshold for N weeks, production falls.
-2. Below a second threshold, the industry closes.
-3. Closure is recoverable within a grace period — this matters, because permanent loss for a
-   temporary lapse is punishing rather than tense.
-
-Towns shrink if goods, food or passenger demand goes unserved.
-
-### 4.4 Contracts
-
-Generated with cargo, origin, destination, rate, volume, deadline and penalty. You bid; rivals
-bid; awarded on price weighted by **reliability history**, which is a persistent stat. Being
-cheap and late is a strategy that stops working.
+The old draft had four acts and eight eras and no answer to "what is the
+problem right now". This table is that answer.
 
 ---
 
-## 5. Eras
+## 2. Yards
 
-Eight eras. Dates are when tech becomes *available*, not when it becomes correct to use.
+**The yard is the unit of expansion**, and this is the structural idea the
+previous draft was missing entirely.
 
-| # | Years | Name | Opens |
-|---|---|---|---|
-| 1 | 1860–1890 | Horse and rail | Horse dray, canal barge, early steam locomotive |
-| 2 | 1890–1920 | Steam | Steam lorry, mainline steam, coastal steamer |
-| 3 | 1920–1950 | Combustion | Diesel lorry, diesel-electric loco, early aviation, tarmac |
-| 4 | 1950–1975 | Motorway | Articulated lorry, motorways, jet freight, grade separation |
-| 5 | 1975–2000 | Container | Containerisation, electrified rail, deep-water ports, waste regulation |
-| 6 | 2000–2030 | Logistics | E-commerce demand, last-mile, high-speed rail, telemetry, lithium |
-| 7 | 2030–2065 | Transition | Electric fleets, hydrogen, renewables, grid storage, remediation |
-| 8 | 2065–2100 | Autonomous | Autonomous convoys, maglev, drone freight, closed-loop recycling |
+- A yard is a site you own. Vehicles are based there, serviced there, and
+  return there.
+- A yard has a **catchment**. A route whose ends are far from any yard costs
+  more to run — empty running, driver hours, a fitter who has to drive out.
+- Buying a second yard does not make your existing routes better. It opens work
+  you could not previously reach at a price that worked.
+- Yards cost to buy and cost to keep.
+
+That makes expansion a *geographic* decision rather than a numeric one. "Buy a
+yard at Aldbridge" is legible in a way "increase capacity by 20%" never is, and
+it puts a map decision at the centre of the second act.
+
+A yard is also where the fleet becomes visible. Two trucks in a yard is a
+picture; two trucks in a spreadsheet is not.
 
 ---
 
-## 6. Scoring
+## 3. Routing
 
-No single score. You are measured on four axes and you cannot max all four:
+A **service** is a list of stops. Vehicles based at a yard run it.
 
-- **Tonnage** — raw volume moved
-- **Population served** — how much of the region has decent access
-- **Prosperity** — regional economic output
-- **Environment** — aggregate amenity, emissions, waste handled
+- Two stops is the normal case: collect here, deliver there.
+- Three is the useful case, and the district rewards it — grain to the mill and
+  feed back is not clever, it is what any operator does.
+- Payment is per load, by distance actually travelled and what the load is
+  worth.
 
-The endgame is a profile, not a number. A player who maxed tonnage and gutted the environment and
-a player who built a beautiful low-throughput region should both feel they played well, and
-should be able to argue about it.
+**Perishable loads.** Milk and dairy have hours, not days. One field on a cargo,
+not a system, and it does more work than any other number in the game: it makes
+the opening job matter, it makes congestion hurt immediately rather than
+eventually, and it gives a reason to prefer a shorter route that is not merely
+arithmetic.
+
+**Cut:** contracts, bidding, deadlines, penalties, reliability ratings,
+objectives. A route that pays is its own reward.
+
+---
+
+## 4. Traffic that is not yours
+
+The most important thing in this rewrite, and the thing that makes rung 4 work
+without AI companies.
+
+**The district has its own traffic.** Farmers' vans, other people's lorries,
+buses, private cars. It is modelled as a **flow on each way**, not as agents: a
+volume with an origin and destination distribution, which responds to what a
+way costs and how congested it is.
+
+This is cheap — no fleets, no decisions, no bankruptcies, no per-company
+pathfinding — and it delivers three things nothing else does:
+
+**It makes a toll worth collecting.** You cannot charge rent to nobody. The old
+draft's answer was four AI companies and roughly two thousand lines of rival
+logic, regulation and access agreements; and when it was finally measured, rent
+was **8.76% of income**. A flow pays the toll for a fraction of the cost.
+
+**It gives the toll a self-balancing curve.** Raise the charge and the flow
+diverts or stays home; lower it and it comes back. There is a revenue-maximising
+price and it moves as the district grows. That is the mechanic the old design
+wanted (its §3.3) and it works better against a demand curve than against
+agents, because a curve cannot go bankrupt or behave stupidly.
+
+**It makes congestion honest.** The lane through the village is busy because it
+is a village. Your sixth truck is the straw, not the whole load. That is truer,
+and it means the queue you have to solve is not one you can solve by simply
+running fewer vehicles.
+
+Your own vehicles cross your own ways free. That is the whole of "buying it
+turns a cost into an income".
+
+---
+
+## 5. Traffic and junctions
+
+Vehicles are individually simulated. They occupy cells on a way, queue at
+junctions, and a junction has finite capacity. Background flow occupies the same
+capacity.
+
+This is what makes building interesting rather than decorative. Without it a
+road is a line and more vehicles is always better. With it, the junction where
+three of your routes meet is where the network fails, and it fails visibly — a
+queue is the information, not a warning icon.
+
+The fix is always a decision with a price: a wider way, a different route, a
+bypass round the village, grade separation, or fewer vehicles running better.
+
+The junction editor is a first-class screen. You lay out approaches, priorities
+and separation, and watch traffic run through it.
+
+**Kept in full.** This is where the game is.
+
+---
+
+## 6. Building and owning
+
+### Owning
+
+Every way has an owner. At the start that is the council, and you pay per
+crossing. You can **pay**, **buy**, or **build**.
+
+Buying is rung 4 and it is the pivot of the game: the road you have been paying
+to use starts paying you, because most of the traffic on it was never yours.
+Valuation is a multiple of what it earns, so a way is expensive exactly when it
+is worth having.
+
+The same object escalates. The branch line is met three times: first you **pay**
+a fee per wagon to send freight down somebody else's line; then you **buy** the
+line and the fee stops and other people's freight starts paying you; then you
+**extend** it to somewhere it never went. One asset, three acts, no new systems.
+
+Maintenance is the counterweight. An owned way decays and costs to keep, and a
+derelict way earns nothing and is visibly derelict.
+
+### Building
+
+Laying way across terrain, and the terrain fighting back.
+
+- Gradient limits, and they bite. A loaded artic on a 1-in-8 lane is a problem.
+- Cuttings and embankments, priced by earth moved.
+- Bridges, culverts, and the occasional tunnel.
+- Junction geometry, because a T-junction onto an A-road is not free.
+
+The terrain is generated with a real erosion pass — stream-power incision and
+talus — so it has valleys that drain and ridges that are ridges. **The valleys
+are the natural routes, so the map argues about where a road should go before
+you have drawn one.**
+
+Four classes of way, no more: farm track, lane, road, dual carriageway.
+
+---
+
+## 7. Growth and amenity
+
+### Growth
+
+The payoff. The district responds to being served.
+
+**Settlements** have a basket of things they want, sized to population,
+part-supplied locally and the rest arriving by road. Serve one and it grows.
+Neglect one and it shrinks. A well-served village becomes a town.
+
+This already works in the simulation — a settlement fed everything it asked for
+grew from 2,712 to 88,248 over a century. What it has never done is happen
+*because of the player*, because four AI carriers were doing the serving badly.
+Now there is only you.
+
+**Industry** needs inputs delivered and output collected. Both and it runs,
+expands, and a second one opens. Starve it and it closes. Chains are two steps
+at most.
+
+**Feedback has to be fast.** Growth is visible within a game month, in the world
+rather than in a panel: the buildings change and the street gets longer.
+
+### Amenity
+
+An industrial estate next to a village is worth money and costs the village
+something. A quarry is worth more and costs more. A bypass takes the lorries out
+of the high street and puts them past somebody's garden.
+
+This is **in**, not deferred. In a game whose top rung is deciding where things
+go, siting industry without a downside is not a decision. Amenity is a field
+over the map — industry lowers it in a radius, traffic lowers it along a way —
+and a settlement's growth and its basket both respond.
+
+One system, already written, 217 lines. It is the counterweight that stops rung
+5 being a shopping list.
+
+---
+
+## 8. One era, and what it bought
+
+The game is 1985 to 1995. One decade, one visual language, one vehicle set.
+
+This is the largest cut in the project and most of the previous draft's
+difficulty was downstream of spanning 240 years.
+
+**It removed content multiplication.** Forty-four vehicles becomes nine. Three
+building languages become one.
+
+**It removed a whole class of bug.** Era-gated baskets, so a town wanted
+electronics in 1860 and its satisfaction capped at 70%. Rates flat across eight
+eras while vehicle costs rose tenfold, so every region had no vehicles by year
+80. Starting capital fixed at 1860 levels, so nobody founded after era three
+could buy anything. All era bugs, all now impossible.
+
+**It removed the art coherence risk**, which the old register rated Medium:
+*"eight eras of assets drift in style."*
+
+**It removed the obsolescence cliff.** Vehicles wear out and break down; they
+do not become worthless because a decade turned.
+
+Eras were carrying the sense of advancement. That job now belongs to the ladder,
+which is what the game was always actually about. The old draft spent its whole
+budget on the wrong axis.
+
+### On the calendar, honestly
+
+Cutting history makes the time problem smaller. It does not solve it.
+
+Any transport game has a contradiction: a vehicle must take tens of seconds to
+make a journey you can watch, and a calendar must advance fast enough for
+progression. Realistic road speeds make those incompatible by two orders of
+magnitude. The old draft's answer was a document apologising for it.
+
+The answer here is to **stop showing the player a unit they can do arithmetic
+with.**
+
+- The player-facing unit is the **week**. Accounts are monthly.
+- There is no day in the interface. A day exists in the simulation as a bucket
+  for daily rates and nowhere else.
+- Three collections a week is a real haulage pattern, so what the player *can*
+  see is not absurd.
+- Speeds are shown in mph as flavour, never beside a duration.
+
+| | |
+|---|---|
+| Tile | 32 m — unchanged, so existing art scale holds |
+| District | 256 × 256, about 8 km square |
+| Week | 4 real minutes at 1× |
+| Month | 4 weeks |
+| Year | 12 months, about 3¼ hours at 1× |
+| Campaign | 10 years — roughly 6 hours at 5× |
+| Speeds | 1×, 2×, 5×. No 20×. |
+
+Dropping 20× lets the sun run on the game clock at every speed rather than on a
+separate one. At 5× a game day is under a minute, which is a cycle you can
+watch rather than a strobe.
