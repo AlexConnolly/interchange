@@ -63,10 +63,7 @@ export function Markers({
 }): JSX.Element {
   const [marks, setMarks] = useState<Marked[]>([]);
 
-  useEffect(() => {
-    let raf = 0;
-    const tick = (): void => {
-      raf = requestAnimationFrame(tick);
+  useOverlayTick(() => {
 
       // Which places are offering work. Read once per frame rather than per
       // marker, because it is a scan of the board and there are five offers on
@@ -105,10 +102,7 @@ export function Markers({
         put(`y${y}`, -1, y, 'yard', world.yards.names[y], tile, true, false);
       }
       setMarks(out);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [world, renderer, hide]);
+  });
 
   return (
     <>
@@ -154,10 +148,7 @@ export function useAnchor(
   const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
   const last = useRef<{ x: number; y: number } | null>(null);
 
-  useEffect(() => {
-    let raf = 0;
-    const tick = (): void => {
-      raf = requestAnimationFrame(tick);
+  useOverlayTick(() => {
       if (tile < 0) {
         if (last.current !== null) { last.current = null; setAnchor(null); }
         return;
@@ -175,10 +166,7 @@ export function useAnchor(
       if (was !== null && Math.abs(was.x - at.x) < 0.5 && Math.abs(was.y - at.y) < 0.5) return;
       last.current = at;
       setAnchor(at);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [world, renderer, tile]);
+  });
 
   return anchor;
 }
@@ -212,10 +200,7 @@ export function Mine({
   const [marks, setMarks] = useState<
     { v: number; x: number; y: number; busy: boolean }[]>([]);
 
-  useEffect(() => {
-    let raf = 0;
-    const tick = (): void => {
-      raf = requestAnimationFrame(tick);
+  useOverlayTick(() => {
       const size = world.terrain.size;
       const out: { v: number; x: number; y: number; busy: boolean }[] = [];
       for (let v = 0; v < world.vehicles.count; v++) {
@@ -246,10 +231,7 @@ export function Mine({
         });
       }
       setMarks(out);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [world, renderer]);
+  });
 
   return (
     <>
@@ -264,6 +246,58 @@ export function Mine({
       ))}
     </>
   );
+}
+
+
+/**
+ * A loop for the things drawn *over* the map, at a rate that is not the frame
+ * rate.
+ *
+ * Four separate components — the place markers, the vehicle marks, the stopped
+ * badges and the money — each ran their own `requestAnimationFrame` and each
+ * called `setState` with a freshly allocated array inside it. So every frame
+ * React re-rendered the whole overlay tree four times over, and adding the
+ * fourth was enough to lock the renderer up entirely.
+ *
+ * Twenty times a second instead of sixty. These are DOM elements a few dozen
+ * pixels across following a camera that eases — at 20 Hz nothing about them
+ * looks different, and it is a third of the work. The WebGL scene still draws
+ * every frame; it is only the HTML on top that does not need to.
+ *
+ * The real fix is to move these positions to direct DOM writes and stop routing
+ * them through React state at all. That is a bigger change than this and this
+ * buys back the frame rate today.
+ */
+export function useOverlayTick(fn: () => void, hz = 20): void {
+  /*
+   * The callback goes through a ref, and it has to.
+   *
+   * The caller's closure is rebuilt every render, so making it a dependency
+   * would cancel and restart the loop on every render — the very churn being
+   * avoided. But capturing it once is worse than it looks: the driver panel
+   * follows a *moving* lorry, so it passes a closure over a tile that changes
+   * every frame, and a stale closure would leave its bubble sitting where the
+   * lorry was when you opened it.
+   *
+   * A ref updated on each render gives the loop the latest closure without the
+   * loop knowing anything changed.
+   */
+  const latest = useRef(fn);
+  latest.current = fn;
+
+  useEffect(() => {
+    let raf = 0;
+    let last = 0;
+    const gap = 1000 / hz;
+    const tick = (now: number): void => {
+      raf = requestAnimationFrame(tick);
+      if (now - last < gap) return;
+      last = now;
+      latest.current();
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [hz]);
 }
 
 /** Money, as a haulier would say it. */

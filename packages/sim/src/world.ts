@@ -471,6 +471,10 @@ export class World {
 
   /** Retrace the network and re-attach everything that points into it. */
   rebuild(): void {
+    // Anything cached off the road network or the fleet dies here. See
+    // `contractPerHour`: it is an A* the interface asks for dozens of times a
+    // second, and it is only valid until one of those two changes.
+    this.perHourCache.clear();
     // Anywhere a service can stop has to be a graph node on every mode that
     // reaches it, or a siding laid past a colliery is traced straight through
     // and the colliery is invisible to the railway.
@@ -3018,6 +3022,32 @@ export class World {
     const b = this.contractBoard;
     if (contract < 0 || contract >= b.count) return 0;
     if (vehicle < 0 || vehicle >= this.vehicles.count) return 0;
+    /*
+     * Cached, and it is not an optimisation — it is the difference between the
+     * game running and not.
+     *
+     * This walks a road route, which is an A* over about a thousand tiles. The
+     * panel asks it for every offer times every suitable lorry, and the panel
+     * re-renders whenever the camera moves. That is dozens of searches a second,
+     * and it locked the renderer solid the moment the figure went on the row.
+     *
+     * The answer only changes when the roads change or the fleet changes, both
+     * of which end in `rebuild`, so the cache is cleared there. Anything the
+     * interface asks repeatedly and that depends on the network belongs behind
+     * one of these.
+     */
+    const key = contract * 65536 + vehicle;
+    const had = this.perHourCache.get(key);
+    if (had !== undefined) return had;
+    const answer = this.computePerHour(contract, vehicle);
+    this.perHourCache.set(key, answer);
+    return answer;
+  }
+
+  private readonly perHourCache = new Map<number, number>();
+
+  private computePerHour(contract: number, vehicle: number): number {
+    const b = this.contractBoard;
     const def = this.content.vehicles[this.vehicles.type[vehicle]];
     if (!def) return 0;
     const from = b.from[contract];
