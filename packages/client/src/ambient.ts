@@ -1,0 +1,227 @@
+/**
+ * Traffic that is nobody's business.
+ *
+ * The district had exactly one moving object in it — the player's van — and read
+ * as a diorama. "Why is there zero road traffic at all? I feel like the world is
+ * unlived in" was exactly right, and it is not a simulation problem: rival
+ * hauliers were tried and cut, because with rivals the district changes for
+ * reasons that are not yours, which is fatal to a building game (design.md §7).
+ *
+ * So this is *scenery that moves*. Not in the simulation at all: no economy, no
+ * ownership, nothing to synchronise. A couple of dozen cars, vans and lorries go
+ * about their business, and the roads look used — which matters for a reason
+ * beyond atmosphere. A road with traffic on it reads as a road; an empty one
+ * reads as a grey stripe, and the hierarchy the road generator works so hard on
+ * is only legible when you can see that more things use the big one.
+ *
+ * **Every vehicle has somewhere to go.** The first version picked a random road
+ * neighbour at each junction, which produced traffic that "just kinda seems to
+ * be flying all over the place, hitting places, spinning right around" — and it
+ * did, because a random walk on a graph turns back on itself constantly. Now
+ * each one picks a *destination* — a business, a village — routes to it with the
+ * same road A* the contract preview uses, drives the route, and picks another
+ * when it arrives. The path is committed, so it never doubles back, and the
+ * difference in how the district reads is out of all proportion to the change.
+ *
+ * Movement along the path is continuous: the tile behind, the tile ahead, and a
+ * fraction between them, with the heading taken from the same vector as the
+ * position so the two can never disagree. That last part is what made the
+ * *simulated* vehicles jerk — they took position from an interpolation and
+ * facing from an eight-way octant table.
+ */
+
+/**
+ * How many are on the road at once.
+ *
+ * Twenty-two, down from forty-four. Forty-four was more traffic than a district
+ * of three villages could justify: the lanes were busier than the A-road and it
+ * read as a city ring road rather than as countryside. Twenty-two puts one or
+ * two in shot at any moment, which is what a quiet English valley looks like.
+ */
+export const AMBIENT_COUNT = 22;
+
+interface Wanderer {
+  /** The route it is driving, as tiles, and how far along it is. */
+  path: number[];
+  /** Index of the tile it has left; it is heading for `leg + 1`. */
+  leg: number;
+  /** 0..1 between `leg` and the next. */
+  t: number;
+  /** Tiles a second. Per vehicle, so a line of them is not a rigid comb. */
+  speed: number;
+  model: number;
+  livery: number;
+  /** Ticks to wait before setting off again, so arrivals pause like deliveries
+   *  rather than turning on a sixpence. */
+  dwell: number;
+}
+
+export interface AmbientRoads {
+  size: number;
+  /** True where a vehicle may drive. */
+  isRoad: (tile: number) => boolean;
+  /** False beyond the player's influence, where nothing is drawn. */
+  usable: (tile: number) => boolean;
+  /** A route along the roads between two tiles, or empty if there is none. */
+  route: (from: number, to: number) => number[];
+  /** Somewhere worth driving to. Recomputed as influence grows. */
+  places: () => number[];
+}
+
+export class Ambient {
+  private readonly cars: Wanderer[] = [];
+  private readonly roads: AmbientRoads;
+  private readonly models: number[];
+  /** A deterministic stream, so the same district gets the same traffic — one
+   *  fewer thing that changes when you look away and back. */
+  private seed = 0x9e3779b9;
+  /** Destinations, cached: `places()` walks every site and town, and doing that
+   *  per vehicle per frame would be the most expensive thing in the file. */
+  private places: number[] = [];
+  private placesAge = 0;
+
+  // Written out rather than declared in the parameter list: the project builds
+  // with `erasableSyntaxOnly`, so a constructor parameter property is a syntax
+  // error here. Worth four lines to keep the flag on.
+  constructor(roads: AmbientRoads, models: number[]) {
+    this.roads = roads;
+    this.models = models;
+  }
+
+  private rnd(): number {
+    this.seed = (this.seed * 1664525 + 1013904223) | 0;
+    return ((this.seed >>> 8) & 0xffff) / 0x10000;
+  }
+
+  private pick<T>(list: T[]): T | undefined {
+    if (list.length === 0) return undefined;
+    return list[Math.floor(this.rnd() * list.length) % list.length];
+  }
+
+  /**
+   * Send a vehicle somewhere.
+   *
+   * Between two *places* rather than between two road tiles, because a
+   * destination that means something is what makes the driving look purposeful.
+   * A route that comes back too short is rejected: a car appearing, driving four
+   * tiles and stopping is worse than no car.
+   */
+  private dispatch(w: Wanderer, fromTile: number): boolean {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const to = this.pick(this.places);
+      if (to === undefined || to === fromTile) continue;
+      const path = this.roads.route(fromTile, to);
+      if (path.length < 6) continue;
+      w.path = path;
+      w.leg = 0;
+      w.t = 0;
+      w.dwell = 0;
+      return true;
+    }
+    return false;
+  }
+
+  /** Start a vehicle from scratch, somewhere near the camera. */
+  private spawn(w: Wanderer): boolean {
+    const start = this.pick(this.places);
+    if (start === undefined) return false;
+    w.speed = 1.5 + this.rnd() * 1.4;
+    w.model = this.models[Math.floor(this.rnd() * this.models.length) % this.models.length];
+    w.livery = Math.floor(this.rnd() * 4) % 4;
+    if (!this.dispatch(w, start)) return false;
+    // Somewhere along its journey rather than all of them at the start line.
+    w.leg = Math.floor(this.rnd() * Math.max(1, w.path.length - 2));
+    return true;
+  }
+
+  /**
+   * Advance, and write into the render source's vehicle arrays after whatever
+   * the caller has already put there. Returns the new count.
+   *
+   * Writing into the same arrays as the player's fleet is deliberate: to the
+   * renderer a lorry is a lorry, and giving traffic its own instancing path
+   * would be a second implementation of the same thing.
+   */
+  step(
+    dt: number, nearX: number, nearZ: number, reach: number,
+    n0: number,
+    vx: Float32Array, vz: Float32Array, vHeading: Float32Array,
+    vLivery: Uint8Array, vModel: Uint8Array, vId: Int32Array,
+  ): number {
+    const { size } = this.roads;
+    // Once a second is plenty: the list only changes when influence grows.
+    this.placesAge -= dt;
+    if (this.placesAge <= 0 || this.places.length === 0) {
+      this.places = this.roads.places();
+      this.placesAge = 1;
+    }
+    if (this.places.length < 2) return n0;
+
+    let n = n0;
+    while (this.cars.length < AMBIENT_COUNT) {
+      this.cars.push({ path: [], leg: 0, t: 0, speed: 2, model: 0, livery: 0, dwell: 0 });
+    }
+
+    for (let i = 0; i < this.cars.length; i++) {
+      const w = this.cars[i];
+      if (w.path.length < 2 && !this.spawn(w)) continue;
+
+      if (w.dwell > 0) {
+        w.dwell -= dt;
+      } else {
+        w.t += dt * w.speed;
+        while (w.t >= 1) {
+          w.t -= 1;
+          w.leg++;
+          if (w.leg >= w.path.length - 1) {
+            // Arrived. Stand for a moment, then go somewhere else — starting
+            // from where it actually is, so journeys chain into a working day
+            // rather than teleporting between unrelated trips.
+            const here = w.path[w.path.length - 1];
+            if (!this.dispatch(w, here)) { w.path = []; break; }
+            w.dwell = 0.8 + this.rnd() * 3.5;
+            break;
+          }
+        }
+      }
+      if (w.path.length < 2) continue;
+
+      const leg = Math.min(w.leg, w.path.length - 2);
+      const a = w.path[leg];
+      const b = w.path[leg + 1];
+      if (!this.roads.usable(a)) { w.path = []; continue; }
+
+      const fx = a % size;
+      const fz = (a / size) | 0;
+      const dx = (b % size) - fx;
+      const dz = ((b / size) | 0) - fz;
+
+      // Out of sight: park it and let it be reused nearer the camera.
+      if (Math.abs(fx + 0.5 - nearX) > reach * 1.5
+        || Math.abs(fz + 0.5 - nearZ) > reach * 1.5) { w.path = []; continue; }
+
+      if (n >= vx.length) break;
+      /*
+       * Keep to the left. It is 1985 in England.
+       *
+       * A sixth of a tile off the centreline, perpendicular to travel — which
+       * also means two vehicles passing do so on the correct sides, for free,
+       * with no traffic model at all. Without it they drive through one another
+       * down the middle of the road.
+       */
+      const frac = w.dwell > 0 ? 1 : w.t;
+      vx[n] = fx + 0.5 + dx * frac + -dz * 0.16;
+      vz[n] = fz + 0.5 + dz * frac + dx * 0.16;
+      // Heading in turns, matching the simulation: 0 is north (-Z), increasing
+      // clockwise. From the same vector as the position, so they cannot disagree.
+      vHeading[n] = (Math.atan2(dx, -dz) / (Math.PI * 2) + 1) % 1;
+      vLivery[n] = w.livery;
+      vModel[n] = w.model;
+      // Negative ids, so the renderer's smoothing keys these apart from the
+      // player's vehicles and no id can ever collide.
+      vId[n] = -1 - i;
+      n++;
+    }
+    return n;
+  }
+}

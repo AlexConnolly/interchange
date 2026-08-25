@@ -208,7 +208,43 @@ def artic(kind):
     return parts
 
 
+def car(estate=False):
+    """A car. Not yours, and that is the whole point of it.
+
+    The district had exactly one moving object in it - the player's van - and
+    read as a diorama rather than a place. Ambient traffic is the cheapest thing
+    that fixes that: a car every few tiles going about business that is nobody's
+    concern makes the roads look used, which is what makes owning one mean
+    something.
+
+    Smaller than the van and much simpler. At the size a car appears it is a
+    coloured wedge with lights, so that is what it is: a body, a cabin step, four
+    wheels and the lamps. The step is the only part that matters - without it a
+    car and a crate are the same silhouette.
+    """
+    L = TILE * 0.30
+    hw = 0.062
+    f = Form(size=(L, hw * 2, 0.062), at=(0, 0, 0.052))
+    roof = f.faces(normal='up')
+    # Pull the cabin in and up: a bonnet, a windscreen line, a boot.
+    f.scale_faces(roof, (0.54 if not estate else 0.72, 0.86, 1.0))
+    f.move(roof, (-L * 0.06, 0, 0.036))
+    f.bevel(amount=0.005)
+    obj = f.build('car_body')
+    lib.repaint(obj, [
+        (lib.livery_material(), lambda c: True),
+        (lib.material('carglass', GLASS, rough=0.18),
+         lambda c: c.z > 0.088),
+    ])
+    parts = [obj]
+    parts += wheels('car', (0.30, -0.30), hw, 0.021, L)
+    parts += lamps('car', L * 0.48, -L * 0.48, hw, 0.062)
+    return parts
+
+
 BUILDS = [
+    ('veh_car_saloon', lambda: car(False)),
+    ('veh_car_estate', lambda: car(True)),
     ('veh_van_transit', lambda: van(False)),
     ('veh_van_reefer', lambda: van(True)),
     ('veh_rigid_box', lambda: rigid('box')),

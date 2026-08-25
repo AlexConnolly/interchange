@@ -37,7 +37,7 @@ import { useEffect, useState, type JSX } from 'react';
 import { type World, ContractState } from '@interchange/sim';
 import { content } from '@interchange/data';
 import type { Renderer } from '@interchange/render';
-import { money, bodyFor } from './Markers.tsx';
+import { money, bodyFor, useAnchor } from './Markers.tsx';
 import { BodyIcon, Icon } from './Icons.tsx';
 
 const C = content();
@@ -70,31 +70,14 @@ export function Place({
 }): JSX.Element | null {
   const [tab, setTab] = useState<Tab>('about');
   const [assigning, setAssigning] = useState(-1);
-  const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
-
   /*
    * Follow the place.
    *
-   * Every frame, because the camera glides when a place is opened and the bubble
-   * has to stay on it the whole way — a bubble that snaps into position after
-   * the camera stops is worse than one that never moved. Costs one `project` a
-   * frame.
+   * The camera glides when a place is opened, and the bubble has to stay on it
+   * the whole way — one that snaps into position after the camera stops is worse
+   * than one that never moved.
    */
-  useEffect(() => {
-    let raf = 0;
-    const tick = (): void => {
-      raf = requestAnimationFrame(tick);
-      const tile = world.siteAccessTile[site];
-      if (tile < 0) { setAnchor(null); return; }
-      const size = world.terrain.size;
-      setAnchor(renderer.project(
-        (tile % size) + 0.5, world.terrain.height[tile],
-        Math.floor(tile / size) + 0.5,
-      ));
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [world, renderer, site]);
+  const anchor = useAnchor(world, renderer, world.siteAccessTile[site] ?? -1);
 
   // A new place resets to its first tab: the question "what is this" comes
   // before "what is it offering", always.

@@ -74,6 +74,9 @@ export interface TickReport {
   hash: number | null;
 }
 
+/** Shared empty, so the common case allocates nothing. */
+const EMPTY_EARNINGS: { x: number; z: number; pence: number }[] = [];
+
 export class World {
   readonly config: WorldConfig;
   readonly content: Content;
@@ -177,6 +180,14 @@ export class World {
   siteAccessTile: Int32Array;
   /** What each vehicle has fitted. A `Fitting` bitmask. */
   vehicleFittings: Int32Array;
+  /**
+   * Money the player has just been paid, and where the lorry was standing.
+   *
+   * Drained by the client each frame — see `takeEarnings`. It exists because
+   * earning was invisible: the figure in the corner changed, which is a fact
+   * rather than an event, and nothing in the game ever said *there you are*.
+   */
+  private readonly earned: { x: number; z: number; pence: number }[] = [];
   townAccessTile: Int32Array;
   /** Reverse lookups for delivery: node id to site or town. */
   private nodeSiteOf = new Map<number, number>();
@@ -1173,6 +1184,21 @@ export class World {
       haulageRate(this.cargoPrice[cargo], dist, this.cargoRateWeight[cargo]) * tonnes,
     );
     this.companies.post(company, Line.Haulage, pence);
+    /*
+     * And say so, if it was the player's.
+     *
+     * A queue rather than a callback, drained by whoever is drawing: the
+     * simulation must not know an interface exists, and a callback would make
+     * the client's frame rate a term in the economy. Bounded and dropped on
+     * overflow, because these are for showing and a missed one is invisible.
+     */
+    if (company === this.player && this.earned.length < 32) {
+      this.earned.push({
+        x: this.vehicles.x[vehicle] / 65536,
+        z: this.vehicles.y[vehicle] / 65536,
+        pence,
+      });
+    }
     this.movedByCargo[company * this.content.cargo.length + cargo] += tonnes;
     this.vehicles.revenue[vehicle] += pence;
     this.stats.tonnesMoved += tonnes;
@@ -1548,6 +1574,17 @@ export class World {
   }
 
   private cheapestCache = 0;
+
+  /**
+   * Take everything earned since the last call, and forget it.
+   *
+   * Drained rather than read so nothing accumulates when nobody is looking: a
+   * headless run has no interface and must not grow a list for ever.
+   */
+  takeEarnings(): { x: number; z: number; pence: number }[] {
+    if (this.earned.length === 0) return EMPTY_EARNINGS;
+    return this.earned.splice(0, this.earned.length);
+  }
 
   /**
    * How deep the snow is, 0..1. The renderer paints it and the traffic obeys
@@ -2544,14 +2581,44 @@ export class World {
    * a reason, rather than a silent refusal. A purchase that fails without saying
    * why is the difference between a constraint and a bug.
    */
-  buyVehicleAtYard(typeIndex: number): { vehicle: number; reason: string } {
+  buyVehicleAtYard(
+    typeIndex: number, into = NONE,
+  ): { vehicle: number; reason: string } {
     const def = this.content.vehicles[typeIndex];
     if (!def) return { vehicle: NONE, reason: 'No such vehicle.' };
     if (this.companies.cash[this.player] < def.cost) {
       return { vehicle: NONE, reason: 'Not enough in the bank.' };
     }
-    const { yard, reason } = this.yardFor(typeIndex);
-    if (yard === NONE) return { vehicle: NONE, reason };
+    /*
+     * Into a named yard when the caller says which, and that is the normal case
+     * now.
+     *
+     * Buying used to be a catalogue screen that found *a* yard which could take
+     * the vehicle, which quietly made "where does it live" the game's decision
+     * rather than the player's. Buying happens at a yard's empty bay instead:
+     * you are filling a specific space in a specific place, which is what makes
+     * a yard's capacity and its facilities mean something. The search is kept for
+     * the opening, which has one yard and no interface yet.
+     */
+    let yard = into;
+    if (yard === NONE) {
+      const found = this.yardFor(typeIndex);
+      if (found.yard === NONE) return { vehicle: NONE, reason: found.reason };
+      yard = found.yard;
+    } else {
+      if (yard < 0 || yard >= this.yards.count) {
+        return { vehicle: NONE, reason: 'No such yard.' };
+      }
+      if (this.yards.owner[yard] !== this.player) {
+        return { vehicle: NONE, reason: 'Not your yard.' };
+      }
+      const verdict = canBase(this.yards, yard, {
+        handling: def.handling as readonly string[], cls: def.class,
+      }, this.basedAt(yard));
+      if (!verdict.ok) {
+        return { vehicle: NONE, reason: refusalText(this.yards, yard, verdict) };
+      }
+    }
 
     // Park it at the nearest site to the yard, because a vehicle has to start
     // somewhere on the network and the yard is not a graph node yet.

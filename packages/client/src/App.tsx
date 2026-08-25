@@ -14,14 +14,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  createWorld, Mode, NO_WAY, TICKS_PER_DAY, SPEED_STEPS, facilitiesFor, type World,
+  createWorld, Mode, NO_WAY, TICKS_PER_DAY, facilitiesFor, type World,
 } from '@interchange/sim';
 import { loadContent } from '@interchange/data';
 import {
   Renderer, RoadClass, TILES_ACROSS_DEFAULT, RUN, loadKit, type RenderSource,
 } from '@interchange/render';
-import { Alerts, Markers, money } from './Markers.tsx';
-import { Vehicles, Yard } from './Fleet.tsx';
+import { Alerts, Earnings, Markers, money } from './Markers.tsx';
+import { Ambient } from './ambient.ts';
+import { Fleet, Yard } from './Fleet.tsx';
 import { Place, type PlaceActions } from './Place.tsx';
 import './style.css';
 
@@ -39,6 +40,15 @@ const DISTRICT = 128;
 const TREE_MODELS = [
   'tree_oak', 'tree_ash', 'tree_hawthorn', 'tree_pine', 'tree_autumn', 'tree_bare',
 ];
+
+/**
+ * Ticks of simulation per real second.
+ *
+ * 13 gives a game day of 800 / 13 = 62 seconds. Slow enough that a lorry
+ * crossing the frame is a journey rather than a blur, fast enough that a
+ * fortnight of trading is a couple of minutes.
+ */
+const TICKS_PER_SECOND = 13;
 
 /** The keys that move the camera. WASD and the arrows, both. */
 const PAN_KEYS = new Set([
@@ -72,6 +82,16 @@ export function App(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [ready, setReady] = useState(false);
   const [hud, setHud] = useState({ date: '', vehicles: 0, fps: 0, tris: 0, cash: 0, free: 0 });
+  /*
+   * Whether the last HUD refresh brought more money than the one before.
+   *
+   * Keyed on the value so React remounts the element and the CSS animation
+   * actually replays — re-adding a class to a live node does not restart an
+   * animation, which is the classic way this effect silently does nothing.
+   */
+  const lastCash = useRef(0);
+  const paid = hud.cash > lastCash.current;
+  lastCash.current = hud.cash;
   const [live, setLive] = useState<
     { world: World; renderer: Renderer; src: RenderSource } | null>(null);
   /*
@@ -88,9 +108,10 @@ export function App(): JSX.Element {
   const [revision, setRevision] = useState(0);
   const bump = useCallback(() => setRevision((r) => r + 1), []);
 
-  const buy = useCallback((typeIndex: number): void => {
+  const buy = useCallback((yard: number, typeIndex: number): void => {
     if (!live) return;
-    const r = live.world.buyVehicleAtYard(typeIndex);
+    // Into that yard's empty bay, not into whichever yard happens to fit it.
+    const r = live.world.buyVehicleAtYard(typeIndex, yard);
     if (r.vehicle >= 0) bump();
   }, [live, bump]);
 
@@ -178,6 +199,20 @@ export function App(): JSX.Element {
     const world = createWorld({
       seed: 1985, size: DISTRICT, townCount: 3, companyCount: 1,
     });
+    /*
+     * Start in spring, not on the first of January.
+     *
+     * The calendar begins at day zero, which is 1 January, which is the deepest
+     * point of the snow — so the game opened with the district under a foot of
+     * it and the one van you own immobilised for want of tyres you could only
+     * just afford. A seasonal mechanic has to arrive as something you were
+     * warned about, not as the first thing that happens.
+     *
+     * Sixty days in is April. The first winter then lands about eight months
+     * later, by which time there has been a summer to earn in and a November of
+     * "No winter tyres" warnings to read.
+     */
+    world.tick = 60 * TICKS_PER_DAY;
     const wayNames = world.content.ways.map((w) => w.id);
     const layer = world.layers[Mode.Road];
 
@@ -213,6 +248,7 @@ export function App(): JSX.Element {
       vHeading: new Float32Array(512),
       vLivery: new Uint8Array(512),
       vModel: new Uint8Array(512),
+      vId: new Int32Array(512),
       placeCount: 0,
       px: new Float32Array(320),
       pz: new Float32Array(320),
@@ -473,7 +509,7 @@ export function App(): JSX.Element {
           handling: v.handling as readonly string[], cls: v.class,
         }));
       }
-      if (vanIndex >= 0) world.buyVehicleAtYard(vanIndex);
+      if (vanIndex >= 0) world.buyVehicleAtYard(vanIndex, yard);
       // And work to do, straight away.
       world.offerWorkNow();
     }
@@ -502,7 +538,57 @@ export function App(): JSX.Element {
      * no lorries in it for two hundred milliseconds is fine; a black screen
      * until the last glb arrives is not.
      */
-    const modelNames = world.content.vehicles.map((v) => `veh_${v.id.replace(/-/g, '_')}`);
+    /*
+     * The nine content vehicles, then the two cars.
+     *
+     * The cars are not in the content because they are not for sale — they are
+     * traffic. They go on the end of the same model list so the renderer needs
+     * no second instancing path: to a draw call a car is a small lorry.
+     */
+    const modelNames = [
+      ...world.content.vehicles.map((v) => `veh_${v.id.replace(/-/g, '_')}`),
+      'veh_car_saloon', 'veh_car_estate',
+    ];
+    /*
+     * What the traffic is made of, and it is not all cars.
+     *
+     * A road that exists to carry freight with nothing but private cars on it
+     * looks wrong in a way that is hard to name — so the mix is two cars, a
+     * transit, a rigid box lorry and an artic, weighted by repetition. Five
+     * silhouettes is enough that a stretch of road does not read as a repeated
+     * stamp.
+     */
+    const byId = (id: string): number =>
+      Math.max(0, world.content.vehicles.findIndex((v) => v.id === id));
+    const ambientModels = [
+      modelNames.length - 2, modelNames.length - 2, modelNames.length - 2,
+      modelNames.length - 1, modelNames.length - 1,
+      byId('van-transit'), byId('van-transit'),
+      byId('rigid-box'),
+      byId('artic-box'),
+    ];
+    const ambient = new Ambient({
+      size: DISTRICT,
+      isRoad: (t) => roadClass[t] >= 0,
+      usable: (t) => world.influence.usable(t),
+      // The same road A* the route preview uses. Traffic that routes rather than
+      // wanders is the whole difference between going somewhere and milling
+      // about — see ambient.ts.
+      route: (from, to) => world.roadRoute(from, to),
+      // Somewhere worth driving to: the businesses, and the settlements.
+      places: () => {
+        const out: number[] = [];
+        for (let i = 0; i < world.sites.count; i++) {
+          const t = world.siteAccessTile[i];
+          if (t >= 0 && world.influence.usable(t)) out.push(t);
+        }
+        for (let t = 0; t < world.towns.count; t++) {
+          const tile = world.towns.y[t] * DISTRICT + world.towns.x[t];
+          if (world.influence.usable(tile)) out.push(tile);
+        }
+        return out;
+      },
+    }, ambientModels);
     void loadKit(modelNames).then((kit) => {
       if (kit.missing.length > 0) {
         console.warn(`[fleet] no model for: ${kit.missing.join(', ')}`);
@@ -662,7 +748,22 @@ export function App(): JSX.Element {
       frames.push(dt);
       if (frames.length > 30) frames.shift();
 
-      acc += dt * 20 * SPEED_STEPS[2];
+      /*
+       * How fast the world runs, and it was six times too fast.
+       *
+       * A game day was about ten seconds, which put a lorry across the screen in
+       * eight — frantic, and not in a way that reads as busy. It reads as a
+       * simulation being fast-forwarded, which is exactly what it was.
+       *
+       * `TICKS_PER_SECOND` gives a day of a little over a minute and a
+       * twenty-six-tile haul of about a minute, which is the figure design.md
+       * §9 asks for. Everything else follows from it because everything else is
+       * expressed in ticks: production, upkeep, the contract board, the sun.
+       * There is deliberately one number here rather than a speed for the
+       * calendar and another for the vehicles — two would drift, and the day
+       * *is* how long things take.
+       */
+      acc += dt * TICKS_PER_SECOND;
       let ran = 0;
       while (acc >= 1 && ran < 40) {
         world.step();
@@ -680,8 +781,15 @@ export function App(): JSX.Element {
         src.vHeading[n] = world.vehicles.heading[i] / 4096;
         src.vLivery[n] = world.vehicles.company[i] & 3;
         src.vModel[n] = world.vehicles.type[i];
+        src.vId[n] = i;
         n++;
       }
+      // And the traffic, appended after the fleet. Scenery that moves, and the
+      // difference between a road and a grey stripe.
+      n = ambient.step(
+        dt, renderer.camX, renderer.camZ, renderer.tilesAcross * 0.8, n,
+        src.vx, src.vz, src.vHeading, src.vLivery, src.vModel, src.vId,
+      );
       src.vehicleCount = n;
 
       /*
@@ -821,6 +929,7 @@ export function App(): JSX.Element {
         />
       )}
       {live && <Alerts world={live.world} renderer={live.renderer} />}
+      {live && <Earnings world={live.world} renderer={live.renderer} />}
       {live && panel.k === 'place' && (
         <Place
           world={live.world}
@@ -830,24 +939,32 @@ export function App(): JSX.Element {
         />
       )}
       {live && panel.k === 'vehicles' && (
-        <Vehicles
+        <Fleet
           world={live.world}
-          onBuy={buy}
+          onFit={fit}
+          onGoToYard={(yard) => {
+            lookAt(live.world.yards.x[yard] + 0.5, live.world.yards.y[yard] + 0.5);
+            setPanel({ k: 'yard', yard });
+          }}
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
       {live && panel.k === 'yard' && (
         <Yard
           world={live.world}
+          renderer={live.renderer}
           yard={panel.yard}
           onAdd={addFacility}
           onFit={fit}
+          onBuy={buy}
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
       <div className="hud">
         <span className="brand">Interchange</span>
-        <span className="money">{money(hud.cash)}</span>
+        <span className={`money ${paid ? 'paid' : ''}`} key={hud.cash}>
+          {money(hud.cash)}
+        </span>
         <span>{hud.date}</span>
         <span className="dim">{hud.vehicles} out · {hud.free} idle</span>
         <button

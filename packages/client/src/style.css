@@ -592,3 +592,123 @@ html, body, #root, .app {
    `both` holds the end state, and a later rule with the same specificity wins.
    Naming the transform again here is deliberate. */
 .mark:hover { transform: translate(-50%, -100%) scale(1.12); animation: none; }
+
+/* Vehicle rows, with the pipeline's render on them.
+ *
+ * The thumbnail is doing the work a name cannot: "Refrigerated van - 2 t" is
+ * three facts and no picture, and choosing between nine vehicles by reading
+ * nine names is not choosing, it is auditing. */
+.veh-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--ink);
+  font: inherit;
+  cursor: default;
+}
+button.veh-row { cursor: pointer; }
+button.veh-row:hover:not(:disabled) { background: #fff; border-color: rgba(0, 0, 0, 0.14); }
+button.veh-row:disabled { opacity: 0.5; cursor: default; }
+.veh-thumb {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  object-fit: contain;
+  /* The renders carry their own light; a drop shadow lifts them off the card
+     without a border, which at this size would read as a box round a lorry. */
+  filter: drop-shadow(0 1px 2px rgba(30, 40, 30, 0.22));
+}
+.veh-warn { display: block; font-size: 11px; color: #c04040; font-weight: 600; }
+.veh-row .price { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 12px; }
+
+/* An empty bay. Dashed, because the point is that there is a space here. */
+.veh-row.empty {
+  border-style: dashed;
+  border-color: rgba(0, 0, 0, 0.18);
+  background: rgba(0, 0, 0, 0.02);
+}
+.bay-slot {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.05);
+  color: #9a9385;
+  font-size: 22px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+/* A panel that is not about a place sits where a screen sits, in the bubble's
+   clothes and without its arrow. */
+.bubble.fixed {
+  right: 18px;
+  left: auto;
+  top: 76px;
+  transform: none;
+  animation: none;
+}
+.bubble.fixed .bubble-arrow { display: none; }
+
+/* Taller, and a scrollbar you can look at.
+ *
+ * 132px was two rows and a half, so anything with three offers on it scrolled
+ * immediately - and the browser's default bar is sixteen pixels of grey
+ * furniture down the side of a panel three hundred wide. */
+.bubble-body {
+  min-height: 236px;
+  max-height: min(236px, 46vh);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.22) transparent;
+}
+.bubble-body::-webkit-scrollbar { width: 7px; }
+.bubble-body::-webkit-scrollbar-track { background: transparent; }
+.bubble-body::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 999px;
+}
+.bubble-body::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.30); }
+
+/* Money arriving. Small, soft, and silent.
+ *
+ * Gold on a dark outline so it reads over a snowy field and over a night lane
+ * without a background plate - a plate would make it a label, and this is meant
+ * to be a thing that happens rather than a thing that is written down. */
+.earn {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #ffdf6e;
+  text-shadow:
+    0 1px 0 rgba(20, 24, 16, 0.85),
+    0 0 6px rgba(20, 24, 16, 0.7);
+  animation: earn-fade 1500ms linear both;
+}
+@keyframes earn-fade {
+  0%   { opacity: 0; }
+  12%  { opacity: 1; }
+  70%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* And the figure in the corner acknowledges it.
+ *
+ * A one-off pulse on the cash readout, keyed off the value changing, so the eye
+ * has somewhere to go after the floating number: you see it leave the lorry and
+ * you see it land in the total. */
+.money.paid { animation: money-pulse 520ms ease-out; }
+@keyframes money-pulse {
+  0%   { color: #ffdf6e; transform: scale(1.14); }
+  100% { color: inherit; transform: scale(1); }
+}

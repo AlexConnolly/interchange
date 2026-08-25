@@ -65,6 +65,15 @@ export interface RenderSource extends GroundSource, RoadSource {
   vLivery: Uint8Array;
   vModel: Uint8Array;
   /**
+   * A stable identity per vehicle, so motion can be smoothed.
+   *
+   * The arrays are packed each frame and an index is therefore not an identity —
+   * one vehicle finishing a job shifts every later one down a slot. Smoothing
+   * keyed on the slot would then interpolate one lorry's position toward
+   * another's, which is a teleport. Negative ids are ambient traffic.
+   */
+  vId: Int32Array;
+  /**
    * Buildings. One per business, plus the village housing.
    *
    * Fed as a flat list rather than read off the world, because *which* of them
@@ -805,7 +814,10 @@ export class Renderer {
 
   private readonly tmp = new Object3D();
 
-  private updateFleet(src: RenderSource): void {
+  /** Drawn position and facing per vehicle id, for easing. */
+  private readonly smooth = new Map<number, { x: number; z: number; a: number }>();
+
+  private updateFleet(src: RenderSource, dt: number): void {
     if (this.batches.length === 0) return;
     const models = this.batches.length;
     const liveries = LIVERY.length;
@@ -830,14 +842,71 @@ export class Renderer {
         (Math.round(z) * src.size + Math.round(x)) | 0);
       const lv = src.level[tile];
       const y = (lv !== 0 ? HEIGHT_TO_WORLD(lv) : HEIGHT_TO_WORLD(src.height[tile])) + 0.04;
-      this.tmp.position.set(x, y, z);
-      this.tmp.rotation.set(0, -src.vHeading[i] * Math.PI * 2 + Math.PI, 0);
+      /*
+       * Where it is drawn, eased toward where the simulation says it is.
+       *
+       * The simulation reprojects positions only after a batch of ticks, and the
+       * client steps a variable number of them per frame, so the raw position
+       * arrives in jumps of uneven size — reported, fairly, as "their horrible
+       * movement is so not consistent at all". Easing the drawn position toward
+       * the true one absorbs that completely and costs one lerp.
+       *
+       * The heading needs it more. The simulation stores a bearing as one of
+       * eight octants, because ways are laid on a grid and an integer table
+       * beats an atan2 in the hot loop — so a lorry going round a corner snaps
+       * forty-five degrees in one frame. Interpolating the *angle* the short way
+       * round turns that into a turn.
+       */
+      const id = src.vId[i];
+      const want = Math.PI / 2 - src.vHeading[i] * Math.PI * 2;
+      let seen = this.smooth.get(id);
+      if (seen === undefined || Math.abs(seen.x - x) + Math.abs(seen.z - z) > 3) {
+        // New, or teleported: snap. Easing across a jump of three tiles would
+        // draw a lorry sliding across a field.
+        seen = { x, z, a: want };
+        this.smooth.set(id, seen);
+      } else {
+        const k = Math.min(1, dt * 14);
+        seen.x += (x - seen.x) * k;
+        seen.z += (z - seen.z) * k;
+        // Shortest way round, or a lorry turning from west to north spins 270
+        // degrees the wrong way.
+        let d = want - seen.a;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        seen.a += d * Math.min(1, dt * 9);
+      }
+      this.smooth.set(id, seen);
+      this.tmp.position.set(seen.x, y, seen.z);
+      /*
+       * And the facing itself was ninety degrees out.
+       *
+       * The models are authored nose along +X. A Y-rotation of theta sends +X to
+       * (cos theta, 0, -sin theta). The simulation's bearing has 0 as north, so
+       * a heading of `t` turns points along (sin 2*pi*t, -cos 2*pi*t). Solving
+       * the two gives theta = pi/2 - 2*pi*t. The old expression was
+       * pi - 2*pi*t: exactly a quarter turn out, so every vehicle in the game
+       * was drawn broadside to its direction of travel.
+       */
+      this.tmp.rotation.set(0, seen.a, 0);
       this.tmp.updateMatrix();
       // The same matrix into both batches: a lamp is not a separate object, it
       // is the same lorry drawn by a material that ignores the light.
       const n = this.counts[slot]++;
       batch.setMatrixAt(n, this.tmp.matrix);
       this.lamps[mi][li]?.setMatrixAt(n, this.tmp.matrix);
+    }
+
+    // Anything not seen this frame is gone: retired, sold, or wandered out of
+    // the influence area. Without this the map grows for the life of the
+    // session, and a returning ambient car would ease in from wherever it was
+    // last seen.
+    if (this.smooth.size > src.vehicleCount * 3 + 64) {
+      const live = new Set<number>();
+      for (let i = 0; i < src.vehicleCount; i++) live.add(src.vId[i]);
+      for (const key of [...this.smooth.keys()]) {
+        if (!live.has(key)) this.smooth.delete(key);
+      }
     }
 
     for (let mi = 0; mi < models; mi++) {
@@ -870,7 +939,7 @@ export class Renderer {
     this.streamChunks(src);
     this.updatePlaces(src);
     this.updateScatter(src);
-    this.updateFleet(src);
+    this.updateFleet(src, dt);
     this.placeSun(src.dayFraction);
     this.setSeason(src.snow);
     this.placeCamera();
