@@ -712,3 +712,65 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   0%   { color: #ffdf6e; transform: scale(1.14); }
   100% { color: inherit; transform: scale(1); }
 }
+
+/* The approval bar.
+ *
+ * A marker on it for the next thing you could ask the board for, so the bar is
+ * a target rather than a readout - the number on its own says where you are and
+ * nothing about where you are going. */
+.approval { display: flex; align-items: center; gap: 9px; padding: 4px 2px 2px; }
+.approval-bar {
+  position: relative;
+  flex: 1;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.09);
+  overflow: visible;
+}
+.approval-bar span {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #7fa04a, #d8a83c);
+  transition: width 400ms ease-out;
+}
+.approval-bar i {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 15px;
+  background: #9a8f78;
+  border-radius: 1px;
+}
+.approval-num {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 15px;
+  min-width: 26px;
+  text-align: right;
+}
+.levies { display: flex; gap: 5px; padding: 0 2px 2px; }
+.levies .btn { flex: 1; }
+
+/* Build mode. A line at the bottom of the screen and nothing else on it,
+   because what you need while choosing where to put a building is the
+   district. */
+.build-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(28, 32, 24, 0.82);
+  color: #f2ecdc;
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+}
+.build-hint b { color: #ffb0a0; font-weight: 700; }
+.hud-btn.armed { background: #f4c95d; color: #4a3c14; }

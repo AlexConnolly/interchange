@@ -379,6 +379,37 @@ def village_shop():
     return p
 
 
+def distribution_centre():
+    """A big shed and a lot of hardstanding. design.md 4.
+
+    The only building in the set whose *scale* is the point. A depot exists to
+    break bulk - an artic brings twenty-four tonnes in and three vans take it
+    out - so it has to look like somewhere an artic turns round in, which means
+    a footprint half again on anything else and a shed long enough to read as a
+    shed rather than as a barn.
+
+    Loading doors along the flank, which is the one detail that says what it is
+    for. A farm building has one door at the end; a distribution centre has
+    twelve down the side, and at forty pixels that row of dark marks is the
+    whole silhouette.
+    """
+    p = pad('dcp', 1.55, 1.25)
+    p += moved(barn('dcs', w=1.15, d=0.58, wall=0.36, body=STEEL, roof=STEEL,
+                    open_end=False), -0.02, 0.26)
+    # The doors. Twelve marks along the near flank.
+    for i in range(12):
+        x = -0.54 + i * 0.098
+        p += [_paint(lib.box('dcd%d' % i, (0.055, 0.02, 0.19),
+                             loc=(x, 0.26 - 0.30, 0.10)), DARK, 'dcd_mat')]
+    p += moved(house('dco', w=0.28, d=0.24, wall=0.20, body=BRICK, roof=PANTILE),
+               -0.62, -0.36)
+    # A trailer standing in the yard, because a depot with nothing waiting on it
+    # looks shut.
+    p += [_paint(lib.box('dct', (0.46, 0.14, 0.16), loc=(0.24, -0.38, 0.10)),
+                 (0.88, 0.90, 0.92, 1), 'dct_mat')]
+    return p
+
+
 def yard():
     """A yard is a business with no inputs and no outputs - design.md 4 - so it
     gets a building like any other: hardstanding, an office and a workshop."""
@@ -419,6 +450,7 @@ BUILDS = [
     ('plc_abattoir', abattoir),
     ('plc_village_shop', village_shop),
     ('plc_yard', yard),
+    ('plc_distribution_centre', distribution_centre),
     # Three cottages, and the point of three is that no two next to each other
     # match. Roof first, because roof is what you see.
     ('vil_cottage_a', lambda: cottage(RENDER, PANTILE)),

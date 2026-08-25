@@ -113,6 +113,17 @@ export const IndustryDef = z.object({
   footprint: z.number().int().min(1).max(8).default(2),
   /** Cost to found, in pence. Act III onward. */
   foundCost: z.number().int().min(0).default(0),
+  /**
+   * Hands back what it was given, rather than turning it into something else.
+   *
+   * design.md §4 defines a distribution centre as "a business whose output is
+   * its input", and that is not expressible as a recipe: a recipe consumes in
+   * order to produce. So it is a flag, and the two functions that ask a site
+   * what it has spare and who would take it read it. Everything else —
+   * contracts, buyers, suppliers, the panel — then works on a depot without
+   * containing the word depot anywhere.
+   */
+  passThrough: z.boolean().optional().default(false),
   /** Three-network requirement, design.md §2.2. Zero means not required yet. */
   powerNeed: z.number().int().min(0).default(0),
   waterNeed: z.number().int().min(0).default(0),

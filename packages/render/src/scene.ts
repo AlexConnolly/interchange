@@ -841,7 +841,10 @@ export class Renderer {
       const tile = Math.min(src.size * src.size - 1,
         (Math.round(z) * src.size + Math.round(x)) | 0);
       const lv = src.level[tile];
-      const y = (lv !== 0 ? HEIGHT_TO_WORLD(lv) : HEIGHT_TO_WORLD(src.height[tile])) + 0.04;
+      // The ground's own corner height, not the tile's raw value — the same fix
+      // the buildings and the roads needed, and the reason vehicles kept
+      // "disappearing under the ground" on slopes.
+      const y = (lv !== 0 ? HEIGHT_TO_WORLD(lv) : this.groundTop(src, x, z)) + 0.045;
       /*
        * Where it is drawn, eased toward where the simulation says it is.
        *
@@ -978,7 +981,9 @@ export class Renderer {
         const x = t % s;
         const z = (t / s) | 0;
         const lv = src.level[t];
-        const y = (lv !== 0 ? HEIGHT_TO_WORLD(lv) : HEIGHT_TO_WORLD(src.height[t])) + 0.045;
+        const y = (lv !== 0
+          ? HEIGHT_TO_WORLD(lv)
+          : this.groundTop(src, (t % s) + 0.5, ((t / s) | 0) + 0.5)) + 0.05;
         const h = 0.19;
         m.quad(
           x + 0.5 - h, y, z + 0.5 - h, x + 0.5 + h, y, z + 0.5 - h,

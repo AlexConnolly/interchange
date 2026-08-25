@@ -23,6 +23,7 @@ import {
 import { Alerts, Earnings, Markers, money } from './Markers.tsx';
 import { Ambient } from './ambient.ts';
 import { Fleet, Yard } from './Fleet.tsx';
+import { Planning } from './Planning.tsx';
 import { Place, type PlaceActions } from './Place.tsx';
 import './style.css';
 
@@ -61,7 +62,8 @@ type Panel =
   | { k: 'none' }
   | { k: 'place'; site: number }
   | { k: 'yard'; yard: number }
-  | { k: 'vehicles' };
+  | { k: 'vehicles' }
+  | { k: 'planning' };
 
 /**
  * Map the content's way classes onto the three the renderer draws.
@@ -105,8 +107,28 @@ export function App(): JSX.Element {
    * breach.
    */
   const [panel, setPanel] = useState<Panel>({ k: 'none' });
+  /*
+   * Placing a depot: the one moment the map is an input rather than a display.
+   *
+   * A mode rather than a panel, because what you need on screen while choosing
+   * where to put a building is *the district*, unobscured. A dialogue with a
+   * coordinate picker in it would be the worst of both.
+   */
+  const [building, setBuilding] = useState(false);
+  const [note, setNote] = useState('');
   const [revision, setRevision] = useState(0);
   const bump = useCallback(() => setRevision((r) => r + 1), []);
+  /*
+   * The canvas listeners are registered once, in an effect with no deps, so they
+   * close over the first render's state for ever. Anything they need to read
+   * *now* goes through a ref. This is the standard trap with a long-lived
+   * imperative listener next to React state, and the alternative — re-binding
+   * every listener whenever build mode changes — costs more than it saves.
+   */
+  const buildingRef = useRef(false);
+  buildingRef.current = building;
+  const bumpRef = useRef(bump);
+  bumpRef.current = bump;
 
   const buy = useCallback((yard: number, typeIndex: number): void => {
     if (!live) return;
@@ -673,6 +695,19 @@ export function App(): JSX.Element {
         const d = dx * dx + dz * dz;
         if (d < bestD) { bestD = d; found = i; }
       }
+      if (buildingRef.current) {
+        // Build mode: the click is a location, not a selection.
+        const r = world.foundDepot(cx, cz, `Depot ${world.yards.count}`);
+        if (r.site >= 0) {
+          setBuilding(false);
+          setNote('');
+          bumpRef.current();
+          setPanel({ k: 'place', site: r.site });
+        } else {
+          setNote(r.reason);
+        }
+        return;
+      }
       if (found >= 0) {
         // Centre what you clicked. The panel anchors itself over the place, so
         // a business at the edge of the frame would otherwise open a panel half
@@ -820,6 +855,26 @@ export function App(): JSX.Element {
        * frame means a new one appears the moment it is bought with no
        * bookkeeping. Never fogged: a yard you own is always visible to you.
        */
+      /*
+       * Businesses founded during play, which is depots.
+       *
+       * `placed` was built once at startup and a depot appears later, so it
+       * would have no building at all — the classic shape of this bug, and the
+       * same one that left the player's own yard invisible. Sites are scanned
+       * each frame rather than appended on purchase because reading the world is
+       * cheap at this size and cannot get out of step.
+       */
+      for (let i = 0; i < world.sites.count && pn < src.px.length; i++) {
+        if (world.sites.owner[i] !== world.player) continue;
+        if (!world.isDepot(i)) continue;
+        const tile = world.siteAccessTile[i];
+        if (tile < 0) continue;
+        src.px[pn] = (tile % DISTRICT) + 0.5;
+        src.pz[pn] = Math.floor(tile / DISTRICT) + 0.5;
+        src.pModel[pn] = world.sites.def[i];
+        src.pRot[pn] = 0;
+        pn++;
+      }
       for (let y = 0; y < world.yards.count && pn < src.px.length; y++) {
         if (world.yards.owner[y] !== world.player) continue;
         src.px[pn] = world.yards.x[y] + 0.5;
@@ -949,6 +1004,24 @@ export function App(): JSX.Element {
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
+      {live && panel.k === 'planning' && (
+        <Planning
+          world={live.world}
+          onFund={(pence) => { if (live.world.fundParish(pence).ok) bump(); }}
+          onPropose={(works, from, to) => {
+            const r = live.world.propose(works, from, to);
+            if (r.ok) { bump(); setNote(''); } else setNote(r.reason);
+          }}
+          onClose={() => setPanel({ k: 'none' })}
+        />
+      )}
+      {building && (
+        <div className="build-hint">
+          Click a spot beside a road to put a depot there
+          {note !== '' && <b>{note}</b>}
+        </div>
+      )}
+      {!building && note !== '' && <div className="build-hint"><b>{note}</b></div>}
       {live && panel.k === 'yard' && (
         <Yard
           world={live.world}
@@ -982,6 +1055,21 @@ export function App(): JSX.Element {
           className="hud-btn"
           onClick={() => setPanel(panel.k === 'vehicles' ? { k: 'none' } : { k: 'vehicles' })}
         >Vehicles</button>
+        <button
+          className={`hud-btn ${building ? 'armed' : ''}`}
+          onClick={() => { setBuilding(!building); setNote(''); setPanel({ k: 'none' }); }}
+        >{building ? 'Cancel' : 'Depot'}</button>
+        {/*
+          * The parish appears when the parish would notice you, and not before.
+          * See planning.ts: a bar filling up on day one would make the opening a
+          * game about the bar.
+          */}
+        {live?.world.planningOpen() && (
+          <button
+            className="hud-btn"
+            onClick={() => setPanel(panel.k === 'planning' ? { k: 'none' } : { k: 'planning' })}
+          >Parish</button>
+        )}
       </div>
       {!ready && <div className="loading">Surveying the district…</div>}
     </div>

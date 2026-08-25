@@ -398,7 +398,23 @@ arrived the mistakes were geometric.
 5. **Buildings, and the winter.** Every business visible as a building, and the
    snow with the tyre rule under it. This is a step of its own because it is
    half art and the art is the point.
-6. **Distribution centres.** A business whose output is its input.
-7. **Influence and the planning board.**
+6. **Distribution centres.** A business whose output is its input — so it
+   needed a flag and no new mechanic. A depot is a site *and* a yard at one
+   tile: it holds stock like a business and houses lorries like a yard, which is
+   the two-noun model paying for itself. Eight bays and a long bay from the
+   start, because the point of one is to break bulk — an artic brings
+   twenty-four tonnes in and three vans take it out to villages an artic cannot
+   reach.
+7. **Influence and the planning board.** Approval, 0–100, rising per *load*
+   delivered into the parish and falling slowly back toward indifference. It
+   gates proposals: widening the lane up to one of your own places, and asking
+   to be counted — which converts reputation into influence reach and spends it
+   doing so. Money buys approval with hard diminishing returns, so the last rung
+   cannot be bought: past about sixty only the work counts. And **none of it
+   exists until you own four vehicles**, because nobody cares about your
+   approval rating until further along, and a bar filling up on day one would
+   make the opening a game about a bar.
+
+All seven are in. What is left is polish and balance, not rungs.
 
 Each step is playable and each step gets deployed so it can be played.

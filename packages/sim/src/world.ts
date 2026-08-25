@@ -26,7 +26,7 @@ import { Hasher } from './hash.ts';
 import { ContractBoard, ContractState, offerContracts } from './contracts.ts';
 import { InfluenceField, type InfluenceSource } from './influence.ts';
 import {
-  Facility, FACILITY_COST, YardTable, canBase, facilitiesFor, refusalText,
+  Facility, FACILITY_COST, MAX_YARDS, YardTable, canBase, facilitiesFor, refusalText,
 } from './yards.ts';
 import {
   Fitting, FITTING_COST, SNOW_STOPS, snowCover, stoppedBySnow,
@@ -38,6 +38,10 @@ import {
 import { Router, type RouteCosts } from './pathfinding.ts';
 import { TileRouter } from './tilerouter.ts';
 import { Heap } from './heap.ts';
+import {
+  APPROVAL_DRIFT_PER_DAY, APPROVAL_PER_LOAD, APPROVAL_REST, PLANNING_FROM_VEHICLES,
+  WORKS_APPROVAL, Works, levyGain,
+} from './planning.ts';
 import { Rng } from './rng.ts';
 import {
   IndustryKind, SiteState, SiteTable, TownTable, hashSites, stepSiteDecay, ageSites,
@@ -73,6 +77,18 @@ export interface TickReport {
   pathRequests: number;
   hash: number | null;
 }
+
+/**
+ * What share of a widening scheme the haulier who wanted it puts in.
+ *
+ * A tenth. The full build cost of a sixteen-tile spur is nearly six hundred
+ * thousand pounds, which against a district where a good year is thirty-five is
+ * not a goal, it is a wall — and it is also not what happens: a parish widens
+ * its own lane and the firm that wanted it widened contributes. A tenth puts a
+ * scheme at about forty thousand, which is a real decision at the point the
+ * board opens.
+ */
+const WIDEN_SHARE = 0.1;
 
 /** Shared empty, so the common case allocates nothing. */
 const EMPTY_EARNINGS: { x: number; z: number; pence: number }[] = [];
@@ -180,6 +196,13 @@ export class World {
   siteAccessTile: Int32Array;
   /** What each vehicle has fitted. A `Fitting` bitmask. */
   vehicleFittings: Int32Array;
+  /**
+   * What the parish thinks of you, 0..100. design.md §3's last rung.
+   *
+   * Not a currency and not a tech tree: a number that gates one kind of action,
+   * rises by being useful, and drifts back if you stop. See planning.ts.
+   */
+  approval = APPROVAL_REST;
   /**
    * Money the player has just been paid, and where the lorry was standing.
    *
@@ -576,6 +599,20 @@ export class World {
   }
 
   private stepDay(): void {
+    /*
+     * Approval drifts back toward indifference.
+     *
+     * Without it the number is a ratchet — every delivery ever made counts for
+     * ever, so by the second year it is pinned at a hundred and has stopped
+     * being a constraint at all. Drifting means standing still costs you
+     * slowly, which is what keeps the rung worth climbing.
+     */
+    if (this.approval > APPROVAL_REST) {
+      this.approval = Math.max(APPROVAL_REST, this.approval - APPROVAL_DRIFT_PER_DAY);
+    } else if (this.approval < APPROVAL_REST) {
+      this.approval = Math.min(APPROVAL_REST, this.approval + APPROVAL_DRIFT_PER_DAY);
+    }
+
     const b = this.content.balance;
 
     // running costs, breakdowns, and obsolescence
@@ -1192,6 +1229,18 @@ export class World {
      * the client's frame rate a term in the economy. Bounded and dropped on
      * overflow, because these are for showing and a missed one is invisible.
      */
+    if (company === this.player) {
+      /*
+       * Serving the place is what earns standing.
+       *
+       * Per *load*, not per pound, and deliberately: a haulier who runs milk to
+       * the village every day for a year is part of the parish, and one who
+       * moved a single enormously valuable load is not. Paying it on tonnage or
+       * on revenue would make approval a second name for money, which is the
+       * thing planning.ts exists to avoid.
+       */
+      this.approval = Math.min(100, this.approval + APPROVAL_PER_LOAD);
+    }
     if (company === this.player && this.earned.length < 32) {
       this.earned.push({
         x: this.vehicles.x[vehicle] / 65536,
@@ -1822,8 +1871,29 @@ export class World {
     this.rebuild();
   }
 
-  /** The best road the authority would build this era. */
+  /**
+   * The road the authority would lay to reach a new works.
+   *
+   * A *lane*, or the nearest thing to one the era has — not the best road in the
+   * catalogue, which is what this used to return. Every spur laid at runtime
+   * came out as a dual carriageway: four lanes to a dairy farm, sixteen tiles of
+   * motorway scattered through a district of hedgerows, and it defeated the
+   * planning board's widening proposals too, because there was nothing left to
+   * widen.
+   *
+   * A farm is on a lane. If the player wants it on a road, that is what the
+   * parish is for.
+   */
   private publicRoadClass(): number {
+    const lane = this.content.ways.findIndex(
+      (w) => w.mode === 'road' && w.era <= this.era && w.lanes <= 1,
+    );
+    if (lane >= 0) return lane;
+    return this.bestRoadClassLegacy();
+  }
+
+  /** The best road the era can build. Kept for the callers that want the trunk. */
+  private bestRoadClassLegacy(): number {
     let best = -1;
     let bestCost = -1;
     for (let i = 0; i < this.content.ways.length; i++) {
@@ -2837,10 +2907,8 @@ export class World {
   }[] {
     const out: { site: number; cargo: number; distance: number; pay: number }[] = [];
     if (this.sites.owner[site] !== this.player) return out;
-    const outs = this.recipes.outputs[this.sites.def[site]];
     const cargoCount = this.content.cargo.length;
-    for (let i = 0; i < outs.length; i += 2) {
-      const cargo = outs[i];
+    for (const cargo of this.offersOf(site)) {
       for (let b = 0; b < this.sites.count; b++) {
         if (b === site) continue;
         const tile = this.siteAccessTile[b];
@@ -2862,6 +2930,346 @@ export class World {
     }
     out.sort((a, b) => b.pay - a.pay);
     return out;
+  }
+
+  /**
+   * Build a distribution centre.
+   *
+   * The last rung but one, and it needed almost no new machinery — which is the
+   * point. A depot is a *place* like any other, so it goes on the map as a site
+   * with a spur to the road, and it is a *yard* as well, so lorries live in it.
+   * Two records for one building is not elegant, but the alternative is teaching
+   * the site tables about bays or the yard tables about stock, and each of those
+   * is a second implementation of something that already works.
+   *
+   * Eight bays and a long bay from the start, because the whole reason to have
+   * one is to break bulk: an artic brings twenty-four tonnes in, and three small
+   * vans take it out to the villages an artic cannot reach. A depot that could
+   * not house the artic would be a shed.
+   */
+  foundDepot(x: number, y: number, name: string): { site: number; reason: string } {
+    const defIndex = this.content.industries.findIndex((i) => i.passThrough);
+    if (defIndex < 0) return { site: NONE, reason: 'No depot in the content.' };
+    const size = this.config.size;
+    if (x < 1 || y < 1 || x >= size - 1 || y >= size - 1) {
+      return { site: NONE, reason: 'Off the map.' };
+    }
+    const tile = y * size + x;
+    if (this.terrain.height[tile] <= 0) return { site: NONE, reason: 'That is water.' };
+    if (!this.influence.usable(tile)) {
+      return { site: NONE, reason: 'You have no standing out there yet.' };
+    }
+    if (this.yards.count >= MAX_YARDS) {
+      return { site: NONE, reason: 'You have as many yards as you can run.' };
+    }
+    const cost = this.content.industries[defIndex].foundCost;
+    if (this.companies.cash[this.player] < cost) {
+      return { site: NONE, reason: 'Not enough in the bank.' };
+    }
+    // Not on top of something else. Six tiles, the same clearance worldgen uses.
+    for (let s = 0; s < this.sites.count; s++) {
+      const dx = this.sites.x[s] - x;
+      const dy = this.sites.y[s] - y;
+      if (dx * dx + dy * dy < 36) return { site: NONE, reason: 'Too close to something.' };
+    }
+    /*
+     * Ask why *before* trying, and hand the reason on.
+     *
+     * `foundIndustry` returns NONE for a dozen different reasons and the first
+     * version of this reported "Could not build there" for all of them — which
+     * cost twenty minutes of guessing at a refusal the code already knew the
+     * answer to. The player deserves the same courtesy the yard rule gets: a
+     * refusal is a sentence.
+     */
+    const problem = this.canFound(this.player, defIndex, tile);
+    if (problem !== '') return { site: NONE, reason: problem };
+    const site = this.foundIndustry(this.player, defIndex, tile);
+    if (site === NONE) return { site: NONE, reason: 'Could not build there.' };
+    this.connectSiteToRoad(site);
+    const yard = this.yards.alloc(x, y, tile, this.player, name);
+    if (yard !== NONE) {
+      this.yards.add(yard, Facility.Hardstanding | Facility.LongBay | Facility.Weighbridge);
+      this.yards.bays[yard] = 8;
+    }
+    this.refreshInfluence();
+    this.offerWorkNow();
+    return { site, reason: '' };
+  }
+
+  /** Is this place one of yours, and a depot? For the panel's wording. */
+  isDepot(site: number): boolean {
+    return this.content.industries[this.sites.def[site]]?.passThrough === true;
+  }
+
+  // ------------------------------------------------- the planning board
+
+  /**
+   * Is the board even a thing yet?
+   *
+   * design.md is emphatic that "nobody cares about your approval rating until
+   * the further along you get", so there is no approval anywhere in the
+   * interface until the player is a presence — measured in vehicles, because a
+   * vehicle is this game's unit of measurement. Showing it on day one would make
+   * the first ten minutes a game about a bar filling up, which is the opposite
+   * of a milk round.
+   */
+  planningOpen(): boolean {
+    return this.fleetSize() >= PLANNING_FROM_VEHICLES;
+  }
+
+  fleetSize(): number {
+    let n = 0;
+    for (let v = 0; v < this.vehicles.count; v++) {
+      if (this.vehicles.alive[v] && this.vehicles.company[v] === this.player) n++;
+    }
+    return n;
+  }
+
+  /**
+   * Put money into the parish, and get a little goodwill for it.
+   *
+   * Diminishing, hard — see `levyGain`. Money can carry you part of the way to
+   * standing and never all of it, so the last rung cannot be bought outright.
+   */
+  fundParish(pence: number): { ok: boolean; reason: string; gained: number } {
+    if (pence <= 0) return { ok: false, reason: 'Nothing to give.', gained: 0 };
+    if (this.companies.cash[this.player] < pence) {
+      return { ok: false, reason: 'Not enough in the bank.', gained: 0 };
+    }
+    const gained = levyGain(this.approval, pence);
+    // Not construction and not an asset: money that leaves and buys nothing you
+    // own. `Penalties` is the existing line for exactly that shape of outgoing.
+    this.companies.post(this.player, Line.Penalties, pence);
+    this.approval = Math.min(100, this.approval + gained);
+    return { ok: true, reason: '', gained };
+  }
+
+  /**
+   * What the board would hear from you today.
+   *
+   * Built from what you actually own, so the list is short and every entry is
+   * about a road you personally drive. A generic "build a road" tool would be a
+   * level editor; a list of the four roads between your own places that could be
+   * better is a decision.
+   */
+  proposals(): {
+    works: number; from: number; to: number; label: string;
+    cost: number; approval: number; ok: boolean; reason: string;
+  }[] {
+    const out: {
+      works: number; from: number; to: number; label: string;
+      cost: number; approval: number; ok: boolean; reason: string;
+    }[] = [];
+    if (!this.planningOpen()) return out;
+
+    /*
+     * The lane up to your own gate, not the trunk road between two of them.
+     *
+     * The first version offered to widen the route between each pair of places
+     * you own, and found nothing on any seed — because `roadRoute` weights by
+     * class and therefore already routes along the best road available. It was
+     * asking "is the best road bad", and the answer is no by construction.
+     *
+     * The real case is the *spur*: your dairy is up a track, the track meets a
+     * proper road half a mile away, and what you want is the track made up.
+     * That is a request a haulier would actually make, it is always available
+     * while any of your places is on a lane, and the reward is legible — the
+     * lane your lorries have been grinding along becomes a road, they go faster
+     * on it, and the district looks different afterwards.
+     */
+    const layer = this.layers[Mode.Road];
+    const best = this.bestRoadClass();
+    const size = this.config.size;
+
+    const handles: number[] = [];
+    for (let s2 = 0; s2 < this.sites.count; s2++) {
+      if (this.sites.owner[s2] === this.player) handles.push(s2);
+    }
+    for (let y = 0; y < this.yards.count; y++) {
+      if (this.yards.owner[y] === this.player) handles.push(-1 - y);
+    }
+
+    const seen = new Set<number>();
+    for (const h of handles) {
+      const from = h >= 0 ? this.siteAccessTile[h] : this.yards.tile[-1 - h];
+      if (from === undefined || from < 0) continue;
+      const spur = this.spurToTrunk(from, best);
+      if (spur.length < 2) continue;
+      // Two places sharing a spur — a depot is a site *and* a yard at one tile —
+      // must not offer the same works twice.
+      if (seen.has(spur[spur.length - 1] * size + spur[0])) continue;
+      seen.add(spur[spur.length - 1] * size + spur[0]);
+
+      const name = h >= 0
+        ? this.content.industries[this.sites.def[h]].name
+        : this.yards.names[-1 - h];
+      const cost = Math.round(spur.length * this.content.ways[best].buildCost * WIDEN_SHARE);
+      const need = WORKS_APPROVAL[Works.Widen];
+      const affordable = this.companies.cash[this.player] >= cost;
+      out.push({
+        works: Works.Widen,
+        from: h,
+        to: NONE,
+        label: `the lane to ${name}`,
+        cost,
+        approval: need,
+        ok: this.approval >= need && affordable,
+        reason: this.approval < need
+          ? `The board wants ${Math.ceil(need)} approval. You have ${Math.floor(this.approval)}.`
+          : affordable ? '' : 'Not enough in the bank.',
+      });
+    }
+    out.sort((a, b) => a.cost - b.cost);
+
+    // And the one that is not a road at all.
+    const standingNeed = WORKS_APPROVAL[Works.Standing];
+    const standingCost = 900_000 * (this.standing + 1);
+    out.push({
+      works: Works.Standing,
+      from: NONE,
+      to: NONE,
+      label: 'Ask to be counted',
+      cost: standingCost,
+      approval: standingNeed,
+      ok: this.approval >= standingNeed
+        && this.companies.cash[this.player] >= standingCost,
+      reason: this.approval < standingNeed
+        ? `The board wants ${Math.ceil(standingNeed)} approval. You have ${Math.floor(this.approval)}.`
+        : this.companies.cash[this.player] >= standingCost ? '' : 'Not enough in the bank.',
+    });
+    void layer;
+    return out.slice(0, 5);
+  }
+
+  /**
+   * The run of sub-standard road between a place and the nearest proper one.
+   *
+   * A breadth-first walk outwards over road tiles, stopping at the first tile of
+   * the best class. Returns the tiles that would need making up, nearest place
+   * first — so its length is both the cost and the thing being widened.
+   *
+   * Breadth-first rather than the A* used for routing, because the question is
+   * "how far to the nearest good road in any direction", which is a flood and
+   * not a path. Bounded at forty tiles: beyond that the place is not on a spur,
+   * it is in the wilderness, and what it wants is a new road rather than a
+   * better one.
+   */
+  private spurToTrunk(from: number, best: number): number[] {
+    const layer = this.layers[Mode.Road];
+    const size = this.config.size;
+    if (layer.cls[from] === best) return [];
+    const cameFrom = new Map<number, number>();
+    const queue: number[] = [from];
+    cameFrom.set(from, NONE);
+    let head = 0;
+    let hit = NONE;
+    while (head < queue.length && head < 400) {
+      const cur = queue[head++];
+      if (layer.cls[cur] === best) { hit = cur; break; }
+      const x = cur % size;
+      for (let d = 0; d < 4; d++) {
+        const nx = x + DIR_DX[d];
+        const ny = ((cur / size) | 0) + DIR_DY[d];
+        if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+        const nt = ny * size + nx;
+        if (layer.cls[nt] === NO_WAY || cameFrom.has(nt)) continue;
+        cameFrom.set(nt, cur);
+        queue.push(nt);
+      }
+    }
+    if (hit === NONE) return [];
+    // Walk back, dropping the trunk tile itself: it is already good.
+    const out: number[] = [];
+    for (let t = cameFrom.get(hit) ?? NONE; t !== NONE; t = cameFrom.get(t) ?? NONE) {
+      out.push(t);
+      if (out.length > 40) return [];
+    }
+    return out;
+  }
+
+  /**
+   * Put a proposal to the board.
+   *
+   * Widening actually lays the way, so the district visibly changes: the lane
+   * your lorries have been grinding along becomes a proper road, they go faster
+   * on it, and the frame looks different afterwards. That last part is the whole
+   * reward — the earlier rungs change what you *own*, and this is the first one
+   * that changes what the place *is*.
+   *
+   * Standing spends approval rather than earning it, which is why it is the
+   * dearest: it converts a reputation into reach, and then you have to build the
+   * reputation again.
+   */
+  propose(works: number, from: number, to: number): { ok: boolean; reason: string } {
+    if (!this.planningOpen()) {
+      return { ok: false, reason: 'The board does not know who you are yet.' };
+    }
+    const need = WORKS_APPROVAL[works] ?? 100;
+    if (this.approval < need) {
+      return {
+        ok: false,
+        reason: `The board wants ${Math.ceil(need)} approval. You have ${Math.floor(this.approval)}.`,
+      };
+    }
+
+    if (works === Works.Standing) {
+      // Dearer every time. The first is the parish agreeing you belong; the
+      // fourth is asking them to rearrange the county for you.
+      const cost = 900_000 * (this.standing + 1);
+      if (this.companies.cash[this.player] < cost) {
+        return { ok: false, reason: 'Not enough in the bank.' };
+      }
+      this.companies.post(this.player, Line.Penalties, cost);
+      // Reach, bought with reputation. Spent, not kept: the number goes back
+      // down and has to be earned again for the next one.
+      this.standing += 1;
+      this.approval = Math.max(APPROVAL_REST, this.approval - 22);
+      this.refreshInfluence();
+      return { ok: true, reason: '' };
+    }
+
+    void to;
+    const a = from >= 0 ? this.siteAccessTile[from] : this.yards.tile[-1 - from];
+    if (a === undefined || a < 0) return { ok: false, reason: 'Nowhere to build.' };
+    const best = this.bestRoadClass();
+    const spur = this.spurToTrunk(a, best);
+    if (spur.length < 2) return { ok: false, reason: 'That lane is already made up.' };
+    const cost = Math.round(spur.length * this.content.ways[best].buildCost * WIDEN_SHARE);
+    if (this.companies.cash[this.player] < cost) {
+      return { ok: false, reason: 'Not enough in the bank.' };
+    }
+    this.companies.post(this.player, Line.Construction, cost);
+    this.layPublicWay(Mode.Road, best, spur, this.wayCharge[best], 0);
+    this.rebuild();
+    // A road the parish agreed to is a road the parish is pleased about, but
+    // building it also spends the goodwill that got it agreed.
+    this.approval = Math.max(APPROVAL_REST, this.approval - 8);
+    return { ok: true, reason: '' };
+  }
+
+  /** How many times the board has agreed you belong here. Widens influence. */
+  standing = 0;
+
+  /**
+   * What the board would widen a country lane *to*.
+   *
+   * A proper two-lane road, and explicitly not the best thing in the catalogue.
+   * Targeting the outright best made the target a dual carriageway, and then
+   * `spurToTrunk` searched for a dual carriageway tile to stop at, found none
+   * anywhere in a rural district, and returned nothing — so the widening
+   * proposal never appeared. Aiming at what a parish would actually build makes
+   * the mechanic work and makes the result look right.
+   */
+  private bestRoadClass(): number {
+    let best = 0;
+    let bestSpeed = -1;
+    for (let i = 0; i < this.content.ways.length; i++) {
+      const w = this.content.ways[i];
+      if (w.mode !== 'road' || w.era > this.era) continue;
+      if (w.lanes > 2) continue;
+      if (this.waySpeed[i] > bestSpeed) { bestSpeed = this.waySpeed[i]; best = i; }
+    }
+    return best;
   }
 
   /**
@@ -2903,11 +3311,9 @@ export class World {
    * simulation, only a different way of asking.
    */
   private surplusAt(site: number): { cargo: number; tonnes: number } | null {
-    const outs = this.recipes.outputs[this.sites.def[site]];
     let best = NONE;
     let most = 0;
-    for (let i = 0; i < outs.length; i += 2) {
-      const cargo = outs[i];
+    for (const cargo of this.offersOf(site)) {
       const have = this.sites.stockOf(site, cargo);
       if (have > most) {
         most = have;
@@ -2915,6 +3321,37 @@ export class World {
       }
     }
     return best === NONE ? null : { cargo: best, tonnes: most };
+  }
+
+  /**
+   * What a place has to offer the world.
+   *
+   * Its recipe outputs, normally. For a **pass-through** place — a distribution
+   * centre — everything it can hold, because it hands back what it was given
+   * rather than turning it into something else (design.md §4).
+   *
+   * One function, read by `surplusAt` and `buyersFor`, so a depot appears on the
+   * contract board and in the supply panel without either of them containing the
+   * word depot. That is the whole reason a distribution centre needed no new
+   * mechanic: it is the two-noun model doing its job.
+   */
+  private offersOf(site: number): number[] {
+    const def = this.sites.def[site];
+    if (this.content.industries[def]?.passThrough) {
+      const cargoCount = this.content.cargo.length;
+      const out: number[] = [];
+      for (let c = 0; c < cargoCount; c++) {
+        // What it *has*, not what it could hold. A depot standing empty offers
+        // nothing, and listing five cargoes it has none of would fill the panel
+        // with work that does not exist.
+        if (this.sites.stockOf(site, c) > 0) out.push(c);
+      }
+      return out;
+    }
+    const outs = this.recipes.outputs[def];
+    const out: number[] = [];
+    for (let i = 0; i < outs.length; i += 2) out.push(outs[i]);
+    return out;
   }
 
   private buyerFor(cargo: number, notSite: number): number {
@@ -3291,13 +3728,33 @@ export class World {
     const sources: InfluenceSource[] = [...extra];
     // A yard is a presence: it is where your lorries sleep and your name is
     // known, so it reaches further than a works you merely own.
+    /*
+     * How far your name carries, and three things add to it.
+     *
+     * A yard is a presence: it is where your lorries sleep and your name is
+     * known, so it reaches further than a works you merely own. The lorries
+     * themselves count — a yard with eight vehicles running out of it is known
+     * further afield than one with one, which is the same "a vehicle is the unit
+     * of measurement" rule as everywhere else. And `standing` is what the
+     * planning board has agreed to, which is the whole point of the last rung:
+     * reputation converted into reach.
+     */
+    const carry = 1 + this.standing * 0.22;
     for (let y = 0; y < this.yards.count; y++) {
       if (this.yards.owner[y] !== this.player) continue;
-      sources.push({ x: this.yards.x[y], y: this.yards.y[y], strength: 2.4 });
+      let fleet = 0;
+      for (let v = 0; v < this.vehicles.count; v++) {
+        if (this.vehicles.alive[v] && this.vehicleYard[v] === y) fleet++;
+      }
+      sources.push({
+        x: this.yards.x[y],
+        y: this.yards.y[y],
+        strength: (2.4 + Math.min(1.2, fleet * 0.16)) * carry,
+      });
     }
     for (let s = 0; s < this.sites.count; s++) {
       if (this.sites.owner[s] !== this.player) continue;
-      sources.push({ x: this.sites.x[s], y: this.sites.y[s], strength: 1.5 });
+      sources.push({ x: this.sites.x[s], y: this.sites.y[s], strength: 1.5 * carry });
     }
     this.influence.rebuild(sources);
   }

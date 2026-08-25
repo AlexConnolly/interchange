@@ -13,6 +13,7 @@ import { ACCESS_SCALE, AUTHORITY, DIR_BIT, DIR_DX, DIR_DY, DIR_OPPOSITE, Mode } 
 import { NONE } from './network.ts';
 import { generateRoads } from './roadnet.ts';
 import { Deposit, SEA_LEVEL, TileFlag, type Terrain } from './terrain.ts';
+import { Charter } from './economy.ts';
 import { SiteState } from './sites.ts';
 import type { World } from './world.ts';
 
@@ -37,7 +38,24 @@ export function generateWorld(w: World): void {
   // ---- companies --------------------------------------------------------
   // Company 0 is always the authority. design.md §3.1.
   w.companies.alloc(LIVERY_NAMES[0], 0, true, 0);
-  w.companies.alloc(LIVERY_NAMES[1], c.balance.startingCash, false, 1);
+  /*
+   * The player holds the top charter, and that is a cut mechanic showing.
+   *
+   * Charters were an era-progression gate — you earned the right to dig, then
+   * the right to build — and eras went with `cut.md`. Leaving the player on the
+   * Construction charter meant `canFound` refused a distribution centre, which
+   * is a terminal and wants Land: the last rung but one of the ladder was
+   * unreachable because of a rule the design had already deleted.
+   *
+   * Rather than special-case the depot, the honest thing is to say the gate is
+   * gone. What limits building now is the influence area and the money, which is
+   * what design.md says limits it.
+   */
+  const player = w.companies.alloc(LIVERY_NAMES[1], c.balance.startingCash, false, 1);
+  // `alloc`'s fourth argument is the *livery*, not the charter — passing
+  // Charter.Land there changed the player's colour and left the charter at
+  // Carrier, which is a good demonstration of why this is now on its own line.
+  w.companies.charter[player] = Charter.Land;
   for (let i = 2; i < Math.max(2, w.config.companyCount); i++) {
     const id = w.companies.alloc(LIVERY_NAMES[i % LIVERY_NAMES.length], c.balance.startingCash, true, i);
     // design.md §2.5: personalities are weightings, not code paths.

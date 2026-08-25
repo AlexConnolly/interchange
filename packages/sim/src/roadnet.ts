@@ -180,9 +180,25 @@ function route(
  */
 function lay(ctx: RoadNetContext, path: number[], tier: Tier): void {
   const cls = ctx.classOf(tier);
+  /*
+   * Which way round "better" runs, and it was backwards.
+   *
+   * The way table is ordered track, lane, road, dual — so a **larger** index is
+   * a better road. Both this function and `smoothTiers` were written as though
+   * a smaller index were better, which is a comment in the file asserting the
+   * opposite of the content.
+   *
+   * The effect was quiet and everywhere: a lane crossing an existing road
+   * overwrote the road with a lane, and the smoothing pass demoted good roads
+   * instead of promoting poor ones. So the network came out worse than it was
+   * built, in a pattern that looked like the generator was confused about its
+   * own hierarchy — which it was.
+   */
   const written: number[] = [];
   for (const t of path) {
-    if (ctx.cls[t] !== NO_WAY && ctx.cls[t] <= cls) continue;
+    // Already at least as good: leave it. A lane crossing a road does not turn
+    // the road into a lane.
+    if (ctx.cls[t] !== NO_WAY && ctx.cls[t] >= cls) continue;
     ctx.cls[t] = cls;
     written.push(t);
   }
@@ -225,11 +241,20 @@ function smoothTiers(ctx: RoadNetContext): number {
           const ny = y + DY[d];
           if (nx < 0 || ny < 0 || nx >= s || ny >= s) continue;
           const nc = ctx.cls[ny * s + nx];
-          if (nc !== NO_WAY && nc < bestNeighbour) bestNeighbour = nc;
+          if (nc !== NO_WAY && nc > bestNeighbour) bestNeighbour = nc;
         }
-        // Class index runs worst to best, so a smaller index is a better road.
-        if (c - bestNeighbour >= 2) {
-          ctx.cls[t] = bestNeighbour + 1;
+        /*
+         * A larger index is a better road, so an illegal join is a tile whose
+         * best neighbour is two or more classes *above* it — a track opening
+         * onto a trunk road. The repair is to promote the poor tile one step,
+         * which is how the track-lane-road pattern appears.
+         *
+         * The original compared the other way and promoted nothing: it demoted
+         * the *good* road down toward the track, so a junction between a farm
+         * track and an A-road was fixed by ruining the A-road.
+         */
+        if (bestNeighbour - c >= 2) {
+          ctx.cls[t] = c + 1;
           changed++;
         }
       }

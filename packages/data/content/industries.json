@@ -335,5 +335,33 @@
     "fromEra": 1,
     "kit": "yard",
     "colour": "#c8a95e"
+  },
+  {
+    "id": "distribution-centre",
+    "name": "Distribution centre",
+    "kind": "terminal",
+    "deposit": 0,
+    "recipe": {
+      "inputs": {
+        "dairy": 8,
+        "meat": 8,
+        "sawn": 8,
+        "feed": 8,
+        "parcels": 8
+      },
+      "outputs": {},
+      "period": 30
+    },
+    "footprint": 1,
+    "foundCost": 4200000,
+    "powerNeed": 0,
+    "waterNeed": 0,
+    "labourNeed": 0,
+    "amenityPenalty": 2,
+    "amenityRadius": 3,
+    "fromEra": 1,
+    "kit": "yard",
+    "colour": "#7a8794",
+    "passThrough": true
   }
 ]

@@ -83,9 +83,52 @@ function faded(c: RGB, influence: number): RGB {
 const DX = [0, 1, 0, -1];
 const DZ = [-1, 0, 1, 0];
 
+/**
+ * Where the *ground* is at a corner, computed exactly as ground.ts does it.
+ *
+ * This is the fix for roads sinking into hillsides, and the same bug the
+ * buildings had. The ground mesh puts each vertex at the mean of the four tiles
+ * meeting at that corner; the road was using its own tile's height value, which
+ * on any slope is a different number. So a road across a hillside sat below the
+ * surface it was supposed to be lying on — reported, twice, as roads being
+ * "below the ground" and looking "split", because what you see of a sunken road
+ * is the bits crossing the tops of the ripples.
+ *
+ * Duplicated rather than imported because the two files disagreeing is precisely
+ * the failure, and the only way to be sure they agree is that the arithmetic is
+ * the same arithmetic. If this ever changes it changes in both places, and the
+ * comment in each says so.
+ */
+function groundCorner(src: RoadSource, x: number, z: number): number {
+  const s = src.size;
+  let sum = 0;
+  for (let dz = -1; dz <= 0; dz++) {
+    for (let dx = -1; dx <= 0; dx++) {
+      const tx = Math.max(0, Math.min(s - 1, x + dx));
+      const tz = Math.max(0, Math.min(s - 1, z + dz));
+      sum += src.height[tz * s + tx];
+    }
+  }
+  return HEIGHT_TO_WORLD(sum / 4);
+}
+
 function surfaceY(src: RoadSource, tile: number): number {
   const lv = src.level[tile];
-  return (lv !== 0 ? HEIGHT_TO_WORLD(lv) : HEIGHT_TO_WORLD(src.height[tile])) + 0.02;
+  if (lv !== 0) return HEIGHT_TO_WORLD(lv) + 0.02;
+  // The highest of the tile's four ground corners, so the ribbon is never under
+  // the surface. Proud of it by two hundredths is invisible at this camera;
+  // under it by the same is a road with holes in.
+  const s = src.size;
+  const x = tile % s;
+  const z = (tile / s) | 0;
+  let top = -Infinity;
+  for (let cz = z; cz <= z + 1; cz++) {
+    for (let cx = x; cx <= x + 1; cx++) {
+      const h = groundCorner(src, cx, cz);
+      if (h > top) top = h;
+    }
+  }
+  return top + 0.02;
 }
 
 /**
@@ -139,10 +182,8 @@ export function buildRoads(
       }
     }
     if (hits > 0) return sum / hits;
-    // No road at this corner: sit on the ground.
-    const tx = Math.max(0, Math.min(s - 1, x));
-    const tz = Math.max(0, Math.min(s - 1, z));
-    return HEIGHT_TO_WORLD(src.height[tz * s + tx]) + 0.02;
+    // No road at this corner: sit on the ground, computed the ground's way.
+    return groundCorner(src, x, z) + 0.02;
   };
 
   for (let z = y0; z < y1; z++) {
