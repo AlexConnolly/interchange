@@ -109,12 +109,36 @@ export function Place({
   const supplies = world.suppliersFor(site);
 
   const board = world.contractBoard;
+  /*
+   * What is going on here, taken or not.
+   *
+   * Only the untaken offers used to be listed, so the moment you put a lorry on a
+   * job it vanished from the place it came from — "why can't we show the
+   * contracts of a place even if we are fulfilling it?" There is no good answer:
+   * a business you are already serving is exactly the one you most want to open,
+   * to see whether the lorry is keeping up with what the yard is producing.
+   *
+   * Two lists rather than one, because they afford different things. An offer is
+   * a button that opens the driver picker; a job in hand is a statement, and
+   * making it look pressable would promise something it cannot do.
+   */
   const offers: number[] = [];
+  const running: number[] = [];
   for (let i = 0; i < board.count; i++) {
-    if (board.state[i] === ContractState.Offered && board.from[i] === site) offers.push(i);
+    if (board.from[i] !== site) continue;
+    const st = board.state[i];
+    if (st === ContractState.Offered) offers.push(i);
+    else if (st === ContractState.Running || st === ContractState.Idle) running.push(i);
   }
+  /** Which lorry is on a contract, or -1. */
+  const driverOf = (id: number): number => {
+    for (let v = 0; v < world.vehicles.count; v++) {
+      if (world.vehicles.alive[v] && world.vehicles.service[v] === board.service[id]) return v;
+    }
+    return -1;
+  };
   const buyers = mine ? world.buyersFor(site).slice(0, 4) : [];
-  const jobs = offers.length + buyers.length;
+  const jobs = offers.length + running.length + buyers.length;
 
   /*
    * Above the place, or below it if there is no room above.
@@ -175,6 +199,32 @@ export function Place({
 
         {tab === 'work' && (
           <>
+            {running.map((id) => {
+              const cargo = C.cargo[board.cargo[id]];
+              const to = C.industries[world.sites.def[board.to[id]]];
+              const v = driverOf(id);
+              return (
+                <div
+                  key={`r${id}`}
+                  className="job taken"
+                  onMouseEnter={() => actions.preview(board.from[id], board.to[id])}
+                  onMouseLeave={() => actions.preview(-1, -1)}
+                >
+                  <span className="job-line">
+                    <span className="swatch" style={{ background: cargo.colour }} />
+                    <span className="grow">{cargo.name} → {to.name}</span>
+                    <span className="pay">{money(board.pay[id])}<i>/t</i></span>
+                  </span>
+                  <span className={`needs ${v >= 0 ? '' : 'cannot'}`}>
+                    <BodyIcon handling={cargo.handling} />
+                    {v >= 0
+                      ? `${C.vehicles[world.vehicles.type[v]].name} · ${board.delivered[id]} loads`
+                      : bodyFor(cargo.handling)}
+                    {v >= 0 ? <em>yours</em> : <b>nobody on it</b>}
+                  </span>
+                </div>
+              );
+            })}
             {offers.map((id) => {
               const cargo = C.cargo[board.cargo[id]];
               const to = C.industries[world.sites.def[board.to[id]]];

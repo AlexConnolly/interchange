@@ -1060,3 +1060,18 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   font-size: 11px;
   color: #9a9284;
 }
+
+/* A job already in hand. Not a button: it looks like the offers above it
+   because it is the same kind of thing, but it does nothing when pressed and so
+   must not invite pressing — no hover lift, no pointer. */
+.job.taken { cursor: default; }
+.job.taken:hover { background: rgba(90, 82, 66, 0.05); }
+.needs em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7d8a5e;
+}

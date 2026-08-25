@@ -180,19 +180,75 @@ export function Contracts({
   onClose: () => void;
 }): JSX.Element {
   const b = world.contractBoard;
-  const rows: { id: number; running: boolean; vehicle: number }[] = [];
+  /*
+   * Everything on the board, not only what has been taken.
+   *
+   * This used to list the contracts you were already running and nothing else,
+   * which made it a progress report rather than a place to find work — "shouldn't
+   * it show you all contracts?", and it should: the only way to see an offer was
+   * to spot a blue dot on the map and click the business under it, which means
+   * the board a haulier actually works from did not exist in the game.
+   *
+   * Offers now sit in the same list as the jobs in hand, because they are the
+   * same question asked at different times.
+   */
+  const rows: {
+    id: number; offered: boolean; running: boolean; vehicle: number; away: number;
+  }[] = [];
+
+  /*
+   * Where "local" is measured from: your yard.
+   *
+   * Not the camera, which is where you happen to be looking, and not the middle
+   * of the district, which is nowhere. A haulier's near work is near the depot
+   * the lorries sleep at, and that is the only anchor in the game that means
+   * anything to the cost of a job.
+   */
+  let homeX = 0;
+  let homeZ = 0;
+  for (let y = 0; y < world.yards.count; y++) {
+    if (world.yards.owner[y] !== world.player) continue;
+    homeX = world.yards.x[y];
+    homeZ = world.yards.y[y];
+    break;
+  }
+
   for (let i = 0; i < b.count; i++) {
-    if (b.state[i] !== ContractState.Running && b.state[i] !== ContractState.Idle) continue;
+    const state = b.state[i];
+    const offered = state === ContractState.Offered;
+    if (!offered && state !== ContractState.Running && state !== ContractState.Idle) continue;
+    if (b.from[i] < 0 || b.to[i] < 0) continue;
     let vehicle = -1;
-    for (let v = 0; v < world.vehicles.count; v++) {
-      if (world.vehicles.alive[v] && world.vehicles.service[v] === b.service[i]) {
-        vehicle = v;
-        break;
+    if (!offered) {
+      for (let v = 0; v < world.vehicles.count; v++) {
+        if (world.vehicles.alive[v] && world.vehicles.service[v] === b.service[i]) {
+          vehicle = v;
+          break;
+        }
       }
     }
-    rows.push({ id: i, running: vehicle >= 0, vehicle });
+    const away = Math.hypot(
+      world.sites.x[b.from[i]] - homeX, world.sites.y[b.from[i]] - homeZ,
+    );
+    rows.push({ id: i, offered, running: vehicle >= 0, vehicle, away });
   }
-  rows.sort((x, y) => Number(x.running) - Number(y.running));
+
+  /*
+   * Anything you could act on, nearest first; then the jobs already running.
+   *
+   * Two keys and the order of them is the whole design. An offer you have not
+   * taken and a contract with no lorry on it are both *work waiting*, and they
+   * belong at the top whatever else is true. Below that, distance from the yard,
+   * because of two jobs you could equally take the near one is the better one
+   * and no other fact on the row settles it.
+   */
+  rows.sort((x, y) => {
+    const ax = x.offered || !x.running ? 0 : 1;
+    const ay = y.offered || !y.running ? 0 : 1;
+    if (ax !== ay) return ax - ay;
+    return x.away - y.away;
+  });
+  const waiting = rows.filter((r) => r.offered || !r.running).length;
 
   return (
     <div className="bubble fixed">
@@ -201,7 +257,9 @@ export function Contracts({
         <div className="grow">
           <div className="sheet-title">Contracts</div>
           <div className="sheet-sub">
-            {rows.length === 1 ? 'One on the go' : `${rows.length} on the go`}
+            {rows.length === 0 ? 'Nothing on the board'
+              : waiting === 0 ? `${rows.length} on the go, all covered`
+                : `${waiting} waiting of ${rows.length}`}
           </div>
         </div>
         <button className="x" onClick={onClose} aria-label="Close">×</button>
@@ -209,7 +267,7 @@ export function Contracts({
       <div className="bubble-body">
         {rows.length === 0 && (
           <div className="why">
-            Nothing taken on. Click a business with a blue dot over it.
+            No work going. Offers appear as businesses fill their yards.
           </div>
         )}
         {rows.map((r) => {
@@ -223,6 +281,7 @@ export function Contracts({
               onClick={() => (r.vehicle >= 0
                 ? onGoDriver(r.vehicle)
                 : onGoSite(b.from[r.id]))}
+              title={r.offered ? 'Open the business to take it on' : undefined}
             >
               <span className="job-line">
                 <span className="swatch" style={{ background: cargo.colour }} />
@@ -234,7 +293,10 @@ export function Contracts({
                 {r.running
                   ? `${C.vehicles[world.vehicles.type[r.vehicle]].name} · ${b.delivered[r.id]} loads`
                   : bodyFor(cargo.handling)}
-                {!r.running && <b>nobody on it</b>}
+                {/* What to do about it, which differs: an offer wants taking,
+                    a contract with no lorry wants one putting on it. */}
+                {r.offered && <b>free to take</b>}
+                {!r.offered && !r.running && <b>nobody on it</b>}
               </span>
             </button>
           );

@@ -507,6 +507,7 @@ export class Renderer {
       light.visible = false;
       this.scene.add(light);
       this.lampPool.push(light);
+      this.lampState.push({ x: 0, z: 0, level: 0, base: 0, taken: false });
     }
     this.scene.add(this.fleet);
     this.scene.add(this.places);
@@ -899,10 +900,11 @@ export class Renderer {
    * hundred candidates and eight winners, so `sort` would be doing two hundred
    * comparisons a frame to answer a question eight passes can answer.
    */
-  private placeLights(src: RenderSource): void {
+  private placeLights(src: RenderSource, dt: number): void {
     if (this.lampPool.length === 0) return;
     if (this.night < 0.02) {
       for (const l of this.lampPool) l.visible = false;
+      for (const st of this.lampState) st.level = 0;
       return;
     }
 
@@ -951,6 +953,31 @@ export class Renderer {
      * per candidate and needs no clustering pass.
      */
     const APART = 1.5 * 1.5;
+
+    /*
+     * Lamps that already have a light keep a head start.
+     *
+     * "Lights flicker when I move the camera" — they did, and the cause was that
+     * this whole selection was recomputed from nothing every frame. Greedy
+     * nearest-first with a separation test is *order dependent*: as the camera
+     * slides, two lamps a tile and a half apart swap places in the ordering, one
+     * of them starts crowding the other instead of the other way round, and the
+     * chosen set changes even though neither lamp moved. The pool then switched a
+     * light off here and on there, instantly, which is a flicker.
+     *
+     * A fifth off the distance of a lamp that is already lit is enough hysteresis
+     * to stop that swapping: a newcomer has to be meaningfully closer, not
+     * fractionally closer, before it takes a light away.
+     */
+    for (const c of cand) {
+      for (const st of this.lampState) {
+        if (st.level <= 0.01) continue;
+        const dx = st.x - c.x;
+        const dz = st.z - c.z;
+        if (dx * dx + dz * dz < 0.04) { c.d *= 0.8; break; }
+      }
+    }
+
     let filled = 0;
     for (let k = 0; k < cand.length && filled < this.lampPool.length; k++) {
       let best = -1;
@@ -972,7 +999,47 @@ export class Renderer {
       }
       if (crowded) continue;
 
-      const light = this.lampPool[filled];
+      /*
+       * Which light draws this lamp, and it must be the same one as last frame.
+       *
+       * Assigning by position in the chosen order meant a lamp that moved from
+       * third-nearest to fourth-nearest changed *which* light drew it — so the
+       * light itself jumped across the village, which reads as a flicker even
+       * when nothing turned off. Matching by position keeps a lamp's light with
+       * it for as long as it is chosen at all.
+       */
+      let slot = -1;
+      for (let q = 0; q < this.lampPool.length; q++) {
+        const st = this.lampState[q];
+        if (st.taken || st.level <= 0.01) continue;
+        const dx = st.x - c.x;
+        const dz = st.z - c.z;
+        if (dx * dx + dz * dz < 0.04) { slot = q; break; }
+      }
+      if (slot < 0) {
+        // A free light, or failing that the dimmest one — which is the one whose
+        // reassignment nobody can see.
+        let dimmest = -1;
+        for (let q = 0; q < this.lampPool.length; q++) {
+          const st = this.lampState[q];
+          if (st.taken) continue;
+          if (dimmest < 0 || st.level < this.lampState[dimmest].level) dimmest = q;
+        }
+        if (dimmest < 0) continue;
+        slot = dimmest;
+        // Only *move* a light that is already dark. A lit one sliding to a new
+        // lamp is the most obvious version of this whole bug.
+        if (this.lampState[slot].level > 0.02) {
+          this.lampState[slot].taken = true;
+          filled++;
+          continue;
+        }
+      }
+      const state = this.lampState[slot];
+      state.taken = true;
+      state.x = c.x;
+      state.z = c.z;
+      const light = this.lampPool[slot];
       filled++;
       // A little above the ground: a window is at head height, and a light at
       // ground level lights the grass and not the wall behind it.
@@ -995,24 +1062,55 @@ export class Renderer {
         light.color.setRGB(1, 0.62, 0.24);
         // Times the same midnight switch, or the pools of light would stay on
         // the road after the lamps above them had gone out.
-        light.intensity = this.night * 0.85 * this.streetOn;
+        state.base = this.night * 0.85 * this.streetOn;
         light.distance = 2.9;
         light.position.y += 0.16;
       } else if (c.warm) {
         light.color.setRGB(1, 0.82, 0.60);
-        light.intensity = this.night * 0.95;
+        state.base = this.night * 0.95;
         light.distance = 2.6;
       } else {
         light.color.setRGB(1, 0.96, 0.88);
-        light.intensity = this.night * 0.8;
+        state.base = this.night * 0.8;
         light.distance = 2.2;
       }
+    }
+
+    /*
+     * And then they fade, rather than switch.
+     *
+     * The hysteresis above stops the *set* churning; this is what makes the
+     * churn that remains invisible. A quarter of a second either way, which is
+     * fast enough that walking the camera into a village feels like the lights
+     * arriving and slow enough that no single frame is a step.
+     */
+    const rate = Math.min(1, dt * 4);
+    for (let q = 0; q < this.lampPool.length; q++) {
+      const st = this.lampState[q];
+      const light = this.lampPool[q];
+      st.level += ((st.taken ? 1 : 0) - st.level) * rate;
+      st.taken = false;
+      if (st.level < 0.01) {
+        st.level = 0;
+        light.visible = false;
+        continue;
+      }
       light.visible = true;
+      light.intensity = st.base * st.level;
     }
-    for (let k = filled; k < this.lampPool.length; k++) {
-      this.lampPool[k].visible = false;
-    }
+    void filled;
   }
+
+  /**
+   * What each light in the pool is currently doing.
+   *
+   * Held across frames, which is the whole point: the pool used to be rebuilt
+   * from nothing every frame, and a set chosen greedily by distance changes when
+   * the camera moves even though none of the lamps do.
+   */
+  private readonly lampState: {
+    x: number; z: number; level: number; base: number; taken: boolean;
+  }[] = [];
 
   private readonly lampCandidates:
   { x: number; z: number; d: number; warm: boolean; sodium: boolean }[] = [];
@@ -1740,7 +1838,7 @@ export class Renderer {
     this.setSeason(src.snow);
     this.setWeather(src.dayFraction, src.dayNumber, dt);
     // After the sun and the weather, because it reads `this.night`.
-    this.placeLights(src);
+    this.placeLights(src, dt);
     /*
      * A shower in winter falls as snow, which needs saying rather than assuming:
      * the two are the same weather and only the temperature differs.
