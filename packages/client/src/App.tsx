@@ -449,19 +449,57 @@ export function App(): JSX.Element {
      */
     const seed = world.config.seed;
 
-    // One building per business, at its access tile — the tile the road reaches,
-    // so a farm sits on its own lane rather than in the middle of a field.
+    /*
+     * One building per business, set back from the lane it is reached by.
+     *
+     * It used to be drawn *on* its access tile, and the access tile is by
+     * definition the tile the road reaches — so every business in the game was
+     * standing in the middle of the carriageway. The models are between one and
+     * two tiles across, so the road went straight through the building, and
+     * "vehicles are driving through buildings" was true of every farm, dairy and
+     * yard in the district. Moving the vehicles onto the road, which was a real
+     * bug of its own, could never have fixed this one.
+     *
+     * A full tile off the road centre, which clears the widest model's near edge
+     * from the lane, and set the *long* axis of the building along the road
+     * rather than into it — which is both what stops the far edge reaching back
+     * across the verge and how buildings actually sit on a street. The direction
+     * to move is toward the site's own ground, away from the tarmac.
+     */
+    const OFF_ROAD = 1.0;
     for (let i = 0; i < world.sites.count; i++) {
       const tile = world.siteAccessTile[i];
       if (tile < 0) continue;
+      const ax = tile % DISTRICT;
+      const az = Math.floor(tile / DISTRICT);
+      // Which way the road runs here, from whichever neighbours carry one.
+      const eastWest = (roadClass[tile + 1] >= 0 || roadClass[tile - 1] >= 0);
+      // And which way is off it: toward the site's own tile, or failing that the
+      // first neighbour that is not road and not water.
+      let dx = 0;
+      let dz = 0;
+      if (eastWest) {
+        dz = Math.sign(world.sites.y[i] - az) || 1;
+        if (roadClass[tile + dz * DISTRICT] >= 0) dz = -dz;
+      } else {
+        dx = Math.sign(world.sites.x[i] - ax) || 1;
+        if (roadClass[tile + dx] >= 0) dx = -dx;
+      }
+      const bx = ax + 0.5 + dx * OFF_ROAD;
+      const bz = az + 0.5 + dz * OFF_ROAD;
       placed.push({
-        x: (tile % DISTRICT) + 0.5,
-        z: Math.floor(tile / DISTRICT) + 0.5,
+        x: bx,
+        z: bz,
         model: world.sites.def[i],
-        // A quarter turn either way, keyed off the tile so it never changes.
-        rot: ((tile * 2654435761) % 4) / 4,
+        /*
+         * Frontage along the road, with a half-turn either way from the tile so
+         * a street is not a row of identical orientations. The models are built
+         * deeper than they are wide, so their long axis is Z: a road running
+         * east-west therefore needs a quarter turn to lay that axis along it.
+         */
+        rot: ((eastWest ? 0.25 : 0) + ((tile * 2654435761) % 2) * 0.5) % 1,
         tile,
-        evening: eveningFor((tile % DISTRICT) + 0.5, Math.floor(tile / DISTRICT) + 0.5, seed),
+        evening: eveningFor(bx, bz, seed),
       });
     }
 

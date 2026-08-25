@@ -38,7 +38,7 @@ import {
 import { Router, type RouteCosts } from './pathfinding.ts';
 import { TileRouter } from './tilerouter.ts';
 import {
-  Crop, NEEDS_WORK, arableStage, grassStage, springSown,
+  Crop, GROWING, NEEDS_WORK, arableStage, grassStage, springSown,
 } from './fields.ts';
 import { Heap } from './heap.ts';
 import {
@@ -3226,13 +3226,24 @@ export class World {
    * over and the district would otherwise stand still. A sprayer working a green
    * field is what is actually happening out there in June.
    */
-  fieldJob(tile: number): 'plough' | 'drill' | 'combine' | 'mow' | 'spray' {
+  fieldJob(tile: number): 'plough' | 'drill' | 'combine' | 'mow' | 'spray' | 'none' {
     const want = this.cropWant;
     const fields = this.terrain.fields;
-    if (!want || tile < 0 || tile >= fields.crop.length) return 'spray';
-    if (fields.parcel[tile] < 0) return 'spray';
+    if (!want || tile < 0 || tile >= fields.crop.length) return 'none';
+    if (fields.parcel[tile] < 0) return 'none';
     const stage = want[tile] as Crop;
-    if (fields.crop[tile] === stage || !NEEDS_WORK.has(stage)) return 'spray';
+    if (fields.crop[tile] === stage || !NEEDS_WORK.has(stage)) {
+      /*
+       * Nothing to do. Whether that means a sprayer or nothing at all depends on
+       * whether there is a crop standing in it.
+       *
+       * "A field is being sprayed that doesn't even have ploughing" — quite
+       * right, and it was nonsense: you spray a growing crop, not bare earth or a
+       * ploughed field. Ground with nothing on it has nobody in it, and a machine
+       * sent there would be a machine doing something that does not happen.
+       */
+      return GROWING.has(fields.crop[tile] as Crop) ? 'spray' : 'none';
+    }
     if (stage === Crop.Plough || stage === Crop.Bare) return 'plough';
     if (stage === Crop.Drilled) return 'drill';
     /*

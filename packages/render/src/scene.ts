@@ -66,6 +66,27 @@ const REVERSE_LIMIT = 3.5;
  */
 const CAMERA_DISTANCE = 120;
 
+/**
+ * The two ways a facing is arrived at, side by side so they cannot disagree.
+ *
+ * The models are authored nose along +X, so a Y-rotation of `a` points the nose
+ * along (cos a, 0, -sin a). The simulation states a bearing in turns with 0 as
+ * north, which points along (sin 2*pi*t, -cos 2*pi*t). Solving the two gives the
+ * heading form; inverting the first gives the motion form.
+ *
+ * Exported because they are the only piece of arithmetic in this renderer that
+ * was derived by hand and used in two places, and getting a quarter turn wrong
+ * here once already drew every vehicle in the game broadside to its own
+ * direction of travel.
+ */
+export function facingFromHeading(turns: number): number {
+  return Math.PI / 2 - turns * Math.PI * 2;
+}
+
+export function facingFromMotion(mx: number, mz: number): number {
+  return Math.atan2(-mz, mx);
+}
+
 /** Tiles per chunk. Small enough that one rebuild is cheap, large enough that a
  *  128² district is sixty-four draw calls rather than a thousand. */
 export const CHUNK = 16;
@@ -1478,12 +1499,19 @@ export class Renderer {
        * round turns that into a turn.
        */
       const id = src.vId[i];
-      const want = Math.PI / 2 - src.vHeading[i] * Math.PI * 2;
+      const want = facingFromHeading(src.vHeading[i]);
       let seen = this.smooth.get(id);
       if (seen !== undefined && src.vStopped[i] === 1) {
         // Standing at a stop: leave it exactly where it is. No easing toward a
         // target, because the target is no longer where the lorry is.
-        seen.rev = 0;
+        /*
+         * Standing at a stop earns the right to reverse away from it.
+         *
+         * The budget is in tiles and it is spent by moving backwards; anything
+         * else cancels it. So a lorry can back out of a spur and nothing else in
+         * the game can ever decide it is reversing.
+         */
+        seen.rev = REVERSE_LIMIT;
         this.tmp.position.set(seen.x, y, seen.z);
         this.tmp.rotation.set(0, seen.a, 0);
         this.tmp.updateMatrix();
@@ -1511,48 +1539,69 @@ export class Renderer {
          */
         const k = Math.min(1, dt * 7);
         /*
-         * Reversing, when the road it is leaving on runs back the way it came.
+         * It faces the way it is actually moving. That is the whole fix for the
+         * drifting, and the drifting was mine.
          *
-         * A farm or a dairy is on a spur, so a lorry arrives up the spur facing
-         * one way and its next link is the same spur facing the other. The
-         * heading therefore flips a hundred and eighty degrees at the stop, and
-         * easing that "the short way round" drew a lorry *spinning on the spot
-         * against the building* - which is what was reported as it aggressively
-         * bumming the thing for a second or two, and what "I hate that things
-         * turn on the spot" was about before that.
+         * The position was eased toward the simulated one on one filter and the
+         * heading toward the simulated heading on a *different, slower* one. Two
+         * lag filters with different time constants cannot agree during a turn,
+         * so every vehicle in the game spent every corner pointing somewhere
+         * other than where it was going — which is precisely what drifting is.
+         * Tuning the two constants closer would have reduced it and never removed
+         * it, because the error is structural: they are separate estimates of the
+         * same thing.
          *
-         * A lorry does not pirouette at a farm gate. It reverses out to the
-         * road. So when the direction it is actually travelling opposes the
-         * direction it is facing, it keeps facing where it is and simply moves
-         * backwards. At the junction the new heading is across its nose rather
-         * than behind it, the test stops holding, and it swings round there -
-         * which is exactly where a driver would do it.
+         * So the heading is not estimated separately any more. It is *derived*
+         * from the drawn motion, which means facing and travel are the same
+         * measurement and cannot disagree by construction. `want` is used only
+         * when the vehicle is too near stationary for its motion to have a
+         * direction, which is the one case where there is nothing to derive from.
          *
-         * Capped in tiles, because reversing is a manoeuvre and not a mode: a
-         * bad heading on the open road must still be corrected, and a spur long
-         * enough to exceed this is one worth turning round in.
+         * The model's nose is +X, so a rotation `a` points it along
+         * (cos a, 0, -sin a) — hence `atan2(-mz, mx)`.
          */
-        const dxTravel = x - seen.x;
-        const dzTravel = z - seen.z;
-        const travelled = Math.hypot(dxTravel, dzTravel);
-        const backwards = travelled > 1e-4
-          && (Math.cos(seen.a) * dxTravel - Math.sin(seen.a) * dzTravel) / travelled < -0.4;
+        const wasX = seen.x;
+        const wasZ = seen.z;
         seen.x += (x - seen.x) * k;
         seen.z += (z - seen.z) * k;
-        if (backwards && seen.rev < REVERSE_LIMIT) {
-          // Reversing: hold the facing and let it travel backwards. The drawn
-          // position is already following normally, so there is nothing else to
-          // do — this is entirely a decision not to turn.
-          seen.rev += travelled * k;
-        } else {
-          seen.rev = 0;
-          // Shortest way round, or a lorry turning from west to north spins 270
-          // degrees the wrong way.
-          let d = want - seen.a;
-          while (d > Math.PI) d -= Math.PI * 2;
-          while (d < -Math.PI) d += Math.PI * 2;
-          seen.a += d * Math.min(1, dt * 6);
+        const mx = seen.x - wasX;
+        const mz = seen.z - wasZ;
+        const moved = Math.hypot(mx, mz);
+        let facing = want;
+        if (moved > 1e-5) {
+          /*
+           * Reversing out of a farm gate, and now it is confined to that.
+           *
+           * A dairy sits on a spur, so a lorry arrives facing up it and leaves
+           * facing down it: the heading flips a hundred and eighty degrees at the
+           * stop, and turning on the spot against the building was reported twice
+           * before this existed. But the first version tested the *drawn* heading
+           * against the travel direction with no other condition, so it also
+           * fired at ordinary corners — where the lagging heading briefly opposed
+           * the motion — and then held the facing for up to three and a half
+           * tiles. It was not merely failing to fix the drift; for the fleet and
+           * the ambient traffic alike it was the largest single cause of it.
+           *
+           * Permitted only in the tiles immediately after a stop, which is the
+           * only place a vehicle genuinely reverses, and cancelled the moment the
+           * motion agrees with the facing again.
+           */
+          const ahead = (Math.cos(seen.a) * mx - Math.sin(seen.a) * mz) / moved;
+          if (seen.rev > 0 && ahead < -0.25) {
+            seen.rev = Math.max(0, seen.rev - moved);
+            facing = seen.a;
+          } else {
+            seen.rev = 0;
+            facing = facingFromMotion(mx, mz);
+          }
         }
+        // Shortest way round, or a lorry turning from west to north spins 270
+        // degrees the wrong way. Fast, because `facing` is already smooth: this
+        // only takes the corner off a change of direction.
+        let d = facing - seen.a;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        seen.a += d * Math.min(1, dt * 12);
       }
       this.smooth.set(id, seen);
       this.tmp.position.set(seen.x, y, seen.z);

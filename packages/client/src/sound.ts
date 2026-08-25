@@ -96,6 +96,25 @@ interface Voice {
   gain: GainNode;
   /** Which vehicle it is following, or -1. */
   id: number;
+  /**
+   * True when this voice has no vehicle.
+   *
+   * A flag rather than a sentinel value in `id`, and that is the entire fix for
+   * "the sound is not 3D, it's just a running engine". `id = -1` used to mean
+   * free — but −1 is a perfectly good vehicle id: the ambient traffic numbers
+   * itself −1, −2, −3 downwards. So a voice that lost its vehicle was marked
+   * free, and on the very next frame the pool looked for "the vehicle with id
+   * −1", *found* it, decided the voice still had its vehicle after all, and
+   * neither reassigned it nor stopped it.
+   *
+   * Every voice that ever went idle therefore ended up glued to the same one
+   * ambient car, playing whatever clip it happened to be holding. Six positional
+   * voices collapsed to one drone that tracked nothing, which is precisely what a
+   * running engine with no direction sounds like. There is no integer that is
+   * safe here — the fleet uses 0 upwards and the traffic −1 downwards — so the
+   * answer cannot be a better sentinel.
+   */
+  free: boolean;
   /** Which clip it is playing, so a car does not become a lorry mid-note. */
   clip: SoundName | null;
 }
@@ -219,7 +238,7 @@ export class Sound {
       gain.gain.value = 0;
       panner.connect(gain);
       gain.connect(this.master);
-      this.voices.push({ source: null, panner, gain, id: -1, clip: null });
+      this.voices.push({ source: null, panner, gain, id: 0, free: true, clip: null });
     }
   }
 
@@ -308,21 +327,22 @@ export class Sound {
       .slice(0, this.voices.length);
 
     const claimed = new Set<number>();
-    // Voices that already have one of the winners keep it.
+    // Voices that already have one of the winners keep it, and are re-aimed at
+    // wherever it has got to.
     for (const v of this.voices) {
-      const still = inRange.find((e) => e.h.id === v.id);
+      const still = v.free ? undefined : inRange.find((e) => e.h.id === v.id);
       if (still) {
         claimed.add(v.id);
         this.aim(v, still.h);
       } else {
-        v.id = -1;
+        v.free = true;
         v.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.25);
       }
     }
     // Free voices take whatever is left, nearest first.
     for (const e of inRange) {
       if (claimed.has(e.h.id)) continue;
-      const free = this.voices.find((v) => v.id === -1);
+      const free = this.voices.find((v) => v.free);
       if (!free) break;
       claimed.add(e.h.id);
       this.play(free, e.h);
@@ -367,6 +387,7 @@ export class Sound {
     v.source = source;
     v.clip = want;
     v.id = h.id;
+    v.free = false;
     this.aim(v, h);
     v.gain.gain.setTargetAtTime(0.55 * this.effectsLevel, ctx.currentTime, 0.35);
   }

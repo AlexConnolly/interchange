@@ -132,6 +132,19 @@ export function springSown(parcel: number): boolean {
  * is allowed to write - which is what turns the tractors from scenery into the
  * thing that changes the district.
  */
+/**
+ * The stages that have something living on them.
+ *
+ * Used to decide whether a field with no job on it is worth visiting at all. A
+ * sprayer belongs on a growing crop; ploughed earth and stubble have nobody in
+ * them, and a machine crawling over bare ground doing nothing is worse than an
+ * empty field, because it invites the question of what it is for.
+ */
+export const GROWING: ReadonlySet<number> = new Set<number>([
+  Crop.Pasture, Crop.PastureRich, Crop.Meadow,
+  Crop.Growing, Crop.Wheat, Crop.WheatRipe,
+]);
+
 export const NEEDS_WORK: ReadonlySet<number> = new Set<number>([
   Crop.Plough, Crop.Drilled, Crop.Stubble, Crop.Bare,
 ]);

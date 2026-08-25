@@ -94,7 +94,7 @@ export interface FarmworkWorld {
 }
 
 /** What is out in the field, which decides both the model and the speed. */
-export type Job = 'plough' | 'drill' | 'combine' | 'mow' | 'spray';
+export type Job = 'plough' | 'drill' | 'combine' | 'mow' | 'spray' | 'none';
 
 /** Which model index draws each machine. Filled in by the client, which is the
  *  only place that knows what order the models were loaded in. */
@@ -239,7 +239,18 @@ export class Farmwork {
     const wanting = free.filter((f) => this.world.needsWork(
       Math.floor(f.entryZ) * this.world.size + Math.floor(f.entryX),
     ));
-    const field = this.pick(wanting.length > 0 ? wanting : free);
+    /*
+     * Somewhere with a job, or failing that somewhere with a crop to spray.
+     *
+     * Never a field with nothing on it and nothing to do: that is where the
+     * sprayer-on-bare-earth came from. If neither list has anything in it the
+     * machine simply stays in the yard, which is what a farm does in a quiet
+     * week.
+     */
+    const idle = free.filter((f) => this.world.job(
+      Math.floor(f.entryZ) * this.world.size + Math.floor(f.entryX),
+    ) !== 'none');
+    const field = this.pick(wanting.length > 0 ? wanting : idle);
     if (!field) return false;
     // A tractor already in its field still needs a way home, so the route is
     // required either way. Nothing else would notice until it tried to leave.
@@ -693,6 +704,14 @@ export class Farmwork {
               t.job = this.world.job(
                 Math.floor(f.entryZ) * size + Math.floor(f.entryX),
               );
+              if (t.job === 'none') {
+                // Somebody else finished it while this one was on the road, and
+                // there is nothing growing to spray. Turn round at the gate.
+                this.release(t);
+                t.phase = 'idle';
+                t.wait = 4;
+                continue;
+              }
               t.phase = 'working';
               t.pass = 0;
               t.along = 0;
