@@ -7,3 +7,4 @@ art/out/
 art/__pycache__/
 packages/client/public/models/
 .tunnel-*.log
+packages/tools/src/scratch*.ts
