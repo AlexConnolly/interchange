@@ -416,7 +416,16 @@ export class Sound {
       gain.gain.value = 0;
       source.connect(gain);
       gain.connect(this.master);
-      source.start(0, Math.random() * buffer.duration);
+      /*
+       * Ambience starts anywhere in its clip; music starts at the beginning.
+       *
+       * A random offset into thirty seconds of wind is what stops two sessions
+       * sounding identical, and nobody can tell where a hedge started. A random
+       * offset into a composed piece drops you into the middle of a phrase,
+       * which is the one thing a piece of music cannot survive.
+       */
+      const music = name === 'musicSummer' || name === 'musicWinter';
+      source.start(0, music ? 0 : Math.random() * buffer.duration);
       entry = { gain, source };
       this.ambient.set(name, entry);
     }
