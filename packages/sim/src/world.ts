@@ -13,7 +13,7 @@ import {
   ACCEL, AUTHORITY, CELLS_PER_TILE, Control, DIR_BIT, DIR_DX, DIR_DY,
   DIR_OPPOSITE, FLOW_WINDOW, HASH_INTERVAL, MAX_COMPANIES, MAX_VEHICLES,
   MAX_NODES, MODE_COUNT, MODE_NAMES, Mode, PATH_LATENCY_TICKS, SPEED_STEPS, START_YEAR,
-  TICKS_PER_DAY, TICKS_PER_YEAR, DAYS_PER_MONTH, DAYS_PER_YEAR, ECONOMY_SCALE, LOAD_PATIENCE_DAYS, LOAD_PATIENCE_SHARE,
+  TICKS_PER_DAY, TICKS_PER_YEAR, DAYS_PER_MONTH, DAYS_PER_YEAR, ECONOMY_SCALE, LOAD_PATIENCE_DAYS, LOAD_PATIENCE_SHARE, CONTAINER_ERA, CONTAINER_TRANSFER_GAIN,
 } from './constants.ts';
 import { Cmd, CommandQueue, type Command } from './commands.ts';
 import {
@@ -140,6 +140,7 @@ export class World {
   private lastEra = 0;
   private entrantDue = 0;
   private airLaid = false;
+  private containerised = false;
   private cargoRateWeight = new Float64Array(256).fill(1);
   private townDemandPerThousand: Float64Array;
   private townWant: Record<string, number> = {};
@@ -1504,6 +1505,7 @@ export class World {
     if (was === 0) return;
 
     this.openNewIndustries(era);
+    this.checkContainerisation(era);
 
     const airCls = this.content.wayIndex.get('airway');
     if (airCls !== undefined && this.content.ways[airCls].era <= era && !this.airLaid) {
@@ -1705,6 +1707,44 @@ export class World {
     this.rebuild();
     this.router.invalidate();
     return true;
+  }
+
+  /**
+   * Containerisation. design.md's era table, and features.md's note that an
+   * era transition should invert the optimum rather than merely retire some
+   * lorries.
+   *
+   * The box did not make ships faster. It made *loading* faster, by about two
+   * orders of magnitude, and everything else followed from that: if a ship
+   * spends three weeks in port and one at sea, the sea leg is not the problem
+   * and a faster ship is not the answer. So this is modelled where it
+   * happened, on the transfer rate, and the consequences fall out on their own
+   * — a container fleet's round trip collapses, the same vehicles suddenly do
+   * three times the work, and the operator who kept a yard full of general
+   * cargo lorries finds their advantage was in the wrong place.
+   *
+   * Applied as a standing change to every container-capable vehicle rather
+   * than as a one-off event, because that is what it was: not something that
+   * happened in 1968, something that was true afterwards.
+   */
+  private checkContainerisation(era: number): void {
+    if (this.containerised || era < CONTAINER_ERA) return;
+    this.containerised = true;
+    let changed = 0;
+    for (let i = 0; i < this.content.vehicles.length; i++) {
+      if (!this.content.vehicles[i].handling.includes('container')) continue;
+      this.vehicleTransfer[i] = Math.round(this.vehicleTransfer[i] * CONTAINER_TRANSFER_GAIN);
+      changed++;
+    }
+    if (changed > 0) {
+      this.onEvent?.(
+        'era',
+        'The box has arrived. Anything that can carry containers now loads and '
+        + 'unloads several times faster, which is where the time in a journey '
+        + 'actually goes. Everything else you own has just become slower by '
+        + 'comparison.',
+      );
+    }
   }
 
   /**
@@ -2616,6 +2656,7 @@ export class World {
     h.array(this.regulator.pressure, this.companies.count);
     h.array(this.regulator.relief, this.companies.count);
     h.int(this.climate.weather).int(this.climate.severity);
+    h.int(this.containerised ? 1 : 0);
     h.int(this.events.count);
     h.array(this.events.active, this.events.count);
     h.array(this.events.kind, this.events.count);

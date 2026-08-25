@@ -186,3 +186,18 @@ export const LOAD_PATIENCE_SHARE = 0.35;
 
 /** Patience before a round trip has been measured, in days. */
 export const LOAD_PATIENCE_DAYS = 12;
+
+/** The era the box arrives. design.md's era table puts containerisation at the
+ *  head of era five, with the deep-water ports it needed. */
+export const CONTAINER_ERA = 5;
+
+/**
+ * How much faster a container-capable vehicle loads afterwards.
+ *
+ * Containerisation was not a speed improvement, it was a *handling*
+ * improvement, and the historical figure is closer to a hundredfold than to
+ * three. Three is what the game can absorb: this multiplies straight into the
+ * round trip of every container fleet, and a hundred would make everything
+ * else in the region irrelevant overnight rather than merely obsolete.
+ */
+export const CONTAINER_TRANSFER_GAIN = 3;

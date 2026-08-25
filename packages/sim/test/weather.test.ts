@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   Climate, EventTable, stepEvents, Season, Weather, SNOW_LINE, FLOOD_LINE,
   floodSeverity, strikePercent, runningCostPercent, ratePercent, EventKind,
-  Rng, TICKS_PER_DAY, DAYS_PER_YEAR, createWorld, TICKS_PER_YEAR,
+  Rng, TICKS_PER_DAY, DAYS_PER_YEAR, createWorld, TICKS_PER_YEAR, CONTAINER_ERA,
 } from '../src/index.ts';
 
 describe('the seasons', () => {
@@ -126,6 +126,34 @@ describe('the world under weather', () => {
     for (let i = 0; i < TICKS_PER_YEAR * 12; i++) w.step();
     // Whatever the sky is doing, the region still carries things.
     expect(w.stats.tonnesMoved).toBeGreaterThan(0);
+  });
+});
+
+describe('era transitions', () => {
+  it('containerisation speeds up handling, not travel, and only for boxes', () => {
+    const w = createWorld({ seed: 1860, size: 256, townCount: 8, companyCount: 3 });
+    const artic = w.content.vehicles.findIndex((v) => v.id === 'artic-box');
+    const van = w.content.vehicles.findIndex((v) => v.id === 'van-parcel');
+    expect(artic).toBeGreaterThanOrEqual(0);
+    expect(van).toBeGreaterThanOrEqual(0);
+    const rate = (i: number) => (w as unknown as { vehicleTransfer: Int32Array }).vehicleTransfer[i];
+    const speed = (i: number) => (w as unknown as { vehicleSpeed: Int32Array }).vehicleSpeed[i];
+
+    const articBefore = rate(artic);
+    const vanBefore = rate(van);
+    const articSpeed = speed(artic);
+    while (w.era < CONTAINER_ERA) w.step();
+
+    /*
+     * The box did not make ships faster; it made loading faster, by about two
+     * orders of magnitude, and everything else followed. Modelling it as a
+     * speed bonus would be modelling the wrong thing and would not invert
+     * anybody's optimum, which is the point of an era transition.
+     */
+    expect(rate(artic)).toBeGreaterThan(articBefore * 2);
+    expect(speed(artic)).toBe(articSpeed);
+    // And a van that cannot take a container gains nothing at all.
+    expect(rate(van)).toBe(vanBefore);
   });
 });
 
