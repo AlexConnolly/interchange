@@ -200,15 +200,29 @@ html, body, #root, .app {
   padding: 12px 14px 8px;
 }
 .panel-title { font-weight: 600; flex: 1; }
+/* The close button, and it now answers the pointer.
+ *
+ * It had no hover state at all, which on a control whose whole job is "press me
+ * to make this go away" is the one place it is worth the four lines: a bare ×
+ * with no affordance reads as a label until you happen to click it. A round
+ * target that darkens is the smallest thing that says *button*. */
 .x {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
   border: 0;
+  border-radius: 50%;
   background: none;
   font-size: 20px;
   line-height: 1;
   color: var(--ink-dim);
   cursor: pointer;
-  padding: 0 2px;
+  padding: 0;
+  transition: background 120ms ease, color 120ms ease;
 }
+.x:hover { background: rgba(0, 0, 0, 0.08); color: var(--ink); }
+.x:active { background: rgba(0, 0, 0, 0.14); }
 .panel-body { padding: 0 14px 14px; }
 .offer-line { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
@@ -1125,3 +1139,48 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   text-transform: uppercase;
   color: #7d8a5e;
 }
+
+
+/* ------------------------------------------------- panels going away again
+
+   Closing was instant, and that is the one half of a transition nobody
+   remembers to write: a panel that grows out of the dock on the way in and then
+   vanishes between two frames on the way out reads as a crash rather than as a
+   dismissal. It matters more for the click-away than for the button, because
+   clicking the map is not obviously a *close* gesture — the movement is what
+   tells you what just happened.
+
+   Faster than the way in, which is the usual asymmetry: arriving wants to be
+   noticed and leaving wants to be out of the way. The panel stays mounted for
+   exactly this long — see `useLeaving`, which is where the number is matched. */
+@keyframes bubble-go {
+  to { opacity: 0; transform: translate(-50%, -100%) scale(0.94); }
+}
+@keyframes bubble-go-below {
+  to { opacity: 0; transform: translate(-50%, 0) scale(0.94); }
+}
+@keyframes dock-go {
+  to { opacity: 0; transform: translateX(-50%) translateY(8px) scale(0.97); }
+}
+.app.panel-leaving .bubble {
+  animation: bubble-go 120ms cubic-bezier(0.4, 0, 0.9, 0.5) both;
+  pointer-events: none;
+}
+.app.panel-leaving .bubble.below,
+.app.panel-leaving .bubble.adrift {
+  animation-name: bubble-go-below;
+}
+/* Last, so it beats the two above whatever order they land in. A dock panel is
+   never `below` or `adrift`, but the class list does not know that. */
+.app.panel-leaving .bubble.fixed { animation: dock-go 120ms cubic-bezier(0.4, 0, 0.9, 0.5) both; }
+
+/* And the pause menu, which is a dialog like any other. The veil fades on its
+   own rather than with the card: a blurred sheet that scales looks like the
+   world moving, and the world is exactly what is not moving. */
+@keyframes veil-go { to { opacity: 0; } }
+@keyframes pause-go { to { opacity: 0; transform: translateY(6px) scale(0.97); } }
+.app.pause-leaving .pause-veil {
+  animation: veil-go 140ms ease both;
+  pointer-events: none;
+}
+.app.pause-leaving .pause { animation: pause-go 140ms cubic-bezier(0.4, 0, 0.9, 0.5) both; }

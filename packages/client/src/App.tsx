@@ -251,6 +251,59 @@ function roadClassOf(cls: number, names: string[]): RoadClass {
   return RoadClass.Lane;
 }
 
+
+/**
+ * Keep something on screen for long enough to animate away.
+ *
+ * React unmounts the moment the condition goes false, which gives every panel in
+ * the game an entrance and no exit — it grows out of the dock on the way in and
+ * then disappears between two frames on the way out. That reads as a crash
+ * rather than as a dismissal, and it is worst for the click-away, where clicking
+ * the map is not obviously a *close* gesture and the movement is the only thing
+ * that says what just happened.
+ *
+ * So the value is held after it closes, and a flag says it is on its way out.
+ * `ms` has to match the CSS, and there is no way around that: the animation
+ * lives in the stylesheet and the unmount lives here.
+ */
+function useLeaving<T>(value: T, open: boolean, ms: number): [T, boolean] {
+  const [shown, setShown] = useState(value);
+  const [leaving, setLeaving] = useState(false);
+  const [wasOpen, setWasOpen] = useState(open);
+
+  /*
+   * Adjusted during render, not in an effect, and that is the whole of it.
+   *
+   * The first version set `leaving` from an effect, which is a frame too late:
+   * effects run *after* the commit, and the commit that closes the panel is the
+   * one that unmounts it. The condition holding the panel on screen was itself
+   * derived from `leaving`, so on the closing render `leaving` was still false,
+   * the panel went, and the effect then set a flag on nothing. Measured with a
+   * MutationObserver: the class never appeared at all on a click-away.
+   *
+   * Setting state during render re-runs this component before anything is
+   * committed, so `leaving` is true in the *same* commit that `open` goes false.
+   * This is React's documented way of adjusting state when an input changes, and
+   * it is the only version of this that is not a race.
+   */
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) { setShown(value); setLeaving(false); } else setLeaving(true);
+  } else if (open && value !== shown) {
+    // Switching straight from one panel to another: swap, do not animate.
+    setShown(value);
+  }
+
+  useEffect(() => {
+    if (!leaving) return undefined;
+    const id = window.setTimeout(() => setLeaving(false), ms);
+    return () => { window.clearTimeout(id); };
+  }, [leaving, ms]);
+
+  // Never both: reopening inside the window must not leave the exit class on.
+  return [shown, leaving && !open];
+}
+
 export function App(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [ready, setReady] = useState(false);
@@ -282,6 +335,14 @@ export function App(): JSX.Element {
    */
   const [panel, setPanel] = useState<Panel>({ k: 'none' });
   /*
+   * What is drawn, which lags what is open by the length of the exit animation.
+   * `panel` stays the truth — the dock button un-lights the instant you press it
+   * — and only the panel itself is held back.
+   */
+  const panelOpen = panel.k !== 'none';
+  const [shownPanel, panelLeaving] = useLeaving(panel, panelOpen, 120);
+  const showPanel = panelOpen || panelLeaving;
+  /*
    * Placing a depot: the one moment the map is an input rather than a display.
    *
    * A mode rather than a panel, because what you need on screen while choosing
@@ -291,6 +352,7 @@ export function App(): JSX.Element {
   const [building, setBuilding] = useState(false);
   const [options, setOptions] = useState<Options>(loadOptions);
   const [paused, setPaused] = useState(false);
+  const [, pauseLeaving] = useLeaving(paused, paused, 140);
   /**
    * The frame loop reads both of these through refs.
    *
@@ -2056,7 +2118,10 @@ export function App(): JSX.Element {
   }, []);
 
   return (
-    <div className="app">
+    <div
+      className={`app${panelLeaving ? ' panel-leaving' : ''}`
+        + `${pauseLeaving ? ' pause-leaving' : ''}`}
+    >
       <canvas ref={canvasRef} className="world" />
       {live && (
         <Markers
@@ -2082,26 +2147,26 @@ export function App(): JSX.Element {
           onOpen={(vehicle) => setPanel({ k: 'driver', vehicle })}
         />
       )}
-      {live && panel.k === 'driver' && (
+      {live && showPanel && shownPanel.k === 'driver' && (
         <Driver
           world={live.world}
           renderer={live.renderer}
-          vehicle={panel.vehicle}
+          vehicle={shownPanel.vehicle}
           onDrop={(v) => {
             if (live.world.dropVehicle(v)) { bump(); setPanel({ k: 'none' }); }
           }}
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
-      {live && panel.k === 'place' && (
+      {live && showPanel && shownPanel.k === 'place' && (
         <Place
           world={live.world}
           renderer={live.renderer}
-          site={panel.site}
+          site={shownPanel.site}
           actions={placeActions}
         />
       )}
-      {live && panel.k === 'vehicles' && (
+      {live && showPanel && shownPanel.k === 'vehicles' && (
         <Fleet
           world={live.world}
           onFit={fit}
@@ -2112,7 +2177,7 @@ export function App(): JSX.Element {
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
-      {live && panel.k === 'owned' && (
+      {live && showPanel && shownPanel.k === 'owned' && (
         <Owned
           world={live.world}
           onGoSite={(site) => {
@@ -2127,7 +2192,7 @@ export function App(): JSX.Element {
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
-      {live && panel.k === 'contracts' && (
+      {live && showPanel && shownPanel.k === 'contracts' && (
         <Contracts
           world={live.world}
           onGoSite={(site) => {
@@ -2138,7 +2203,7 @@ export function App(): JSX.Element {
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
-      {live && panel.k === 'planning' && (
+      {live && showPanel && shownPanel.k === 'planning' && (
         <Planning
           world={live.world}
           onFund={(pence) => { if (live.world.fundParish(pence).ok) bump(); }}
@@ -2156,18 +2221,18 @@ export function App(): JSX.Element {
         </div>
       )}
       {!building && note !== '' && <div className="build-hint"><b>{note}</b></div>}
-      {live && panel.k === 'yard' && (
+      {live && showPanel && shownPanel.k === 'yard' && (
         <Yard
           world={live.world}
           renderer={live.renderer}
-          yard={panel.yard}
+          yard={shownPanel.yard}
           onAdd={addFacility}
           onFit={fit}
           onBuy={buy}
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
-      {paused && (
+      {(paused || pauseLeaving) && (
         <Settings
           options={options}
           onChange={setOptions}
