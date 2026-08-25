@@ -125,6 +125,51 @@ def pitched(name, w, d, wall, rise, body, roof, ridge='x', eaves=0.07):
     return made
 
 
+def spill(name, w, d, wall, warm=WINDOW):
+    """Light on the ground outside a lit wall.
+
+    Same problem as the vehicle lamps and the same answer: an emissive window is
+    a bright shape and not a light source, so the pool it would throw is drawn.
+    Three strips of decreasing brightness lying just off each long wall, additive,
+    so at night a cottage stands in a patch of its own light.
+
+    It is the single cheapest thing that makes a village read as inhabited rather
+    than as a model. Twelve triangles a building.
+    """
+    made = []
+    steps = 5
+    for i in range(steps):
+        f = i / steps
+        g = (i + 1) / steps
+        # Cubed rather than squared, and a quarter of the brightness the first
+        # attempt used. At 0.50 with a square falloff the pools came out as flat
+        # cream rectangles - paving slabs, not light. Additive blending is
+        # unforgiving that way: anything approaching the value of the surface it
+        # is added to stops reading as glow and starts reading as an object.
+        bright = (1 - g) ** 3
+        mat = lib.material(lib.LAMP + '_sp%d' % i,
+                           # Dimmer again, because eight *real* lights now do the
+                           # near work (see the lamp pool in scene.ts) and this
+                           # only has to carry the distance. Two things drawing
+                           # the same pool of light is how you get a cream slab.
+                           (0.19 * bright, 0.13 * bright, 0.055 * bright, 1.0),
+                           emissive=1.0, rough=0.6)
+        reach = wall * 1.9
+        # And it *narrows* going out, where the first version widened. A pool of
+        # light from a window is a lozenge with soft ends; a rectangle that grows
+        # away from the wall is a driveway.
+        for sy in (-1, 1):
+            o = lib.box('%s_sp%d%d' % (name, i, sy),
+                        (w * (1.05 - 0.55 * ((f + g) / 2)),
+                         reach * (g - f) * 2 * 1.34, 0.004),
+                        loc=(0, sy * (d / 2 + reach * (f + g) / 2), 0.006))
+            o.data.materials.append(mat)
+            made.append(o)
+    void = warm
+    del void
+    return made
+
+
 def house(name, w=0.46, d=0.38, wall=0.26, body=BRICK, roof=SLATE, ridge='x'):
     """A dwelling: pitched, with a chimney.
 
@@ -137,6 +182,7 @@ def house(name, w=0.46, d=0.38, wall=0.26, body=BRICK, roof=SLATE, ridge='x'):
                 loc=(w * 0.3, 0, wall + wall * 0.80)),
         BRICK, name + '_stackmat'))
     made += windows(name, w, d, wall)
+    made += spill(name, w, d, wall)
     return made
 
 
@@ -149,6 +195,7 @@ def barn(name, w=0.80, d=0.42, wall=0.24, body=TIMBER, roof=STEEL, ridge='x',
     # light on has somebody working late in it, and a barn lit like a terrace
     # reads as a hotel.
     made += windows(name, w * 0.7, d, wall * 0.9)
+    made += spill(name, w * 0.7, d, wall * 0.7)
     if open_end:
         made.append(_paint(
             lib.box(name + '_mouth', (0.02, d * 0.62, wall * 0.78),
@@ -539,7 +586,9 @@ def main():
     # there are a dozen or two in a district, and each is drawn once - where a
     # vehicle is drawn per instance. The budget follows the draw cost, not the
     # object's importance.
-    lib.summarise(report, budget=900)
+    # 1100. The lit windows and the pools of light they throw are worth it:
+    # they are the whole difference between a village at night and a silhouette.
+    lib.summarise(report, budget=1100)
 
 
 if __name__ == '__main__':

@@ -30,7 +30,8 @@
 import {
   AdditiveBlending, BackSide, Color, DirectionalLight, DoubleSide, Group,
   InstancedMesh, MeshBasicMaterial, MeshLambertMaterial, Object3D, OrthographicCamera,
-  HemisphereLight, PCFSoftShadowMap, Scene as ThreeScene, Vector3, WebGLRenderer,
+  HemisphereLight, PCFSoftShadowMap, PointLight, Scene as ThreeScene, Vector3,
+  WebGLRenderer,
 } from 'three';
 import { buildGround, toMesh, HEIGHT_TO_WORLD, type GroundSource } from './ground.ts';
 import { Mesh } from './geometry.ts';
@@ -53,6 +54,15 @@ export const CHUNK = 16;
  * district size, the field size, the model budgets — follows from it.
  */
 export const TILES_ACROSS_DEFAULT = 26;
+
+/**
+ * How many real lights the scene keeps.
+ *
+ * Eight. Three renders forward, so this number appears in every shader in the
+ * scene and every fragment pays for it whether anything is near it or not —
+ * which is why it is a pool handed round rather than a light per lamp.
+ */
+const LAMP_POOL = 8;
 
 export interface RenderSource extends GroundSource, RoadSource {
   /** Vehicles: position in tiles, heading in turns, whose it is, and which
@@ -130,6 +140,27 @@ export class Renderer {
   private readonly glow: MeshBasicMaterial;
   private readonly sun: DirectionalLight;
   private readonly fill: HemisphereLight;
+  /**
+   * Real lights, a few, for the things nearest the camera.
+   *
+   * "Why not just use actual lights?" — and for these, that is the right
+   * question. The answer for the other two hundred is that three renders forward:
+   * every light is compiled into the shader and costs per-fragment work on every
+   * material in the scene, so the practical ceiling is somewhere around a dozen
+   * and a night district has hundreds of lit windows and thirty vehicles.
+   *
+   * But a pool solves that, and it is the standard answer. Keep eight lights,
+   * assign them each frame to whatever is closest to the camera, and let the
+   * drawn beams and pools carry everything further out. Near the camera — which
+   * is the only place you can see the difference — the light is real: it falls
+   * off correctly, it climbs the *walls* of the building it comes from, and a
+   * lorry driving past a lit cottage picks up warm light down its side. A quad
+   * lying on the ground can never do any of that.
+   *
+   * Eight, and no shadows on them. A shadow-casting point light is six shadow
+   * maps and would be the whole frame budget for one window.
+   */
+  private readonly lampPool: PointLight[] = [];
   private readonly chunks = new Map<number, Chunk>();
   private readonly fleet = new Group();
   /** Batches indexed [model][livery], for bodies and for lamps. */
@@ -283,6 +314,16 @@ export class Renderer {
       new Color(...SKY.zenith), new Color(...SKY.ground), 0.78,
     );
     this.scene.add(this.fill);
+    for (let i = 0; i < LAMP_POOL; i++) {
+      // Distance rather than decay: a physically correct inverse-square falloff
+      // at this scale puts everything either blown out or black, because a tile
+      // is a symbolic unit and not a metre. A linear-ish falloff over a fixed
+      // radius is the one that looks like light here.
+      const light = new PointLight(new Color(1, 0.72, 0.38), 0, 4.5, 1.4);
+      light.visible = false;
+      this.scene.add(light);
+      this.lampPool.push(light);
+    }
     this.scene.add(this.fleet);
     this.scene.add(this.places);
     this.scene.add(this.scatter);
@@ -571,6 +612,89 @@ export class Renderer {
   night = 0;
   private readonly clear = new Color();
   private readonly sunRGB: [number, number, number] = [0, 0, 0];
+
+  /**
+   * Hand the pool to whatever is nearest, and switch it off in daylight.
+   *
+   * Nearest *to the camera's target*, not to the camera, because the target is
+   * where the player is looking. Buildings first and vehicles after, because a
+   * lit window is stationary and a moving light draws the eye far more than it
+   * is worth — one or two headlamps close by is atmosphere, eight is a disco.
+   *
+   * Sorted by a partial selection rather than a full sort: there are a couple of
+   * hundred candidates and eight winners, so `sort` would be doing two hundred
+   * comparisons a frame to answer a question eight passes can answer.
+   */
+  private placeLights(src: RenderSource): void {
+    if (this.lampPool.length === 0) return;
+    if (this.night < 0.02) {
+      for (const l of this.lampPool) l.visible = false;
+      return;
+    }
+
+    // Candidates: every building in view, then the player's vehicles.
+    const cand = this.lampCandidates;
+    cand.length = 0;
+    for (let i = 0; i < src.placeCount; i++) {
+      const dx = src.px[i] - this.camX;
+      const dz = src.pz[i] - this.camZ;
+      const d = dx * dx + dz * dz;
+      if (d > 900) continue;
+      cand.push({ x: src.px[i], z: src.pz[i], d, warm: true });
+    }
+    for (let i = 0; i < src.vehicleCount; i++) {
+      // Only yours. Ambient traffic already carries a drawn beam, and a real
+      // light on every passing car is the disco.
+      if (src.vId[i] < 0) continue;
+      const dx = src.vx[i] - this.camX;
+      const dz = src.vz[i] - this.camZ;
+      const d = dx * dx + dz * dz;
+      if (d > 400) continue;
+      cand.push({ x: src.vx[i], z: src.vz[i], d, warm: false });
+    }
+
+    const want = Math.min(this.lampPool.length, cand.length);
+    for (let k = 0; k < want; k++) {
+      let best = k;
+      for (let j = k + 1; j < cand.length; j++) {
+        if (cand[j].d < cand[best].d) best = j;
+      }
+      const tmp = cand[k];
+      cand[k] = cand[best];
+      cand[best] = tmp;
+
+      const c = cand[k];
+      const light = this.lampPool[k];
+      // A little above the ground: a window is at head height, and a light at
+      // ground level lights the grass and not the wall behind it.
+      light.position.set(c.x, this.groundTop(src, c.x, c.z) + 0.34, c.z);
+      /*
+       * Dim, and dimmer than the first guess by half.
+       *
+       * At 2.6 over four and a half tiles a single cottage lit most of a field
+       * bright yellow — which is not what a window does, and over green grass it
+       * went lurid. A window throws light a few yards and then stops. Less
+       * saturated too: tungsten *is* orange, but a saturated orange light on
+       * green grass is the one combination that reads as a fault rather than as
+       * warmth.
+       */
+      if (c.warm) {
+        light.color.setRGB(1, 0.82, 0.60);
+        light.intensity = this.night * 0.95;
+        light.distance = 2.6;
+      } else {
+        light.color.setRGB(1, 0.96, 0.88);
+        light.intensity = this.night * 0.8;
+        light.distance = 2.2;
+      }
+      light.visible = true;
+    }
+    for (let k = want; k < this.lampPool.length; k++) {
+      this.lampPool[k].visible = false;
+    }
+  }
+
+  private readonly lampCandidates: { x: number; z: number; d: number; warm: boolean }[] = [];
 
   /** Stream the chunks around the camera, building what has come into view. */
   private streamChunks(src: RenderSource): void {
@@ -1053,6 +1177,8 @@ export class Renderer {
     this.placeSun(src.dayFraction);
     this.setSeason(src.snow);
     this.setWeather(src.dayFraction, src.dayNumber, dt);
+    // After the sun and the weather, because it reads `this.night`.
+    this.placeLights(src);
     this.placeCamera();
     this.renderer.render(this.scene, this.camera);
   }

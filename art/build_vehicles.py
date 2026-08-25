@@ -124,6 +124,75 @@ def lamps(name, nose, tail, half_width, height):
     return made
 
 
+def beam(name, nose, tail, half_width, length):
+    """Light *on the road*, in front of the lamps and behind them.
+
+    The lamps glowed and lit nothing — "there's no lights from them though" —
+    because an emissive quad is a bright shape, not a light source. Real lights
+    are out of the question at this scale: a district at night has hundreds of
+    lamps and `MeshLambertMaterial` takes a handful.
+
+    So the spill is drawn. A flat quad lying on the road, additively blended, is
+    indistinguishable from a headlamp beam from four hundred feet — and it is the
+    thing that turns a pair of dots into a vehicle travelling.
+
+    Segmented, because a beam has to *fade* and the glTF path carries one colour
+    per material rather than per vertex. Four strips of decreasing brightness
+    from the same reserved slot: the near one nearly white, the far one almost
+    nothing. Eight triangles for the whole thing.
+
+    Lying at z just above zero rather than parented to the lamps, so it stays on
+    the ground when the vehicle pitches over a hump — a beam that tilted with the
+    cab would sweep into the sky on every bump.
+    """
+    made = []
+    steps = 5
+    for i in range(steps):
+        f = i / steps
+        g = (i + 1) / steps
+        # Falls off with the square, which is how light behaves and also what
+        # stops the far end reading as a hard edge.
+        bright = (1 - g) ** 2.4
+        mat = lib.material(
+            lib.LAMP + '_b%d' % i,
+            (0.26 * bright, 0.22 * bright, 0.14 * bright, 1.0),
+            emissive=1.0, rough=0.5,
+        )
+        mid = nose + length * (f + g) / 2
+        # A third longer than its slot, so consecutive strips overlap. Additive
+        # blending sums where they meet, which turns the hard step between one
+        # brightness and the next into a ramp — the cheapest possible gradient on
+        # a path that carries one colour per material.
+        span = length * (g - f) * 1.34
+        # Widening away from the vehicle: a beam spreads.
+        wide = half_width * (1.5 + 5.0 * (f + g) / 2)
+        o = lib.box('%s_beam%d' % (name, i), (span, wide * 2, 0.004),
+                    loc=(mid, 0, 0.006))
+        o.data.materials.append(mat)
+        made.append(o)
+
+    # And a much smaller, redder wash behind: brake and tail lamps do throw a
+    # little onto the road, and without it a lorry seen from behind at night has
+    # a hard edge where its lights stop.
+    for i in range(2):
+        f = i / 2
+        g = (i + 1) / 2
+        bright = (1 - g) ** 2
+        mat = lib.material(
+            lib.LAMP + '_r%d' % i,
+            (0.34 * bright, 0.03 * bright, 0.02 * bright, 1.0),
+            emissive=1.0, rough=0.5,
+        )
+        mid = tail - length * 0.34 * (f + g) / 2
+        span = length * 0.34 * (g - f)
+        wide = half_width * (1.4 + 2.2 * (f + g) / 2)
+        o = lib.box('%s_glow%d' % (name, i), (span, wide * 2, 0.004),
+                    loc=(mid, 0, 0.005))
+        o.data.materials.append(mat)
+        made.append(o)
+    return made
+
+
 def cab(name, length, half_width, height, floor):
     """A cab, grown rather than stacked.
 
@@ -204,6 +273,7 @@ def van(reefer=False):
     parts[-1].location.x -= L * 0.16
     parts += wheels('van', (0.30, -0.26), hw, 0.030, L)
     parts += lamps('van', L * 0.46, -L * 0.47, hw, 0.085)
+    parts += beam('van', L * 0.5, -L * 0.5, hw, 1.15)
     return parts
 
 
@@ -223,6 +293,7 @@ def rigid(kind):
         parts[-1].location.x -= L * 0.12
     parts += wheels('rigid', (0.32, -0.20, -0.34), hw, 0.036, L)
     parts += lamps('rigid', L * 0.47, -L * 0.48, hw, 0.100)
+    parts += beam('rigid', L * 0.5, -L * 0.5, hw, 1.35)
     return parts
 
 
@@ -243,6 +314,7 @@ def artic(kind):
     parts[-1].location.x -= L * 0.14
     parts += wheels('artic', (0.40, 0.24, -0.20, -0.32, -0.44), hw, 0.038, L)
     parts += lamps('artic', L * 0.49, -L * 0.49, hw, 0.115)
+    parts += beam('artic', L * 0.5, -L * 0.5, hw, 1.55)
     return parts
 
 
@@ -277,6 +349,7 @@ def car(estate=False):
     parts = [obj]
     parts += wheels('car', (0.30, -0.30), hw, 0.021, L)
     parts += lamps('car', L * 0.48, -L * 0.48, hw, 0.062)
+    parts += beam('car', L * 0.5, -L * 0.5, hw, 0.95)
     return parts
 
 
@@ -311,7 +384,9 @@ def main():
     # ground pass already drawing sixteen thousand. It is not the frame.
     # 560, up from 480. The halos round the lamps are four boxes a vehicle and
     # they are the difference between a lorry at night being visible and not.
-    lib.summarise(report, budget=560)
+    # 700. The beams are twelve boxes a vehicle and they are the difference
+    # between a lamp being a bright dot and a vehicle having headlights.
+    lib.summarise(report, budget=700)
 
 
 if __name__ == '__main__':
