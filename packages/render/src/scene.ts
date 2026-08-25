@@ -83,6 +83,20 @@ export interface RenderSource extends GroundSource, RoadSource {
   dayFraction: number;
   /** 0..1 depth of snow. One number, and the same one the traffic obeys. */
   snow: number;
+  /**
+   * Scatter: trees, and anything else there are hundreds of.
+   *
+   * A separate layer from the buildings because the counts are two orders apart.
+   * A district has a dozen businesses and a thousand trees, so they want
+   * different instance capacities and different update rules — the buildings are
+   * relaid whenever influence grows, the trees never move at all.
+   */
+  scatterCount: number;
+  sx: Float32Array;
+  sz: Float32Array;
+  sModel: Uint8Array;
+  sRot: Float32Array;
+  sScale: Float32Array;
 }
 
 interface Chunk {
@@ -111,6 +125,8 @@ export class Renderer {
   private lamps: (InstancedMesh | null)[][] = [];
   private readonly places = new Group();
   private placeBatches: InstancedMesh[] = [];
+  private readonly scatter = new Group();
+  private scatterBatches: InstancedMesh[] = [];
   /** A route being considered, drawn over the road. */
   private routeMesh: ReturnType<typeof toMesh> | null = null;
   private routeKey = '';
@@ -121,6 +137,18 @@ export class Renderer {
   /** Where the camera is looking, in tiles, and how much it shows. */
   camX = 0;
   camZ = 0;
+  /**
+   * Where it is heading, if anywhere.
+   *
+   * Jumping the camera to a place loses the player: the district looks much the
+   * same everywhere, so a cut gives no sense of *which way* you went, and the
+   * relationship between where you were and where you are now — which is the
+   * whole content of "this farm supplies that dairy" — is thrown away. Gliding
+   * keeps it. It costs two numbers and an ease.
+   */
+  private flyX = 0;
+  private flyZ = 0;
+  private flying = false;
   /** The height of the ground under the camera's target, so the view is framed
    *  on the land rather than on the origin plane. */
   camY = 0;
@@ -161,19 +189,21 @@ export class Renderer {
      */
     this.material = litMaterial({});
     /*
-     * Roads get their own material so they can go the other way in the snow.
+     * Roads get their own material so they can take *less* snow, not different
+     * snow.
      *
-     * A cleared road is darker and wetter than a dry one, and the whole frame's
-     * contrast inverts for three months of every year: dark roads on a bright
-     * ground, where the rest of the year is pale roads on green. Mixing them
-     * toward white with everything else would erase the network exactly when it
-     * is at its most legible.
+     * I had this backwards first time and it was a design decision, not a bug —
+     * I reasoned that a cleared road is darker and wetter than a dry one, made
+     * roads mix toward a wet grey, and got a district where the fields went
+     * white and the roads went black. It is defensible and it is not what a
+     * snowy lane looks like, which is snow with two dark tracks cut through it.
+     * The tracks do that job on their own (see roads.ts), and they do it far
+     * better, because they say where the traffic goes.
      *
-     * 0.72 rather than 1 because a road is not perfectly swept, and the verges
-     * either side take full snow from `this.material` — so the ribbon reads as
-     * ploughed with white banks.
+     * 0.88 rather than 1 so the road keeps a hint of its own colour under the
+     * snow and does not merge into the field beside it.
      */
-    this.roadMaterial = litMaterial({ takes: 0.72, to: SNOW.wet });
+    this.roadMaterial = litMaterial({ takes: 0.88 });
 
     /*
      * The glow pass, and it is one material shared by every emitter in the
@@ -244,6 +274,7 @@ export class Renderer {
     this.scene.add(this.fill);
     this.scene.add(this.fleet);
     this.scene.add(this.places);
+    this.scene.add(this.scatter);
   }
 
   resize(w: number, h: number): void {
@@ -294,6 +325,45 @@ export class Renderer {
    * tight around what is on screen, which is how a 2048 map produces sharp
    * shadows over a 26-tile frame.
    */
+  /**
+   * Glide to a place instead of cutting to it.
+   *
+   * Exponential ease with a floor on the step, so it is quick when far and does
+   * not crawl for ever when close — a pure exponential never arrives, and a
+   * camera that is still creeping a tenth of a tile after two seconds reads as
+   * a bug. Any drag or key cancels it, because the player taking hold of the
+   * camera always wins.
+   */
+  flyTo(x: number, z: number): void {
+    this.flyX = x;
+    this.flyZ = z;
+    this.flying = true;
+  }
+
+  /** Stop gliding. Called when the player moves the camera themselves. */
+  stopFlying(): void {
+    this.flying = false;
+  }
+
+  private stepFly(dt: number): void {
+    if (!this.flying) return;
+    const dx = this.flyX - this.camX;
+    const dz = this.flyZ - this.camZ;
+    const away = Math.hypot(dx, dz);
+    if (away < 0.05) {
+      this.camX = this.flyX;
+      this.camZ = this.flyZ;
+      this.flying = false;
+      return;
+    }
+    // Six per cent of the remainder per sixtieth, with a floor of a fifth of a
+    // tile a second so the last stretch is walked rather than approached.
+    const k = Math.min(1, 1 - Math.pow(1 - 0.075, dt * 60));
+    const step = Math.max(away * k, Math.min(away, 0.2 * dt * 60 * 0.06));
+    this.camX += (dx / away) * step;
+    this.camZ += (dz / away) * step;
+  }
+
   /** Sample the ground under the camera so the view stays framed as it pans. */
   private followGround(src: RenderSource): void {
     const x = Math.max(0, Math.min(src.size - 1, Math.round(this.camX)));
@@ -596,6 +666,66 @@ export class Renderer {
     });
   }
 
+  /**
+   * Hand the renderer the scatter models.
+   *
+   * Big capacity, and it is the only reason this is not just more place models:
+   * seven hundred trees against sixty-four buildings. Trees cast shadows and
+   * receive them, which for something drawn a thousand times is worth stating —
+   * it is the whole cost of having them, and the whole reason they are worth
+   * having. A tree without a shadow is a sticker.
+   */
+  setScatterModels(models: Model[], capacity = 700): void {
+    for (const b of this.scatterBatches) {
+      this.scatter.remove(b);
+      b.dispose();
+    }
+    this.scatterBatches = models.map((model) => {
+      const mesh = new InstancedMesh(model.body, litMaterial({}), capacity);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
+      mesh.count = 0;
+      mesh.visible = false;
+      this.scatter.add(mesh);
+      return mesh;
+    });
+  }
+
+  private updateScatter(src: RenderSource): void {
+    if (this.scatterBatches.length === 0) return;
+    const key = `${src.scatterCount}:${this.placeRevision}`;
+    if (key === this.scatterKey) return;
+    this.scatterKey = key;
+
+    const counts = new Int32Array(this.scatterBatches.length);
+    for (let i = 0; i < src.scatterCount; i++) {
+      const mi = src.sModel[i] % this.scatterBatches.length;
+      const batch = this.scatterBatches[mi];
+      if (counts[mi] >= batch.instanceMatrix.count) continue;
+      const x = src.sx[i];
+      const z = src.sz[i];
+      this.tmp.position.set(x, this.groundTop(src, x, z), z);
+      this.tmp.rotation.set(0, src.sRot[i] * Math.PI * 2, 0);
+      const k = src.sScale[i];
+      this.tmp.scale.set(k, k, k);
+      this.tmp.updateMatrix();
+      batch.setMatrixAt(counts[mi]++, this.tmp.matrix);
+    }
+    // Everything else in this file uses an unscaled `tmp`, so put it back or a
+    // building drawn after a tree comes out tree-sized.
+    this.tmp.scale.set(1, 1, 1);
+
+    for (let mi = 0; mi < this.scatterBatches.length; mi++) {
+      const batch = this.scatterBatches[mi];
+      batch.count = counts[mi];
+      batch.visible = counts[mi] > 0;
+      batch.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  private scatterKey = '';
+
   private updatePlaces(src: RenderSource): void {
     if (this.placeBatches.length === 0) return;
     // Rebuilt only when the list changes, which it does when influence grows or
@@ -734,10 +864,12 @@ export class Renderer {
 
   private counts = new Int32Array(0);
 
-  render(src: RenderSource): void {
+  render(src: RenderSource, dt = 1 / 60): void {
+    this.stepFly(dt);
     this.followGround(src);
     this.streamChunks(src);
     this.updatePlaces(src);
+    this.updateScatter(src);
     this.updateFleet(src);
     this.placeSun(src.dayFraction);
     this.setSeason(src.snow);
@@ -840,6 +972,7 @@ export class Renderer {
    * very nearly right, and nobody could have known why.
    */
   pan(dxPixels: number, dyPixels: number): void {
+    this.flying = false;
     const w = Math.max(1, this.renderer.domElement.clientWidth);
     const perPixel = this.tilesAcross / w;
     this.camera.updateMatrixWorld();
@@ -865,6 +998,7 @@ export class Renderer {
    * and nobody is tracking that in their head.
    */
   nudge(right: number, up: number): void {
+    this.flying = false;
     this.camera.updateMatrixWorld();
     const m = this.camera.matrixWorld.elements;
     const ux = m[4];
@@ -998,7 +1132,18 @@ ${vs}`.replace(
 	// sheets has no relief at all. Leaving a tenth of the summer colour showing
 	// keeps the striping and the parcel boundaries faintly legible under the
 	// snow, which is both what snow looks like and what makes the shadows read.
-	vColor = mix( vColor, uSnowColour, clamp( uSnow * uSnowTake * snowTake * upness, 0.0, 0.9 ) );`,
+	vColor = mix( vColor, uSnowColour, clamp( uSnow * uSnowTake * snowTake * upness, 0.0, 0.9 ) );
+	// And the faces that get no snow still get the winter.
+	//
+	// Snow lands on horizontal faces only, which is right and which left every
+	// hedge in the district standing in a foot of snow in full July green -
+	// bright, saturated, and the loudest thing in a frame that is otherwise
+	// white. A hedge in January is brown-grey. So vertical faces desaturate
+	// toward a dead winter brown instead of whitening: the same season, applied
+	// the way each surface would actually take it.
+	float winter = uSnow * ( 1.0 - upness ) * 0.62;
+	float lum = dot( vColor, vec3( 0.299, 0.587, 0.114 ) );
+	vColor = mix( vColor, mix( vec3( lum ), vec3( 0.34, 0.30, 0.26 ), 0.40 ), winter );`,
     );
   };
   return mat;

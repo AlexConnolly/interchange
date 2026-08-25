@@ -29,6 +29,17 @@ loadContent();
 
 const DISTRICT = 128;
 
+/**
+ * The scatter models, in the order the source's `sModel` indexes them.
+ *
+ * Six, which is enough that a hedgerow does not repeat within a screen and few
+ * enough that the whole set is six draw calls. The bare one earns its place by
+ * being the only tree here whose shape says what month it is.
+ */
+const TREE_MODELS = [
+  'tree_oak', 'tree_ash', 'tree_hawthorn', 'tree_pine', 'tree_autumn', 'tree_bare',
+];
+
 /** The keys that move the camera. WASD and the arrows, both. */
 const PAN_KEYS = new Set([
   'w', 'a', 's', 'd',
@@ -98,8 +109,8 @@ export function App(): JSX.Element {
    */
   const lookAt = useCallback((x: number, z: number): void => {
     if (!live) return;
-    live.renderer.camX = x;
-    live.renderer.camZ = z;
+    // Glide, never cut. See `Renderer.flyTo`.
+    live.renderer.flyTo(x, z);
   }, [live]);
 
   const addFacility = useCallback((yard: number, facility: number): void => {
@@ -207,6 +218,12 @@ export function App(): JSX.Element {
       pz: new Float32Array(320),
       pModel: new Uint8Array(320),
       pRot: new Float32Array(320),
+      scatterCount: 0,
+      sx: new Float32Array(1400),
+      sz: new Float32Array(1400),
+      sModel: new Uint8Array(1400),
+      sRot: new Float32Array(1400),
+      sScale: new Float32Array(1400),
       dayFraction: 0.62,
       snow: 0,
     };
@@ -292,6 +309,77 @@ export function App(): JSX.Element {
           if (rand() > 0.88) model = VILLAGE_FIRST + 4;
         }
         placed.push({ x: x + 0.5, z: z + 0.5, model, rot: Math.floor(rand() * 4) / 4, tile });
+      }
+    }
+
+    /*
+     * The trees, laid out once and never again.
+     *
+     * Where they go matters more than how many. Three rules, and each one is a
+     * thing you can see in the target frame:
+     *
+     *   **Along the field boundaries.** A hedgerow with an oak standing in it
+     *   every fifty yards is the single most English thing in the picture, and
+     *   it is what makes a hedge read as old rather than as planted last year.
+     *
+     *   **Thick on the rough grazing**, which is the crop the field generator
+     *   uses for land nobody ploughs. Unenclosed, unimproved, and therefore
+     *   where the scrub is.
+     *
+     *   **Thin in the fields themselves.** A handful, in the corners.
+     *
+     * Species come from a *coarse* hash — one dominant kind per eight-tile
+     * block — so a copse is a copse of one thing rather than one of each. Salt
+     * and pepper reads as noise; a stand of pines on one hillside reads as a
+     * plantation, and the district gets somewhere to look.
+     */
+    interface Scattered { x: number; z: number; model: number; rot: number; scale: number }
+    const trees: Scattered[] = [];
+    {
+      const parcel = world.terrain.fields.parcel;
+      const crop = world.terrain.fields.crop;
+      const height = world.terrain.height;
+      // A hash, not an rng, so a tile always grows the same tree.
+      const hash = (a: number, b: number): number => {
+        let h = (a * 374761393 + b * 668265263) | 0;
+        h = (h ^ (h >>> 13)) * 1274126177;
+        return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+      };
+      const boundary = (t: number, x: number, z: number): boolean => {
+        const p = parcel[t];
+        if (p < 0) return false;
+        if (x > 0 && parcel[t - 1] !== p) return true;
+        if (x + 1 < DISTRICT && parcel[t + 1] !== p) return true;
+        if (z > 0 && parcel[t - DISTRICT] !== p) return true;
+        if (z + 1 < DISTRICT && parcel[t + DISTRICT] !== p) return true;
+        return false;
+      };
+      for (let z = 1; z < DISTRICT - 1 && trees.length < 1400; z++) {
+        for (let x = 1; x < DISTRICT - 1 && trees.length < 1400; x++) {
+          const t = z * DISTRICT + x;
+          if (height[t] <= 0) continue;
+          if (roadClass[t] >= 0) continue;
+          const r = hash(x, z);
+          // The rough grazing is scrub; the boundaries are hedgerow; the middle
+          // of a worked field is nearly bare.
+          const chance = crop[t] === 6 ? 0.22 : boundary(t, x, z) ? 0.09 : 0.007;
+          if (r > chance) continue;
+          // One dominant species per block of eight tiles.
+          const local = hash(x >> 3, (z >> 3) + 4096);
+          const stray = hash(x + 7919, z + 104729);
+          const kind = stray < 0.22
+            ? Math.floor(hash(x + 31, z + 17) * TREE_MODELS.length)
+            : Math.floor(local * TREE_MODELS.length);
+          trees.push({
+            // Off the tile centre, or a hedgerow reads as a row of fenceposts.
+            x: x + 0.18 + hash(x + 1, z) * 0.64,
+            z: z + 0.18 + hash(x, z + 1) * 0.64,
+            model: Math.min(TREE_MODELS.length - 1, Math.max(0, kind)),
+            rot: hash(x + 3, z + 5),
+            // A stand of identical trees is a wallpaper. Half again either way.
+            scale: 0.78 + hash(x + 11, z + 13) * 0.55,
+          });
+        }
       }
     }
 
@@ -422,6 +510,13 @@ export function App(): JSX.Element {
       const ordered = modelNames.map((n) => kit.models.get(n)).filter((m) => m !== undefined);
       if (ordered.length === modelNames.length) renderer.setFleet(ordered);
     });
+    void loadKit(TREE_MODELS).then((kit) => {
+      if (kit.missing.length > 0) {
+        console.warn(`[trees] no model for: ${kit.missing.join(', ')}`);
+      }
+      const ordered = TREE_MODELS.map((n) => kit.models.get(n)).filter((m) => m !== undefined);
+      if (ordered.length === TREE_MODELS.length) renderer.setScatterModels(ordered);
+    });
     void loadKit(placeNames).then((kit) => {
       if (kit.missing.length > 0) {
         console.warn(`[places] no model for: ${kit.missing.join(', ')}`);
@@ -492,7 +587,13 @@ export function App(): JSX.Element {
         const d = dx * dx + dz * dz;
         if (d < bestD) { bestD = d; found = i; }
       }
-      if (found >= 0) setPanel({ k: 'place', site: found });
+      if (found >= 0) {
+        // Centre what you clicked. The panel anchors itself over the place, so
+        // a business at the edge of the frame would otherwise open a panel half
+        // off the screen.
+        renderer.flyTo(world.sites.x[found] + 0.5, world.sites.y[found] + 0.5);
+        setPanel({ k: 'place', site: found });
+      }
     };
     const wheel = (e: WheelEvent): void => {
       e.preventDefault();
@@ -621,6 +722,23 @@ export function App(): JSX.Element {
       }
       if (pn !== src.placeCount) renderer.placeRevision++;
       src.placeCount = pn;
+
+      // Trees, the same influence test. A wood beyond your reach is part of the
+      // country you cannot touch, and leaving it out is what makes the boundary
+      // read as a boundary rather than as a colour wash.
+      let sn = 0;
+      for (const q of trees) {
+        if (sn >= src.sx.length) break;
+        const tile = Math.round(q.z) * DISTRICT + Math.round(q.x);
+        if (!world.influence.usable(tile)) continue;
+        src.sx[sn] = q.x;
+        src.sz[sn] = q.z;
+        src.sModel[sn] = q.model;
+        src.sRot[sn] = q.rot;
+        src.sScale[sn] = q.scale;
+        sn++;
+      }
+      src.scatterCount = sn;
       /*
        * Open in the late afternoon, which is the light in the target frame.
        *
@@ -636,7 +754,7 @@ export function App(): JSX.Element {
       // to decide who can move. There is deliberately not a second one.
       src.snow = world.snow;
 
-      renderer.render(src);
+      renderer.render(src, dt);
 
       /*
        * The HUD, four times a second, by clock rather than by frame count.
@@ -691,7 +809,11 @@ export function App(): JSX.Element {
         <Markers
           world={live.world}
           renderer={live.renderer}
-          onOpenSite={(site) => setPanel({ k: 'place', site })}
+          hide={panel.k === 'place' ? panel.site : -1}
+          onOpenSite={(site) => {
+            lookAt(live.world.sites.x[site] + 0.5, live.world.sites.y[site] + 0.5);
+            setPanel({ k: 'place', site });
+          }}
           onOpenYard={(yard) => {
             lookAt(live.world.yards.x[yard] + 0.5, live.world.yards.y[yard] + 0.5);
             setPanel({ k: 'yard', yard });
@@ -700,7 +822,12 @@ export function App(): JSX.Element {
       )}
       {live && <Alerts world={live.world} renderer={live.renderer} />}
       {live && panel.k === 'place' && (
-        <Place world={live.world} site={panel.site} actions={placeActions} />
+        <Place
+          world={live.world}
+          renderer={live.renderer}
+          site={panel.site}
+          actions={placeActions}
+        />
       )}
       {live && panel.k === 'vehicles' && (
         <Vehicles

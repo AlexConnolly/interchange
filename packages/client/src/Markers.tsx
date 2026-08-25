@@ -46,10 +46,18 @@ interface Marked {
 }
 
 export function Markers({
-  world, renderer, onOpenSite, onOpenYard,
+  world, renderer, hide, onOpenSite, onOpenYard,
 }: {
   world: World;
   renderer: Renderer;
+  /**
+   * The one place whose panel is open, which does not get a marker.
+   *
+   * Its bubble is already sitting on it with an arrow pointing down at it, so
+   * the marker is saying a thing that is being said louder an inch above — and
+   * worse, the two overlap. The sign is for places you have not looked at.
+   */
+  hide: number;
   onOpenSite: (site: number) => void;
   onOpenYard: (yard: number) => void;
 }): JSX.Element {
@@ -83,6 +91,7 @@ export function Markers({
       };
 
       for (let s = 0; s < world.sites.count; s++) {
+        if (s === hide) continue;
         const tile = world.siteAccessTile[s];
         if (tile < 0 || !world.influence.usable(tile)) continue;
         const def = C.industries[world.sites.def[s]];
@@ -99,7 +108,7 @@ export function Markers({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [world, renderer]);
+  }, [world, renderer, hide]);
 
   return (
     <>
