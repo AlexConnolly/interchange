@@ -117,6 +117,43 @@ export const LIVERY: { body: RGB; accent: RGB }[] = [
   { body: hex('#c98a2f'), accent: hex('#43423f') },
 ];
 
+/**
+ * The colours farm machinery comes in. **Edit this list to change them.**
+ *
+ * Add a line and every farm in the district can paint a machine that colour;
+ * remove one and none of them can. Nothing else needs touching: the renderer
+ * builds one batch per model per entry in `PAINT` below, and a farm picks its
+ * colour by hashing its own tile into this list — so a farm's tractor, its drill
+ * and its combine all match, which is both true and the single cheapest thing
+ * that makes a district feel owned by somebody.
+ *
+ * Kept separate from `LIVERY` because they answer to different things. A haulage
+ * livery is a *choice a player makes* and there are four so the choice is legible;
+ * these are the makes of machine that were in an English field in 1985 and they
+ * are what they are. Massey red, Deere green, Ford blue, New Holland yellow, and
+ * the grey of something twenty years old that still starts.
+ */
+export const FARM_LIVERY: { body: RGB; accent: RGB }[] = [
+  { body: hex('#bf3327'), accent: hex('#e8e2d4') },
+  { body: hex('#3d7a36'), accent: hex('#e9d64a') },
+  { body: hex('#2b6390'), accent: hex('#e8e2d4') },
+  { body: hex('#d79f22'), accent: hex('#3a3c40') },
+  { body: hex('#8b8f96'), accent: hex('#c8442e') },
+];
+
+/**
+ * Every colour a vehicle can be painted, in one list.
+ *
+ * The renderer's batch grid is `[model][paint]`, so this is the axis it is built
+ * on. Company liveries come first and keep their indices, which matters: a
+ * company's livery is `company & 3`, and putting anything before them would
+ * silently repaint the entire fleet.
+ */
+export const PAINT: { body: RGB; accent: RGB }[] = [...LIVERY, ...FARM_LIVERY];
+
+/** Where the farm colours start in `PAINT`. */
+export const FARM_PAINT_FROM = LIVERY.length;
+
 export const VEHICLE = {
   tank: hex('#d8dade'),
   tyre: hex('#1f2124'),

@@ -3212,6 +3212,43 @@ export class World {
   }
 
   /**
+   * Which machine the job on this tile calls for.
+   *
+   * The reason this belongs in the simulation rather than in the renderer is that
+   * it is a fact about farming, not about drawing: a field that wants turning over
+   * wants a plough behind a tractor, and one standing ripe wants a combine, and
+   * that is true whether or not anybody is looking. The client's only job is to
+   * know which model has a combine in it.
+   *
+   * `spray` is the answer when there is nothing to do, and it is not a fudge. A
+   * crop between drilling and harvest still has somebody out in it every few
+   * weeks, and those are exactly the months — April to July — when no stage turns
+   * over and the district would otherwise stand still. A sprayer working a green
+   * field is what is actually happening out there in June.
+   */
+  fieldJob(tile: number): 'plough' | 'drill' | 'combine' | 'mow' | 'spray' {
+    const want = this.cropWant;
+    const fields = this.terrain.fields;
+    if (!want || tile < 0 || tile >= fields.crop.length) return 'spray';
+    if (fields.parcel[tile] < 0) return 'spray';
+    const stage = want[tile] as Crop;
+    if (fields.crop[tile] === stage || !NEEDS_WORK.has(stage)) return 'spray';
+    if (stage === Crop.Plough || stage === Crop.Bare) return 'plough';
+    if (stage === Crop.Drilled) return 'drill';
+    /*
+     * Cutting, and what does the cutting depends on what is standing there.
+     *
+     * A combine for a cereal; a mower behind a tractor for grass. It is the one
+     * place the *previous* stage decides the machine rather than the next one,
+     * because "stubble" is where a wheat field and a hay meadow arrive by
+     * completely different means.
+     */
+    const now = fields.crop[tile] as Crop;
+    if (now === Crop.Wheat || now === Crop.WheatRipe) return 'combine';
+    return 'mow';
+  }
+
+  /**
    * Is there anything for a tractor to do on this tile?
    *
    * Used to choose which field to send one to, so the tractors of a district are

@@ -753,6 +753,7 @@ export function App(): JSX.Element {
       work: (tile) => world.workField(tile),
       needsWork: (tile) => world.fieldNeedsWork(tile),
       rank: (t) => (t >= 0 && t < roadClass.length ? roadClass[t] : -1),
+      job: (tile) => world.fieldJob(tile),
       farms: () => {
         const out: { tile: number; x: number; z: number }[] = [];
         for (let i = 0; i < world.sites.count; i++) {
@@ -942,9 +943,28 @@ export function App(): JSX.Element {
      */
     const modelNames = [
       ...world.content.vehicles.map((v) => `veh_${v.id.replace(/-/g, '_')}`),
-      'veh_car_saloon', 'veh_car_estate', 'veh_tractor',
+      'veh_car_saloon', 'veh_car_estate',
+      // The farm machinery, last and in a known order — see MACHINES.
+      'veh_tractor', 'veh_tractor_drill', 'veh_tractor_sprayer', 'veh_combine',
     ];
-    const TRACTOR_MODEL = modelNames.length - 1;
+    /**
+     * Which model index draws which machine.
+     *
+     * Derived from the end of the list rather than searched by name, because the
+     * list *is* the loading order and anything that disagreed with it would draw
+     * a combine where a car should be. Counting back from the end is ugly and it
+     * is the only version that cannot drift.
+     */
+    const MACHINES = {
+      plough: modelNames.length - 4,
+      drill: modelNames.length - 3,
+      sprayer: modelNames.length - 2,
+      combine: modelNames.length - 1,
+    };
+    /** Every model that is a farm machine, for the engine note. */
+    const FARM_MODELS = new Set<number>([
+      MACHINES.plough, MACHINES.drill, MACHINES.sprayer, MACHINES.combine,
+    ]);
     /*
      * What the traffic is made of, and it is not all cars.
      *
@@ -956,9 +976,11 @@ export function App(): JSX.Element {
      */
     const byId = (id: string): number =>
       Math.max(0, world.content.vehicles.findIndex((v) => v.id === id));
+    const CAR_SALOON = modelNames.length - 6;
+    const CAR_ESTATE = modelNames.length - 5;
     const ambientModels = [
-      modelNames.length - 3, modelNames.length - 3, modelNames.length - 3,
-      modelNames.length - 2, modelNames.length - 2,
+      CAR_SALOON, CAR_SALOON, CAR_SALOON,
+      CAR_ESTATE, CAR_ESTATE,
       byId('van-transit'), byId('van-transit'),
       byId('rigid-box'),
       byId('artic-box'),
@@ -1388,7 +1410,7 @@ export function App(): JSX.Element {
       // instanced drawing, headlamps at dusk, motion smoothing and engine sound
       // without any of those systems knowing tractors exist.
       n = farmwork.step(
-        dt, TRACTOR_MODEL, n,
+        dt, MACHINES, n,
         src.vx, src.vz, src.vHeading, src.vLivery, src.vModel, src.vId,
       );
       // Traffic and tractors manage their own standing about, so the renderer
@@ -1562,7 +1584,9 @@ export function App(): JSX.Element {
        * and putting the ears there would attenuate everything to nothing. What
        * the player is looking at is what they should be able to hear.
        */
-      sound.listenAt(renderer.camX, renderer.camY, renderer.camZ);
+      sound.listenAt(
+        renderer.camX, renderer.camY, renderer.camZ, renderer.audioBasis(),
+      );
       heard.length = 0;
       for (let i = 0; i < src.vehicleCount; i++) {
         const model = src.vModel[i];
@@ -1579,9 +1603,9 @@ export function App(): JSX.Element {
            * only place in the client that needs to know, which is why it has not
            * earned a table of its own.
            */
-          engine: model === TRACTOR_MODEL
+          engine: FARM_MODELS.has(model)
             ? 'tractor'
-            : (model === modelNames.length - 3 || model === modelNames.length - 2)
+            : (model === CAR_SALOON || model === CAR_ESTATE)
               ? 'petrol'
               : 'diesel',
         });

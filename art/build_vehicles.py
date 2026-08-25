@@ -364,22 +364,191 @@ def car(estate=False):
     return parts
 
 
+TR_L = TILE * 0.34
+TR_HW = 0.070
+
+
 def tractor():
-    """A tractor, and it is nearly all wheels.
+    """Tractor and plough. Autumn, and the job the whole field system starts on."""
+    L, hw = TR_L, TR_HW
+    parts = tractor_body()
+    # The implement: a bar with tines, dragged. Says "working" rather than
+    # "driving", which is the difference between a tractor and a small lorry.
+    parts.append(_tr_paint(lib.box('tr_bar', (0.026, hw * 2.5, 0.020),
+                                   loc=(-L * 0.52, 0, 0.052)),
+                           (0.36, 0.24, 0.20, 1), 'trbar'))
+    for i in range(5):
+        y = (i / 4 - 0.5) * hw * 2.2
+        parts.append(_tr_paint(lib.box('tr_tine%d' % i, (0.014, 0.010, 0.038),
+                                       loc=(-L * 0.54, y, 0.030)),
+                               (0.42, 0.43, 0.45, 1), 'trtine'))
+    return parts + tractor_lamps(L, hw)
 
-    The silhouette is the whole job. At forty pixels a tractor and a van are the
-    same box unless the *back wheels are enormous* — that one proportion is what
-    the eye reads, and everything else here exists to hold it up: a narrow bonnet
-    in front, a tall thin cab set back over the rear axle, and a bar of an
-    implement dragging behind.
 
-    Painted in the livery slot like everything else, so a farm's tractor takes a
-    colour. Which is not quite right — a tractor belongs to the farm, not to the
-    haulier — and it is right *enough*, because what it buys is that no two
-    tractors in the district are the same colour.
+def tractor_drill():
+    """Tractor and seed drill. The spring job, and it has to read as *wide*.
+
+    A drill is the widest thing on a farm that is not a combine: a hopper you
+    could sit in and a toolbar reaching well outside the wheel tracks. At forty
+    pixels the width and the hopper are the whole recognition — so the hopper is
+    deliberately taller than anything on the plough version, and the toolbar is
+    three and a half times the tractor's own half-width.
     """
-    L = TILE * 0.34
-    hw = 0.070
+    L, hw = TR_L, TR_HW
+    parts = tractor_body()
+    # The hopper, high and boxy, carried over the toolbar.
+    parts.append(_tr_paint(lib.box('dr_hopper', (0.062, hw * 2.4, 0.062),
+                                   loc=(-L * 0.50, 0, 0.086), chamfer=0.004),
+                           (0.72, 0.70, 0.66, 1), 'drhop'))
+    parts.append(_tr_paint(lib.box('dr_lid', (0.070, hw * 2.5, 0.010),
+                                   loc=(-L * 0.50, 0, 0.121)),
+                           (0.34, 0.35, 0.37, 1), 'drlid'))
+    parts.append(_tr_paint(lib.box('dr_bar', (0.022, hw * 3.5, 0.016),
+                                   loc=(-L * 0.66, 0, 0.040)),
+                           (0.40, 0.41, 0.43, 1), 'drbar'))
+    # Coulters: a comb of them, which is what a drilled field gets its lines from.
+    for i in range(9):
+        y = (i / 8 - 0.5) * hw * 3.3
+        parts.append(_tr_paint(lib.box('dr_coulter%d' % i, (0.010, 0.008, 0.030),
+                                       loc=(-L * 0.68, y, 0.024)),
+                               (0.30, 0.31, 0.33, 1), 'drc'))
+    return parts + tractor_lamps(L, hw)
+
+
+def tractor_sprayer():
+    """Tractor and sprayer, for the months when nothing is changing colour.
+
+    The one machine whose whole silhouette is a *horizontal line*: booms reaching
+    most of a tile either side, which nothing else in the game does, so it is
+    unmistakable even when the tractor pulling it is four pixels of green. It also
+    earns its place in the design — it is what is out in the fields in May and June
+    when a crop is growing and no stage is turning over, and the district would
+    otherwise have nothing happening in it for two months.
+    """
+    L, hw = TR_L, TR_HW
+    parts = tractor_body()
+    parts.append(_tr_paint(lib.box('sp_tank', (0.070, hw * 1.9, 0.056),
+                                   loc=(-L * 0.46, 0, 0.082), chamfer=0.010),
+                           (0.86, 0.86, 0.83, 1), 'sptank'))
+    # The booms. Thin, long, and just above the crop.
+    for i, side in enumerate((-1, 1)):
+        parts.append(_tr_paint(
+            lib.box('sp_boom%d' % i, (0.014, hw * 5.0, 0.008),
+                    loc=(-L * 0.60, side * hw * 3.0, 0.062)),
+            (0.44, 0.45, 0.47, 1), 'spboom'))
+        # Nozzles, so the boom is a boom and not a stick.
+        for k in range(4):
+            y = side * hw * (1.0 + k * 1.3)
+            parts.append(_tr_paint(
+                lib.box('sp_noz%d_%d' % (i, k), (0.008, 0.008, 0.012),
+                        loc=(-L * 0.60, y, 0.052)),
+                (0.30, 0.31, 0.33, 1), 'spnoz'))
+    return parts + tractor_lamps(L, hw)
+
+
+def combine():
+    """A combine, and it must not read as a big tractor.
+
+    Three things separate it, all of them silhouette. It is *long*. The cab sits
+    high and right at the front rather than back over the rear axle, so the
+    profile steps down from the front instead of up from it. And the header is a
+    wide box slung out ahead of the front wheels with a reel across it — nothing
+    else in the district has anything in front of its own wheels, which is the
+    single cue that makes it a combine at forty pixels.
+
+    The auger folded out to the side is the fourth cue and nearly free: one box at
+    an angle, and the shape becomes immediately agricultural.
+    """
+    L = TILE * 0.52
+    hw = 0.086
+    parts = []
+    tyre = lib.material('tyre', TYRE, rough=0.9)
+
+    # The body: long, tall at the front, tapering back over the small rear wheels.
+    body = lib.box('cb_body', (L * 0.72, hw * 1.9, 0.096),
+                   loc=(-L * 0.06, 0, 0.116), chamfer=0.006)
+    lib.repaint(body, [(lib.livery_material(), lambda c: True)])
+    parts.append(body)
+
+    # The grain tank, sitting on top and behind the cab.
+    parts.append(_tr_paint(lib.box('cb_tank', (L * 0.34, hw * 1.7, 0.052),
+                                   loc=(-L * 0.16, 0, 0.188), chamfer=0.005),
+                           (0.80, 0.78, 0.72, 1), 'cbtank'))
+
+    # The cab, high and forward.
+    f = Form(size=(L * 0.24, hw * 1.55, 0.086), at=(L * 0.24, 0, 0.208))
+    f.bevel(amount=0.004)
+    cab = f.build('cb_cab')
+    lib.repaint(cab, [
+        (lib.material('cbcab', (0.88, 0.88, 0.86, 1), rough=0.6), lambda c: True),
+        (lib.material('trglass', GLASS, rough=0.18), lambda c: c.z > 0.208),
+    ])
+    parts.append(cab)
+    parts.append(_tr_paint(lib.box('cb_roof', (L * 0.28, hw * 1.7, 0.012),
+                                   loc=(L * 0.24, 0, 0.256)),
+                           (0.30, 0.31, 0.33, 1), 'cbroof'))
+
+    # Wheels: big at the front under the header, small at the back. The reverse
+    # of a tractor, and part of why it does not read as one.
+    for i, side in enumerate((-1, 1)):
+        o = lib.cyl('cb_front%d' % i, 0.074, 0.074, hw * 0.44,
+                    loc=(L * 0.20, side * hw * 1.02, 0.074),
+                    rot=(math.pi / 2, 0, 0), segments=9)
+        o.data.materials.append(tyre)
+        parts.append(o)
+        r = lib.cyl('cb_rear%d' % i, 0.038, 0.038, hw * 0.30,
+                    loc=(-L * 0.34, side * hw * 0.80, 0.038),
+                    rot=(math.pi / 2, 0, 0), segments=8)
+        r.data.materials.append(tyre)
+        parts.append(r)
+
+    # The feeder house: the sloping throat between the body and the header.
+    #
+    # Without it the header floated a tenth of a tile clear of the machine, which
+    # in profile is not a combine at all — it is a combine and a separate object
+    # in front of it. The bridge is one box and it is what makes the whole front
+    # end read as attached.
+    parts.append(_tr_paint(lib.box('cb_feeder', (L * 0.22, hw * 1.5, 0.056),
+                                   loc=(L * 0.35, 0, 0.084)),
+                           (0.74, 0.72, 0.66, 1), 'cbfeed'))
+
+    # The header, out in front of the wheels and wider than everything. Nothing
+    # else in the district has anything ahead of its own wheels, which is the one
+    # cue that makes this a combine at forty pixels.
+    parts.append(_tr_paint(lib.box('cb_header', (0.056, hw * 4.2, 0.044),
+                                   loc=(L * 0.52, 0, 0.050)),
+                           (0.78, 0.76, 0.70, 1), 'cbhead'))
+    # The reel across it, which is the part that looks like it is moving.
+    reel = lib.cyl('cb_reel', 0.026, 0.026, hw * 4.0,
+                   loc=(L * 0.53, 0, 0.084), rot=(math.pi / 2, 0, 0), segments=8)
+    reel.data.materials.append(lib.material('cbreel', (0.52, 0.40, 0.24, 1), rough=0.8))
+    parts.append(reel)
+    # The knife along the front lip, pale so the header reads as an edge.
+    parts.append(_tr_paint(lib.box('cb_knife', (0.014, hw * 4.2, 0.010),
+                                   loc=(L * 0.56, 0, 0.034)),
+                           (0.62, 0.63, 0.65, 1), 'cbknife'))
+
+    # The unloading auger, folded out to the left.
+    parts.append(_tr_paint(lib.box('cb_auger', (0.020, hw * 2.6, 0.020),
+                                   loc=(-L * 0.02, hw * 2.4, 0.196),
+                                   rot=(0, 0, 0)),
+                           (0.74, 0.72, 0.66, 1), 'cbaug'))
+
+    parts += lamps('cb', L * 0.44, -L * 0.42, hw, 0.190)
+    parts += beam('cb', L * 0.62, -L * 0.42, hw * 1.1, 0.70)
+    return parts
+
+
+def tractor_body():
+    """The tractor everything is bolted to: bonnet, cab, roof and wheels.
+
+    Pulled out so the variants are three implements rather than three tractors —
+    which matters less for the triangle count than for the fact that a change to
+    the cab now happens once. The silhouette is the whole job: at forty pixels a
+    tractor and a van are the same box unless the *back wheels are enormous*, and
+    that one proportion is what the eye reads.
+    """
+    L, hw = TR_L, TR_HW
     parts = []
 
     # Bonnet: low and narrow, forward of the cab.
@@ -416,22 +585,6 @@ def tractor():
         f2.data.materials.append(tyre)
         parts.append(f2)
 
-    # The implement: a bar with tines, dragged. Says "working" rather than
-    # "driving", which is the difference between a tractor and a small lorry.
-    parts.append(_tr_paint(lib.box('tr_bar', (0.026, hw * 2.5, 0.020),
-                                   loc=(-L * 0.52, 0, 0.052)),
-                           (0.36, 0.24, 0.20, 1), 'trbar'))
-    for i in range(5):
-        y = (i / 4 - 0.5) * hw * 2.2
-        parts.append(_tr_paint(lib.box('tr_tine%d' % i, (0.014, 0.010, 0.038),
-                                       loc=(-L * 0.54, y, 0.030)),
-                               (0.42, 0.43, 0.45, 1), 'trtine'))
-
-    parts += tractor_lamps(L, hw)
-    # And light on the ground. Shorter and much wider than a lorry's: a tractor
-    # crawls, and its lamps are low and splayed on the bonnet rather than set
-    # into a nose four feet up.
-    parts += beam('tr', L * 0.42, -L * 0.30, hw * 0.92, 0.55)
     return parts
 
 
@@ -499,6 +652,10 @@ def tractor_lamps(L, hw):
                      loc=(-L * 0.28 - 0.005, side * hw * 0.74, 0.115))
         rh.data.materials.append(halo_r)
         made.append(rh)
+    # And light on the ground, once, for whichever implement is on the back.
+    # Shorter and much wider than a lorry's: a tractor crawls, and its lamps are
+    # low and splayed on the bonnet rather than set into a nose four feet up.
+    made += beam('tr', L * 0.42, -L * 0.30, hw * 0.92, 0.55)
     return made
 
 
@@ -509,6 +666,9 @@ def _tr_paint(obj, rgba, name):
 
 BUILDS = [
     ('veh_tractor', tractor),
+    ('veh_tractor_drill', tractor_drill),
+    ('veh_tractor_sprayer', tractor_sprayer),
+    ('veh_combine', combine),
     ('veh_car_saloon', lambda: car(False)),
     ('veh_car_estate', lambda: car(True)),
     ('veh_van_transit', lambda: van(False)),

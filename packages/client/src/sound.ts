@@ -175,7 +175,6 @@ export class Sound {
        * metre, so the physical curve puts everything either deafening or
        * inaudible. Linear over a fixed earshot is the one that behaves.
        */
-      this.ctx.listener.forwardX?.setValueAtTime(0, this.ctx.currentTime);
       await this.loadAll();
       this.makeVoices();
     } catch {
@@ -235,18 +234,58 @@ export class Sound {
   }
 
   /** Where the player's ears are: the point the camera is looking at. */
-  listenAt(x: number, y: number, z: number): void {
+  listenAt(
+    x: number, y: number, z: number,
+    basis?: { fx: number; fy: number; fz: number; ux: number; uy: number; uz: number },
+  ): void {
     const ctx = this.ctx;
     if (!ctx) return;
     const l = ctx.listener;
+    /*
+     * Ears just above the ground, not six tiles up.
+     *
+     * "The car sounds are not 3D" — and they were not, for a reason that is pure
+     * geometry. The listener sat six units above the plane the vehicles are on,
+     * so every engine within six tiles was steeply *below* it, and a source below
+     * you produces almost no difference between the two ears. HRTF was working
+     * perfectly and being asked the one question it has no answer to.
+     *
+     * Half a tile up puts the listener in the same plane as the traffic, where
+     * the angle to a vehicle is nearly all lateral and panning has something to
+     * work with.
+     */
+    const ear = y + 0.5;
     if (l.positionX) {
       l.positionX.setTargetAtTime(x, ctx.currentTime, 0.05);
-      l.positionY.setTargetAtTime(y + 6, ctx.currentTime, 0.05);
+      l.positionY.setTargetAtTime(ear, ctx.currentTime, 0.05);
       l.positionZ.setTargetAtTime(z, ctx.currentTime, 0.05);
     } else {
       // Safari and older Chrome. Deprecated and still the only way there.
       (l as unknown as { setPosition: (a: number, b: number, c: number) => void })
-        .setPosition(x, y + 6, z);
+        .setPosition(x, ear, z);
+    }
+    if (!basis) return;
+    /*
+     * And facing the way the camera faces.
+     *
+     * The listener defaults to looking down -Z with +Y up, which is not where
+     * this camera looks: it is thirty-two degrees round and thirty-eight down. So
+     * the stereo axis was world X rather than screen right, and a car visibly on
+     * the left of the frame was heard a third of a turn away from where it looked.
+     * Borrowing the camera's own basis makes left mean left.
+     */
+    if (l.forwardX) {
+      l.forwardX.setTargetAtTime(basis.fx, ctx.currentTime, 0.05);
+      l.forwardY.setTargetAtTime(basis.fy, ctx.currentTime, 0.05);
+      l.forwardZ.setTargetAtTime(basis.fz, ctx.currentTime, 0.05);
+      l.upX.setTargetAtTime(basis.ux, ctx.currentTime, 0.05);
+      l.upY.setTargetAtTime(basis.uy, ctx.currentTime, 0.05);
+      l.upZ.setTargetAtTime(basis.uz, ctx.currentTime, 0.05);
+    } else {
+      (l as unknown as {
+        setOrientation: (a: number, b: number, c: number,
+          d: number, e: number, f: number) => void;
+      }).setOrientation(basis.fx, basis.fy, basis.fz, basis.ux, basis.uy, basis.uz);
     }
   }
 
@@ -337,6 +376,8 @@ export class Sound {
     if (!ctx) return;
     if (v.panner.positionX) {
       v.panner.positionX.setTargetAtTime(h.x, ctx.currentTime, 0.08);
+      // In the listener's own plane. It was already 0 and the listener was not.
+      v.panner.positionY.setTargetAtTime(0.4, ctx.currentTime, 0.08);
       v.panner.positionZ.setTargetAtTime(h.z, ctx.currentTime, 0.08);
     } else {
       (v.panner as unknown as { setPosition: (a: number, b: number, c: number) => void })

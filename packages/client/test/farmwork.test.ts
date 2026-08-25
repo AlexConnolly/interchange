@@ -11,6 +11,8 @@ import { Farmwork, type FarmField } from '../src/farmwork.ts';
  * teleports back to the same end of every pass.
  */
 
+const MACHINES = { plough: 3, drill: 4, sprayer: 5, combine: 6 };
+
 const SIZE = 32;
 const t = (x: number, z: number): number => z * SIZE + x;
 
@@ -40,6 +42,7 @@ function district(worked?: Set<number>): Farmwork {
     // give-way rule never fires. The following rule is what these tests are
     // about; priority has its own test below.
     rank: () => 1,
+    job: () => 'plough' as const,
   });
 }
 
@@ -56,7 +59,7 @@ function run(seconds: number, worked?: Set<number>): { x: number; z: number }[] 
   const seen: { x: number; z: number }[] = [];
   const dt = 1 / 30;
   for (let s = 0; s < seconds * 30; s++) {
-    const n = farm.step(dt, 3, 0, vx, vz, vh, vl, vm, vi);
+    const n = farm.step(dt, MACHINES, 0, vx, vz, vh, vl, vm, vi);
     for (let k = 0; k < n; k++) seen.push({ x: vx[k], z: vz[k] });
   }
   return seen;
@@ -141,6 +144,7 @@ describe('a tractor at a junction', () => {
         work: () => {},
         needsWork: () => true,
         rank: (tile) => (tile === t(7, 10) ? otherRank : laneRank),
+        job: () => 'plough' as const,
       });
       let moved = 0;
       let last = -1;
@@ -149,7 +153,7 @@ describe('a tractor at a junction', () => {
         vx[0] = 7.5;
         vz[0] = 10.5;
         vi[0] = 99;
-        const n = farm.step(1 / 30, 3, 1, vx, vz, vh, vl, vm, vi);
+        const n = farm.step(1 / 30, MACHINES, 1, vx, vz, vh, vl, vm, vi);
         for (let k = 1; k < n; k++) {
           if (vi[k] !== -1000) continue;
           if (last >= 0 && Math.abs(vx[k] - last) > 1e-4) moved++;
@@ -164,5 +168,64 @@ describe('a tractor at a junction', () => {
     const yielding = run(1, 3);
     const equal = run(1, 1);
     expect(yielding).toBeLessThan(equal);
+  });
+});
+
+
+/**
+ * Nothing in the field ever jumps.
+ *
+ * "It looks like some of the tractors are drifting" — they were, and the cause
+ * was a single-frame teleport rather than anything in the drawing. At the end of
+ * each pass the position moved sideways by one furrow spacing in one frame, and
+ * the renderer's smoothing, seeing a jump too small to be a real teleport, eased
+ * across it: a tractor sliding sideways while still facing along the furrow.
+ *
+ * The measurement is therefore the largest step between consecutive frames. A
+ * tractor moving at well under a tile a second, sampled thirty times a second,
+ * cannot legitimately move more than a few hundredths of a tile in one frame —
+ * and a furrow spacing is a whole one, so the two are nowhere near each other and
+ * the threshold needs no fine tuning.
+ */
+describe('a tractor never teleports', () => {
+  it('moves in small steps for its whole visit, turns included', () => {
+    const farm = district();
+    const cap = 64;
+    const vx = new Float32Array(cap);
+    const vz = new Float32Array(cap);
+    const vh = new Float32Array(cap);
+    const vl = new Uint8Array(cap);
+    const vm = new Uint8Array(cap);
+    const vi = new Int32Array(cap);
+    const last = new Map<number, { x: number; z: number }>();
+    let worst = 0;
+    const dt = 1 / 30;
+    for (let s = 0; s < 30 * 240; s++) {
+      const n = farm.step(dt, MACHINES, 0, vx, vz, vh, vl, vm, vi);
+      const drawn = new Set<number>();
+      for (let k = 0; k < n; k++) {
+        drawn.add(vi[k]);
+        const was = last.get(vi[k]);
+        const at = { x: vx[k], z: vz[k] };
+        if (was) worst = Math.max(worst, Math.hypot(at.x - was.x, at.z - was.z));
+        last.set(vi[k], at);
+      }
+      /*
+       * A tractor sitting in its yard is not drawn at all, and the next thing it
+       * does is appear somewhere else entirely. That is a gap in the record, not a
+       * jump in a journey — so forgetting where it was is the honest way to
+       * measure, rather than a distance threshold that would also hide the bug.
+       */
+      for (const id of [...last.keys()]) if (!drawn.has(id)) last.delete(id);
+    }
+    expect(worst).toBeGreaterThan(0);
+    /*
+     * A tenth of what it was, and the threshold is now a real bound rather than
+     * a guess: the fastest machine is a sprayer at about one and a fifth tiles a
+     * second, sampled thirty times a second, so a legitimate frame moves about
+     * four hundredths of a tile. Eight hundredths leaves room for the gate run's
+     * slightly quicker pace and nothing else.
+     */
+    expect(worst).toBeLessThan(0.08);
   });
 });

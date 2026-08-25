@@ -40,7 +40,7 @@ import { Mesh } from './geometry.ts';
 import { buildRoads, buildCatsEyes, type RoadSource } from './roads.ts';
 import type { Model } from './glb.ts';
 import { Precipitation } from './weather.ts';
-import { LIVERY, NIGHT, SKY, SNOW, type RGB } from './palette.ts';
+import { NIGHT, PAINT, SKY, SNOW, type RGB } from './palette.ts';
 import {
   LOOK, aimFog, aimShade, buildComposer, makeFog, makeMotes, moodAt, stylise,
   type Composed, type Mood, type Motes,
@@ -497,6 +497,29 @@ export class Renderer {
     const halfUp = this.tilesAcross / aspect / 2;
     return halfUp / Math.tan((38 * Math.PI) / 180);
   }
+
+  /**
+   * The camera's forward and up, for the audio listener to borrow.
+   *
+   * Given out rather than the camera itself, because the sound engine has no
+   * business holding a three.js object — and because these six numbers are the
+   * entire question it needs answered: which way is *into the screen*, and which
+   * way is up. Aligning the listener to them is what makes a car on the left of
+   * the frame arrive in the left ear.
+   */
+  audioBasis(): {
+    fx: number; fy: number; fz: number; ux: number; uy: number; uz: number;
+  } {
+    this.camera.getWorldDirection(this.tmpForward);
+    this.tmpUp.set(0, 1, 0).applyQuaternion(this.camera.quaternion);
+    return {
+      fx: this.tmpForward.x, fy: this.tmpForward.y, fz: this.tmpForward.z,
+      ux: this.tmpUp.x, uy: this.tmpUp.y, uz: this.tmpUp.z,
+    };
+  }
+
+  private readonly tmpForward = new Vector3();
+  private readonly tmpUp = new Vector3();
 
   private placeCamera(): void {
     const el = (38 * Math.PI) / 180;
@@ -1036,7 +1059,7 @@ export class Renderer {
         }
       }
     }
-    this.batches = models.map((model) => LIVERY.map((liv) => {
+    this.batches = models.map((model) => PAINT.map((liv) => {
       const mesh = new InstancedMesh(model.body, liveryMaterial(liv.body), capacity);
       mesh.castShadow = true;
       mesh.receiveShadow = false;
@@ -1046,7 +1069,7 @@ export class Renderer {
       this.fleet.add(mesh);
       return mesh;
     }));
-    this.lamps = models.map((model) => LIVERY.map(() => {
+    this.lamps = models.map((model) => PAINT.map(() => {
       if (!model.lamps) return null;
       const mesh = new InstancedMesh(model.lamps, this.glow, capacity);
       // A lamp does not cast a shadow. It is the thing making them.
@@ -1408,7 +1431,7 @@ export class Renderer {
   private updateFleet(src: RenderSource, dt: number): void {
     if (this.batches.length === 0) return;
     const models = this.batches.length;
-    const liveries = LIVERY.length;
+    const liveries = PAINT.length;
     // One counter per batch, flattened. Reused between frames because
     // allocating a nine-by-four array sixty times a second is a garbage
     // generator for nothing.
