@@ -224,6 +224,17 @@ for (const r of results) for (let k = 0; k < C.cargo.length; k++) rawByCargo[k] 
 const grandTotal = totalByCargo.reduce((a, b) => a + b, 0);
 const dead: string[] = [];
 const unserved: string[] = [];
+const notYet: string[] = [];
+
+/** The earliest era any industry makes this cargo. */
+const earliestMaker = (id: string): number => {
+  let best = 99;
+  for (const ind of C.industries) {
+    if (ind.recipe.outputs[id] !== undefined && ind.fromEra < best) best = ind.fromEra;
+  }
+  return best;
+};
+const eraAtEnd = C.eras.reduce((n, e) => (e.from <= 1860 + YEARS ? e.n : n), 1);
 const live: { name: string; share: number }[] = [];
 for (let k = 0; k < C.cargo.length; k++) {
   const cargo = C.cargo[k];
@@ -234,9 +245,21 @@ for (let k = 0; k < C.cargo.length; k++) {
   const eraOf = C.eras.find((e) => e.n === cargo.fromEra);
   if (eraOf && eraOf.from > eraEnd) continue;
   const share = grandTotal > 0 ? (totalByCargo[k] / grandTotal) * 100 : 0;
-  if (rawByCargo[k] < 1) {
-    (results.some((r) => r.reachable[k]) ? unserved : dead).push(cargo.name);
-  } else live.push({ name: cargo.name, share });
+  if (rawByCargo[k] >= 1) {
+    live.push({ name: cargo.name, share });
+  } else if (results.some((r) => r.reachable[k])) {
+    unserved.push(cargo.name);
+  } else if (earliestMaker(cargo.id) > eraAtEnd) {
+    /*
+     * Nothing in the region makes it yet, and nothing was ever going to
+     * within the years this sweep covers. A distribution centre arrives in
+     * era six; a hundred-and-twenty-year run ends in 1980, which is era five.
+     * Calling that dead content would be calling the calendar a bug.
+     */
+    notYet.push(cargo.name);
+  } else {
+    dead.push(cargo.name);
+  }
 }
 live.sort((a, b) => b.share - a.share);
 console.log(`  moved (share of the carrying trade, seats weighted against tonnes):`);

@@ -110,6 +110,9 @@ export function generateWorld(w: World): void {
   const cargoCount = c.cargo.length;
   for (let s = 0; s < w.sites.count; s++) {
     const ind = c.industries[w.sites.def[s]];
+    // Whether it digs its output out of the ground or makes it from something
+    // somebody has to bring. Cached here so the hot paths need not ask.
+    w.sites.extraction[s] = ind.kind === 'extraction' ? 1 : 0;
     for (const [id, amount] of Object.entries(ind.recipe.inputs)) {
       const ci = c.cargoIndex.get(id);
       if (ci !== undefined) w.sites.capacity[s * cargoCount + ci] = amount * 30;

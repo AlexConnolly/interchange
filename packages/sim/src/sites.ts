@@ -63,6 +63,9 @@ export class SiteTable {
    *  site carries it so the inspector can show the player what their pit has
    *  done to the valley. */
   readonly amenity = new Uint8Array(MAX_SITES).fill(100);
+  /** Set from the recipe kind at alloc, so the hot paths do not have to reach
+   *  into the content to ask. */
+  readonly extraction = new Uint8Array(MAX_SITES);
   /** Lifetime tonnes shipped out, for reporting and for the balance sweep. */
   readonly shipped = new Float64Array(MAX_SITES);
   /**
@@ -112,6 +115,13 @@ export class SiteTable {
   /** The node this site is served from on a given mode, or NONE. */
   nodeOf(site: number, mode: number): number {
     return this.nodes[site * MODE_COUNT + mode];
+  }
+
+  /** Does this site dig its output out of the ground, or make it from
+   *  something somebody has to deliver? The difference decides whether a route
+   *  to it keeps working when nobody else is doing anything. */
+  isExtraction(site: number): boolean {
+    return this.extraction[site] === 1;
   }
 
   setNode(site: number, mode: number, node: number): void {

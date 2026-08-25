@@ -2398,6 +2398,7 @@ export class World {
     const y = (tile / this.config.size) | 0;
     const site = this.sites.alloc(defIndex, x, y, tile, company);
     if (site === NONE) return NONE;
+    this.sites.extraction[site] = def.kind === 'extraction' ? 1 : 0;
     this.sites.richness[site] = 40 + (this.terrain.deposit[tile] > 0 ? 40 : 20);
     this.sites.cycle[site] = def.recipe.period;
     const cargoCount = this.content.cargo.length;

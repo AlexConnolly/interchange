@@ -492,6 +492,25 @@ function bestUnservedPair(
       // and nothing else — a hundred per cent of tonnage on one cargo.
       const waiting = Math.min(stock, 30);
       const originPenalty = servedOut.has(a) ? 400 : 0;
+      /*
+       * A pit is worth far more than a works, as an origin.
+       *
+       * A cement works has cement in the yard and looks like just as good a
+       * customer as a colliery with coal in the yard. It is not. A colliery
+       * digs coal out of the ground and never stops; a works makes cement only
+       * while somebody brings it stone, and in a region with a dozen routes
+       * nobody does — so it runs through its opening stock, produces thirty
+       * tonnes, and stops for ever. A harness playing the "obvious" opening
+       * move against a works loses nine hundred pounds in twelve years; the
+       * same move against a pit makes eleven hundred. Every rival in the sweep
+       * was making the losing version of that choice, which is most of why the
+       * pacing report said most companies never get going.
+       *
+       * A works is still worth serving once its own supply is arranged, which
+       * is what the chain terms below are for. It is just never the place to
+       * start.
+       */
+      const fromGround = w.sites.isExtraction(a) ? 2.6 : 1;
       // A works that already receives deliveries is a works with something
       // coming out of it. Collecting from one completes a chain, and a
       // completed chain is what keeps the first half of it running.
@@ -502,7 +521,7 @@ function bestUnservedPair(
           if (w.towns.nodeOf(t, Mode.Road) === NONE) continue;
           const d = Math.hypot(w.sites.x[a] - w.towns.x[t], w.sites.y[a] - w.towns.y[t]);
           if (d < 6 || d > 90) continue;
-          const score = (waiting * 10 + w.towns.population[t] * 0.03) * rarity * chain - d
+          const score = (waiting * 10 + w.towns.population[t] * 0.03) * rarity * chain * fromGround - d
             - originPenalty + rng.int(60);
           if (score > bestScore) {
             bestScore = score;
@@ -549,7 +568,7 @@ function bestUnservedPair(
          * failed and the only survivors were omnibuses.
          */
         const completesChain = servedIn.has(b) ? 2.4 : 1;
-        const score = waiting * 10 * rarity * drains * chain * onwardBonus * appetite * completesChain
+        const score = waiting * 10 * rarity * drains * chain * onwardBonus * appetite * completesChain * fromGround
           - originPenalty + rng.int(60);
         if (score > bestScore) {
           bestScore = score;
