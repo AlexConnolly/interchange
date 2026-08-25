@@ -85,72 +85,15 @@ describe('what a resort earns', () => {
   });
 });
 
-describe('remediation', () => {
-  it('is not available before its era, and needs a land charter', () => {
-    const w = createWorld({ seed: 606, size: 128, townCount: 4, companyCount: 2 });
-    w.companies.charter[w.player] = Charter.Land;
-    w.companies.cash[w.player] = 900_000_000;
-    expect(w.era).toBeLessThan(REMEDIATION_FROM_ERA);
-    expect(w.remediate(w.player, 40 * 128 + 40, 3)).toBe(false);
-  });
-
-  it('mends ground much faster than nature, once nothing is spoiling it', () => {
-    const w = createWorld({ seed: 606, size: 128, townCount: 4, companyCount: 2 });
-    w.companies.charter[w.player] = Charter.Land;
-    w.companies.cash[w.player] = 900_000_000;
-
-    // Reach the era that knows how to mend land.
-    const era = 1860 + (REMEDIATION_FROM_ERA - 1) * 30;
-    while (w.year < era + 2 && w.era < REMEDIATION_FROM_ERA) w.step();
-    if (w.era < REMEDIATION_FROM_ERA) return;
-
-    /*
-     * A cell nothing is currently spoiling. Restoring ground while the pit
-     * that ruined it is still working is not a thing you can buy, and the
-     * monthly pass is right to hold such a cell down — so the test has to
-     * find somewhere the field is quiet, or it is testing the wrong claim.
-     */
-    // The quietest good ground in the region. A mature region has industry
-    // almost everywhere, so this looks for the least-penalised cell rather
-    // than an untouched one — restoration only has to beat nature, and it
-    // cannot beat a works that is still running.
-    let cell = -1;
-    let best = -Infinity;
-    for (let i = 0; i < w.amenity.current.length; i++) {
-      const headroom = w.amenity.potential[i] - w.amenity.penalty[i];
-      if (headroom > best) { best = headroom; cell = i; }
-    }
-    expect(cell).toBeGreaterThanOrEqual(0);
-    expect(best).toBeGreaterThan(30);
-
-    const potential = w.amenity.potential[cell];
-    w.amenity.current[cell] = 10;
-    const x = (cell % w.amenity.cols) * 4;
-    const y = ((cell / w.amenity.cols) | 0) * 4;
-
-    const before = w.companies.cash[w.player];
-    expect(w.remediate(w.player, y * 128 + x, 0)).toBe(true);
-    expect(w.companies.cash[w.player]).toBeLessThan(before);
-
-    for (let i = 0; i < TICKS_PER_YEAR * 3; i++) w.step();
-    // Three years of paid restoration beats three years of nature by a mile.
-    expect(w.amenity.current[cell]).toBeGreaterThan(10 + RECOVERY_PER_YEAR * 3 + 5);
-    expect(w.amenity.current[cell]).toBeLessThanOrEqual(potential);
-  });
-
-  it('refuses to restore ground that is already as good as it gets', () => {
-    const w = createWorld({ seed: 606, size: 128, townCount: 4, companyCount: 2 });
-    w.companies.charter[w.player] = Charter.Land;
-    w.companies.cash[w.player] = 900_000_000;
-    const era = 1860 + (REMEDIATION_FROM_ERA - 1) * 30;
-    while (w.year < era + 2 && w.era < REMEDIATION_FROM_ERA) w.step();
-    if (w.era < REMEDIATION_FROM_ERA) return;
-
-    // Ground already at its potential. Made so by hand rather than searched
-    // for, because in a mature region there may be none left.
-    const cell = w.amenity.cellOf(40, 40);
-    w.amenity.potential[cell] = w.amenity.current[cell];
-    w.amenity.restored[cell] = 0;
-    expect(w.remediate(w.player, 40 * 128 + 40, 0)).toBe(false);
-  });
-});
+/*
+ * The remediation tests went with the Phase A cut.
+ *
+ * Amenity itself stays and is now core rather than deferred: design.md 7 makes
+ * it the counterweight to the top rung of the ladder, because siting industry
+ * without a downside is not a decision. What went is the *command* that lets a
+ * player pay to clean ground up, which was gated behind a land charter and an
+ * era, and belongs with industry siting in Phase E.
+ *
+ * So the field is tested here and the acting on it is not, because there is
+ * nothing yet to act with.
+ */

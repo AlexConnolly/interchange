@@ -23,21 +23,7 @@ import {
 } from './economy.ts';
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
 import { Hasher } from './hash.ts';
-import { generateAirCorridors } from './seaair.ts';
-import {
-  Climate, EventTable, stepEvents, floodSeverity, strikePercent,
-  runningCostPercent, ratePercent, FLOOD_LINE, EVENT_NAMES, EventKind, WEATHER_NAMES, Weather,
-  waterAvailable,
-} from './weather.ts';
 import { AmenityField, stepAmenity, REMEDIATION_PRICE, REMEDIATION_FROM_ERA } from './amenity.ts';
-import { planReclamation, reclaim, type ReclaimPlan } from './reclamation.ts';
-import { scoreTransit, carShare } from './transit.ts';
-import { stepCharacter, characterAppetite } from './towncharacter.ts';
-import {
-  AgreementTable, agreedCharge, stepAgreements, propose, accept, decline, withdraw,
-} from './agreements.ts';
-import { SchemeTable, stepPublicWorks, SchemeState } from './publicworks.ts';
-import { RegulatorTable, stepRegulator, accessChargeFor, Intervention, INTERVENTION_NAMES } from './regulation.ts';
 import {
   AssetTable, Graph, NONE, NO_WAY, WayLayer, hashNetwork, rebuildGraph,
 } from './network.ts';
@@ -49,10 +35,7 @@ import {
   stepSites, stepTowns, type RecipeTables,
 } from './sites.ts';
 import { DEPOSIT_NAMES, TileFlag, generateTerrain, SEA_LEVEL, type Terrain, type WorldConfig } from './terrain.ts';
-import { ObjectiveTable, checkObjectives, generateObjective, type ObjectiveContext } from './objectives.ts';
-import { THINK_DAYS, stepRival } from './rivals.ts';
 import { alignForRadius, layAlignment, planAlignment, removeWayTile, LOCK_LIFT, type Alignment } from './construction.ts';
-import { balanceGrids, buildGrids, computeLabour, emptyUtilityState } from './utilities.ts';
 import {
   VState, VehicleTable, buildNodeGeometry, projectVehicles, stepTraffic,
   type NodeGeometry, type TrafficStats,
@@ -96,8 +79,7 @@ export class World {
   readonly companies = new CompanyTable();
   readonly contracts = new ContractTable();
   readonly services = new ServiceTable();
-  readonly objectives = new ObjectiveTable();
-  /** Tonnes moved per cargo, per company, for objectives and the sweep. */
+  /** Tonnes moved per cargo, per company, for the balance sweep. */
   movedByCargo: Float64Array;
   readonly queue = new CommandQueue();
   readonly rng: Rng;
@@ -137,16 +119,9 @@ export class World {
   readonly vehicleMode = new Uint8Array(256);
   private cargoPrice = new Int32Array(64);
   private recipes: RecipeTables;
-  /** The authority's competition powers, and how far it has had to use them
-   *  against each company. design.md 3.7. */
-  readonly regulator = new RegulatorTable();
-  /** The sky, and the things that go wrong under it. features.md 11 and 15. */
   /** What the region is like to be in, and what industry has done to it.
    *  design.md 2.3. */
   readonly amenity: AmenityField;
-  /** Public road schemes the authority has in hand against dear private
-   *  ways. features.md 12. */
-  readonly schemes = new SchemeTable();
   /*
    * What each *tile* mostly carries, and how much.
    *
@@ -157,10 +132,6 @@ export class World {
    */
   readonly tileCargo: Uint8Array;
   readonly tileTonnes: Float32Array;
-  /** Standing arrangements between companies about passage. design.md 3.6. */
-  readonly agreements = new AgreementTable();
-  readonly climate = new Climate();
-  readonly events = new EventTable();
   private lastEra = 0;
   private entrantDue = 0;
   private airLaid = false;
@@ -184,12 +155,6 @@ export class World {
   private nodeSiteOf = new Map<number, number>();
   private nodeTownOf = new Map<number, number>();
 
-  /** The three networks. design.md §2.2. */
-  readonly power = emptyUtilityState(MAX_NODES);
-  readonly water = emptyUtilityState(MAX_NODES);
-  readonly conveyorGrid = emptyUtilityState(MAX_NODES);
-  /** People who can reach each node inside a commute. */
-  labourAt = new Float64Array(MAX_NODES);
 
   /**
    * The last thing each company created, so a command can refer to it without
@@ -366,7 +331,6 @@ export class World {
   private rebuildTownBasket(era: number): void {
     if (this.basketEra === era) return;
     this.basketEra = era;
-    this.buildAppetiteTable();
     this.townDemandPerThousand.fill(0);
     this.townProducePerThousand.fill(0);
     for (const [id, v] of Object.entries(this.townWant)) {
@@ -402,85 +366,8 @@ export class World {
     }
   }
 
-  /**
-   * Flatten the character multipliers into a lookup, once.
-   *
-   * towncharacter.ts states them against cargo *ids* because that is how the
-   * design reads and how anybody balancing them would want to write them, and
-   * the town step needs them by index on every town on every day. Building the
-   * cross product once per era costs five rows of a dozen numbers and takes
-   * the string comparison out of the inner loop entirely.
-   */
-  private buildAppetiteTable(): void {
-    const n = this.content.cargo.length;
-    this.appetite = new Float64Array(CHARACTER_COUNT * n).fill(1);
-    for (let ch = 0; ch < CHARACTER_COUNT; ch++) {
-      for (let c = 0; c < n; c++) {
-        this.appetite[ch * n + c] = characterAppetite(ch, this.content.cargo[c].id);
-      }
-    }
-  }
 
-  /**
-   * Let each town drift toward the kind of place its circumstances make it.
-   * Once a year, and slowly even then — towncharacter.ts has the reasoning.
-   */
-  private stepCharacter(): void {
-    const n = this.towns.count;
-    const industry = new Float64Array(n);
-    const carriers: Set<number>[] = [];
-    for (let t = 0; t < n; t++) carriers.push(new Set());
-    // Industry near a town, by distance rather than by catchment: what makes a
-    // place industrial is the works you can see from it.
-    for (let s = 0; s < this.sites.count; s++) {
-      if (this.sites.state[s] === SiteState.Dead) continue;
-      const def = this.sites.def[s];
-      if (this.recipes.amenityPenalty[def] <= 0) continue;
-      for (let t = 0; t < n; t++) {
-        const dx = this.sites.x[s] - this.towns.x[t];
-        const dy = this.sites.y[s] - this.towns.y[t];
-        const d2 = dx * dx + dy * dy;
-        if (d2 > INDUSTRY_SIGHT * INDUSTRY_SIGHT) continue;
-        industry[t] += 1 - Math.sqrt(d2) / INDUSTRY_SIGHT;
-      }
-    }
-    // And who serves it, counted as distinct companies rather than services,
-    // because three routes belonging to one carrier is not a market town.
-    for (let sv = 0; sv < this.services.count; sv++) {
-      if (!this.services.active[sv] || this.services.vehicles[sv] === 0) continue;
-      const owner = this.services.company[sv];
-      for (let k = 0; k < this.services.stopCount[sv]; k++) {
-        const i = sv * MAX_STOPS + k;
-        if (this.services.stopKind[i] !== 1) continue;
-        const t = this.services.stopTarget[i];
-        if (t >= 0 && t < n) carriers[t].add(owner);
-      }
-    }
-    stepCharacter(this.towns, {
-      industryNearby: (t) => industry[t],
-      carriers: (t) => carriers[t].size,
-      amenity: (t) => this.amenity.at(this.towns.x[t], this.towns.y[t]),
-      transit: (t) => this.towns.transitQuality[t],
-      coastal: (t) => this.isCoastal(this.towns.tile[t]),
-      yearFraction: 1,
-    });
-  }
 
-  /** Whether a tile has open water within sight of it. */
-  private isCoastal(tile: number): boolean {
-    const size = this.config.size;
-    const x = tile % size;
-    const y = (tile / size) | 0;
-    for (let dy = -3; dy <= 3; dy++) {
-      for (let dx = -3; dx <= 3; dx++) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
-        if (this.terrain.isWater(nx, ny)) return true;
-      }
-    }
-    return false;
-  }
 
   get era(): number {
     const y = this.year;
@@ -515,10 +402,6 @@ export class World {
     rebuildGraph(this.graph, this.layers, this.assets, this.wayLanes);
     this.geometryVersion = -1;
     this.router.clear();
-    buildGrids(this.graph, this.assets, Mode.Wire, this.power);
-    buildGrids(this.graph, this.assets, Mode.Pipe, this.water);
-    buildGrids(this.graph, this.assets, Mode.Conveyor, this.conveyorGrid);
-
     this.nodeSiteOf.clear();
     this.nodeTownOf.clear();
     for (let s = 0; s < this.sites.count; s++) {
@@ -632,11 +515,10 @@ export class World {
 
   private stepDay(): void {
     const b = this.content.balance;
-    this.checkEraTurn();
 
     // running costs, breakdowns, and obsolescence
     const year = this.year;
-    const fuelPct = runningCostPercent(this.events);
+    const fuelPct = 100;
     for (let id = 0; id < this.vehicles.count; id++) {
       if (!this.vehicles.alive[id]) continue;
       const type = this.vehicles.type[id];
@@ -727,124 +609,20 @@ export class World {
       }
     }
 
-    this.stepUtilities();
     stepSiteDecay(this.sites, b);
-    if (this.day % DAYS_PER_YEAR === 0) ageSites(this.sites, this.year);
-    this.scoreTransit();
-    if (this.day % DAYS_PER_YEAR === 0 && this.day > 0) this.stepCharacter();
     this.rebuildTownBasket(this.era);
     stepTowns(
       this.towns, this.townDemandPerThousand, this.townProducePerThousand, b.townGrowthPerDay,
-      { cargo: this.touristCargo, multiplier: this.climate.tourismMultiplier(this.day) },
-      {
-        cargo: this.passengerCargo,
-        shareLost: (t) => carShare(this.era, this.towns.transitQuality[t]),
-      },
-      {
-        appetite: (t, c) => this.appetite[this.towns.character[t] * this.content.cargo.length + c],
-      },
     );
-    this.stepConveyors();
     this.stepContracts();
-    this.stepRivals();
     stepFinance(this.companies, b, (c) => this.declareBankrupt(c));
-    this.checkStalled();
 
     if (this.day % b.contractIntervalDays === 0) this.offerContract();
-    this.stepObjectives();
     if (this.dayOfMonth === 0 && this.day > 0) this.companies.closeMonth();
     this.syncCargoRibbons();
-    {
-      const report = stepAgreements(this.agreements, this.tick);
-      for (const i of [...report.lapsed, ...report.ended]) {
-        if (this.agreements.grantor[i] !== this.player
-          && this.agreements.beneficiary[i] !== this.player) continue;
-        this.onEvent?.('agreement', 'An access agreement has run out.');
-      }
-      if (report.ended.length > 0) this.router.invalidate();
-    }
-    this.stepWeather();
     if (this.dayOfMonth === 0) this.stepAmenityField();
-    this.stepRegulation();
-    if (this.day % DAYS_PER_YEAR === 0 && this.day > 0) this.stepPublicWorks();
-    this.stepEntrants();
-    this.checkCharters();
   }
 
-  /**
-   * The three networks, once a day.
-   *
-   * Daily rather than per tick because none of it changes faster than that: a
-   * grid does not re-balance twenty times a second, and running it per tick
-   * would be the most expensive thing in the simulation for no perceivable
-   * difference.
-   */
-  private stepUtilities(): void {
-    const c = this.content;
-    const electricity = c.cargoIndex.get('electricity') ?? 0;
-    const waterCargo = c.cargoIndex.get('water') ?? 0;
-
-    const ledger = {
-      charge: (payer: number, payee: number, amount: number, asset: number): void => {
-        if (amount <= 0) return;
-        this.companies.post(payer, Line.AccessPaid, amount);
-        if (payee !== AUTHORITY) this.companies.post(payee, Line.AccessCharged, amount);
-        if (asset !== NONE) this.assets.revenue[asset] += amount;
-      },
-    };
-
-    balanceGrids(
-      this.power, this.sites, Mode.Wire,
-      (s) => this.recipes.powerNeed[this.sites.def[s]],
-      (s) => this.siteOutputRate(s, electricity),
-      (s, pct) => { this.sites.powered[s] = pct; },
-      this.assets, ledger, this.cargoPrice[electricity],
-    );
-    balanceGrids(
-      this.water, this.sites, Mode.Pipe,
-      (s) => this.recipes.waterNeed[this.sites.def[s]],
-      /*
-       * What the reservoirs can actually give, which in a dry summer is less
-       * than what they hold. features.md 5 lists drought with the utility
-       * events, and this is where it lands: the transport game feels a drought
-       * second-hand, through a region that has stopped producing.
-       */
-      (s) => (this.siteOutputRate(s, waterCargo) * waterAvailable(this.events)) / 100,
-      (s, pct) => { this.sites.watered[s] = pct; },
-      this.assets, ledger, this.cargoPrice[waterCargo],
-    );
-
-    // Total labour demand, so the catchment can be shared rather than counted
-    // once per site. Without this, twenty mines beside one town are each
-    // "fully staffed" and labour is not a constraint at all.
-    let totalNeed = 0;
-    for (let s = 0; s < this.sites.count; s++) {
-      if (this.sites.state[s] === SiteState.Dead) continue;
-      totalNeed += this.recipes.labourNeed[this.sites.def[s]];
-    }
-    let totalPeople = 0;
-    for (let t = 0; t < this.towns.count; t++) totalPeople += this.towns.population[t];
-    // One person in ten works in the industries the player is running; the
-    // rest are children, shopkeepers, and everybody else a town contains.
-    this.labourShare = totalNeed > 0 ? Math.max(1, totalNeed / Math.max(1, totalPeople * 0.1)) : 1;
-
-    // Recomputed on a slower cadence than the grids, because towns grow by
-    // single people and the catchment is a smooth function of that.
-    if (this.day % 10 === 0) {
-      computeLabour(this.graph, this.towns, (link) => this.waySpeed[this.graph.linkCls[link]], this.labourAt);
-    }
-    for (let s = 0; s < this.sites.count; s++) {
-      const need = this.recipes.labourNeed[this.sites.def[s]];
-      if (need <= 0) {
-        this.sites.staffed[s] = 100;
-        continue;
-      }
-      const node = this.sites.nodeOf(s, Mode.Road);
-      const available = node === NONE ? 0 : this.labourAt[node];
-      this.sites.staffed[s] = Math.max(0, Math.min(100,
-        Math.round((available * 0.1) / Math.max(1, need * this.labourShare) * 100)));
-    }
-  }
 
   /** Units per day a site can supply of a networked cargo. */
   private siteOutputRate(site: number, cargo: number): number {
@@ -975,15 +753,7 @@ export class World {
     if (owner === payer) return;
     this.assets.foreignPasses[asset]++;
     const tiles = this.graph.linkChainLen[link] - 1;
-    /*
-     * Regulation first, then any deal between these two.
-     *
-     * The order matters and is the fair one: a charge cap is a ceiling
-     * imposed on the owner, and a private agreement can go below it but must
-     * not be able to lift anybody back above it.
-     */
-    const posted = accessChargeFor(this.regulator, this.assets, asset);
-    const charge = agreedCharge(this.agreements, owner, payer, posted) * tiles;
+    const charge = this.assets.charge[asset] * tiles;
     if (charge <= 0) return;
     this.companies.post(payer, Line.AccessPaid, charge);
     this.assets.revenue[asset] += charge;
@@ -1349,9 +1119,8 @@ export class World {
      * reason.
      */
     const dist = Math.max(direct, Math.min(this.vehicles.haulDistance[vehicle], direct * HAUL_ALLOWANCE));
-    const boom = ratePercent(this.events, cargo);
     const pence = Math.round(
-      (haulageRate(this.cargoPrice[cargo], dist, this.cargoRateWeight[cargo], this.era) * tonnes * boom) / 100,
+      haulageRate(this.cargoPrice[cargo], dist, this.cargoRateWeight[cargo]) * tonnes,
     );
     this.companies.post(company, Line.Haulage, pence);
     this.movedByCargo[company * this.content.cargo.length + cargo] += tonnes;
@@ -1537,89 +1306,7 @@ export class World {
     }
   }
 
-  /**
-   * Conveyors: a transport mode with no vehicles.
-   *
-   * Mine to processing, quarry to wharf — short hauls where a fleet is
-   * ridiculous and a belt is obvious. Everything on one conveyor network moves
-   * cargo to whoever on that network wants it, at a fixed rate, and the owner
-   * of the belt charges for it exactly as a road owner charges a lorry.
-   */
-  private stepConveyors(): void {
-    const conveyor = this.layers[Mode.Conveyor];
-    if (conveyor.tileCount === 0) return;
-    const cargoCount = this.content.cargo.length;
-    const RATE = 26;
 
-    // Sites on each conveyor component, producers and consumers alike.
-    const members = new Map<number, number[]>();
-    for (let s = 0; s < this.sites.count; s++) {
-      const node = this.sites.nodeOf(s, Mode.Conveyor);
-      if (node === NONE) continue;
-      const gi = this.conveyorGrid.gridOfNode[node];
-      if (gi < 0) continue;
-      const list = members.get(gi) ?? [];
-      list.push(s);
-      members.set(gi, list);
-    }
-
-    // Iterated by grid index rather than by Map order, because Map iteration
-    // order is not a contract the simulation may rely on (rule 4).
-    const gridIds = [...members.keys()].sort((a, b) => a - b);
-    for (const gi of gridIds) {
-      const list = members.get(gi) as number[];
-      list.sort((a, b) => a - b);
-      for (const from of list) {
-        const outs = this.recipes.outputs[this.sites.def[from]];
-        for (let i = 0; i < outs.length; i += 2) {
-          const cargo = outs[i];
-          let available = this.sites.stockOf(from, cargo);
-          if (available <= 0) continue;
-          for (const to of list) {
-            if (to === from || available <= 0) continue;
-            const room = this.sites.capacity[to * cargoCount + cargo] - this.sites.stockOf(to, cargo);
-            if (room <= 0) continue;
-            const moved = Math.min(available, room, RATE);
-            if (moved <= 0) continue;
-            this.sites.takeStock(from, cargo, moved);
-            this.sites.addStock(to, cargo, moved);
-            this.sites.everServed[from] = 1;
-            this.sites.shipped[from] += moved;
-            available -= moved;
-
-            // The belt charges, like every other piece of infrastructure.
-            const owner = this.sites.owner[to];
-            for (const asset of this.conveyorGrid.grids[gi].assets) {
-              const lineOwner = this.assets.owner[asset];
-              if (lineOwner === owner) continue;
-              const fee = Math.round((moved * accessChargeFor(this.regulator, this.assets, asset)) / 4);
-              if (fee <= 0) continue;
-              this.companies.post(owner, Line.AccessPaid, fee);
-              if (lineOwner !== AUTHORITY) this.companies.post(lineOwner, Line.AccessCharged, fee);
-              this.assets.revenue[asset] += fee;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  /**
-   * Rivals think, one at a time, on a rota.
-   *
-   * Staggered rather than all on the same day so the contract board is not
-   * hit by four simultaneous bids every sixth morning — and because a company
-   * that reviews its strategy the same day as everybody else is a company in
-   * a simulation rather than a company.
-   */
-  private stepRivals(): void {
-    for (let company = 1; company < this.companies.count; company++) {
-      if (!this.companies.isAi[company]) continue;
-      if (this.companies.bankrupt[company]) continue;
-      if ((this.day + company * 2) % THINK_DAYS !== 0) continue;
-      stepRival(this, company, this.rng);
-    }
-  }
 
   /**
    * Whether rivals may buy and price infrastructure.
@@ -1638,60 +1325,7 @@ export class World {
 
   // ------------------------------------------------------------ objectives
 
-  private objectiveContext(company: number): ObjectiveContext {
-    const cargoCount = this.content.cargo.length;
-    const base = company * LINE_COUNT;
-    const liveCargo: number[] = [];
-    for (let c = 0; c < cargoCount; c++) {
-      if (this.recipes.cargoFromEra[c] > this.era) continue;
-      if (this.content.cargo[c].tier === 'networked') continue;
-      liveCargo.push(c);
-    }
-    return {
-      tick: this.tick,
-      era: this.era,
-      cargoName: (i) => this.content.cargo[i]?.name ?? '',
-      townName: (i) => this.towns.names[i] ?? '',
-      movedByCargo: this.movedByCargo.subarray(company * cargoCount, (company + 1) * cargoCount),
-      townCount: this.towns.count,
-      townServed: (t) => this.towns.served[t],
-      annualRevenue:
-        this.companies.ledgerYear[base + Line.Haulage] +
-        this.companies.ledgerYear[base + Line.ContractBonus] +
-        this.companies.ledgerYear[base + Line.AccessCharged],
-      ownedAssets: this.ownedAssets(company),
-      ownedSites: this.ownedSites(company),
-      liveCargo,
-    };
-  }
 
-  private stepObjectives(): void {
-    for (let company = 1; company < this.companies.count; company++) {
-      if (this.companies.bankrupt[company]) continue;
-      const ctx = this.objectiveContext(company);
-      const { met, expired } = checkObjectives(this.objectives, ctx);
-      for (const id of met) {
-        if (this.objectives.company[id] !== company) continue;
-        this.companies.post(company, Line.Subsidy, this.objectives.reward[id]);
-        if (company === this.player) {
-          this.onEvent?.('objective', `${this.objectives.text[id]} — done. ${Math.round(this.objectives.reward[id] / 100).toLocaleString('en-GB')} paid.`);
-        }
-        this.objectives.release(id);
-      }
-      for (const id of expired) {
-        if (this.objectives.company[id] === this.player) {
-          this.onEvent?.('objective-missed', `Missed: ${this.objectives.text[id]}.`);
-        }
-        this.objectives.release(id);
-      }
-      // Two open at a time. More than that and the board stops being a
-      // prompt and becomes a checklist, which is the opposite of the point.
-      const open = this.objectives.openFor(company).length;
-      if (open < 2 && this.day % 15 === 0) {
-        generateObjective(this.objectives, company, ctx, this.rng);
-      }
-    }
-  }
 
   // -------------------------------------------------------------- charters
 
@@ -1701,91 +1335,7 @@ export class World {
    * that you have run a real business at the current level, not that a
    * timer expired.
    */
-  /**
-   * Things that happen once, when the century turns a page.
-   *
-   * Air is the clearest case. There is no sky to build, only aerodromes, so
-   * the corridors between them cannot be laid at worldgen — in 1860 there is
-   * nowhere for them to go — and they cannot be laid by the player either,
-   * because nobody builds a flight path. They come into existence when the
-   * era does, between the places big enough to have an aerodrome, which is
-   * the same argument seaair.ts makes about the sea and for the same reason.
-   */
-  private checkEraTurn(): void {
-    const era = this.era;
-    if (era === this.lastEra) return;
-    const was = this.lastEra;
-    this.lastEra = era;
-    if (was === 0) return;
 
-    this.openNewIndustries(era);
-    this.checkContainerisation(era);
-
-    const airCls = this.content.wayIndex.get('airway');
-    if (airCls !== undefined && this.content.ways[airCls].era <= era && !this.airLaid) {
-      // The four largest towns get an aerodrome. Fewer and there is no network;
-      // more and every village in the region has an airport, which is silly and
-      // also makes the air graph enormous for no gain.
-      const order = Array.from({ length: this.towns.count }, (_, i) => i)
-        .sort((a, b) => this.towns.population[b] - this.towns.population[a]);
-      const airports = order.slice(0, 4).map((t) => this.towns.tile[t]);
-      if (airports.length >= 2) {
-        const laid = generateAirCorridors(
-          this.terrain, this.layers[Mode.Air], this.assets, airCls, airports, this.tick,
-        );
-        if (laid > 0) {
-          this.airLaid = true;
-          this.rebuild();
-          this.onEvent?.('era', 'Aerodromes have opened at the four largest towns, and the corridors between them are open to anybody with an aeroplane.');
-        }
-      }
-    }
-  }
-
-  /**
-   * How good the passenger service is at each town, once a day.
-   *
-   * Read by stepTowns to decide how many people take a service at all, which
-   * is what makes the motor car a competitor rather than a decoration.
-   */
-  private scoreTransit(): void {
-    const people = this.passengerCargo;
-    if (people < 0) return;
-    const calls = new Int32Array(this.towns.count);
-    const lapSum = new Float64Array(this.towns.count);
-    const modes = new Int32Array(this.towns.count);
-    for (let s = 0; s < this.services.count; s++) {
-      if (!this.services.active[s] || this.services.vehicles[s] === 0) continue;
-      // Only a service with something that carries people counts.
-      let mode = -1;
-      for (let v = 0; v < this.vehicles.count; v++) {
-        if (!this.vehicles.alive[v] || this.vehicles.service[v] !== s) continue;
-        const def = this.content.vehicles[this.vehicles.type[v]];
-        if (!def.handling.includes('people')) continue;
-        mode = this.vehicleMode[this.vehicles.type[v]];
-        break;
-      }
-      if (mode < 0) continue;
-      for (let k = 0; k < this.services.stopCount[s]; k++) {
-        const i = s * MAX_STOPS + k;
-        if (this.services.stopKind[i] !== 1) continue;
-        const t = this.services.stopTarget[i];
-        if (t < 0 || t >= this.towns.count) continue;
-        calls[t]++;
-        lapSum[t] += this.services.roundTrip[s] || TICKS_PER_YEAR;
-        modes[t] |= 1 << mode;
-      }
-    }
-    scoreTransit(this.towns, {
-      era: this.era,
-      serviceCount: (t) => calls[t],
-      meanRoundTrip: (t) => (calls[t] > 0 ? lapSum[t] / calls[t] : 0),
-      modes: (t) => modes[t],
-      // A month is what a commute ought to feel like at this game's scale —
-      // see scale.md on why a journey and a calendar are not reconciled here.
-      referenceRoundTrip: TICKS_PER_DAY * 30,
-    });
-  }
 
   /**
    * What the region is like to be in, once a month.
@@ -1841,53 +1391,6 @@ export class World {
     }
   }
 
-  /**
-   * The sky, once a day.
-   *
-   * Both halves are announced. A player whose lorries have slowed by a third
-   * and who has not been told why will look for the bug, and they are right
-   * to: an unexplained number is indistinguishable from a broken one.
-   */
-  private stepWeather(): void {
-    /*
-     * Only the weather that changes a decision is worth a line.
-     *
-     * Announcing every front produced ten notices a year, at which point the
-     * player stops reading the log — and the log is also where the regulator
-     * writes, so the cost of the noise is not the noise. Rain and fog are
-     * atmosphere and belong in the palette; snow and a storm can shut a pass,
-     * which is news.
-     */
-    const changed = this.climate.step(this.tick, this.day, this.rng);
-    const notable = this.climate.weather === Weather.Snow || this.climate.weather === Weather.Storm;
-    if (changed && notable && this.climate.severity > 62) {
-      this.onEvent?.('weather', `${WEATHER_NAMES[this.climate.weather]} has set in across the region.`);
-    }
-    const live: number[] = [];
-    for (let c = 0; c < this.content.cargo.length; c++) {
-      // Electricity and water travel down a wire and a pipe. A boom in them
-      // is not a boom in carriage, and announcing one is a promise of work
-      // that does not exist.
-      if (this.content.cargo[c].tier === 'networked') continue;
-      if (this.recipes.cargoFromEra[c] <= this.era) live.push(c);
-    }
-    const { opened, closed } = stepEvents(this.events, {
-      tick: this.tick, day: this.day, era: this.era,
-      companyCount: this.companies.count, cargoCount: this.content.cargo.length,
-      liveCargo: live, climate: this.climate,
-    }, this.rng);
-    for (const i of opened) {
-      const subject = this.events.kind[i] === EventKind.Boom
-        ? ` (${this.content.cargo[this.events.subject[i]].name.toLowerCase()})`
-        : this.events.kind[i] === EventKind.Strike
-          ? ` (${this.companies.names[this.events.subject[i]]})`
-          : '';
-      this.onEvent?.('disruption', `${EVENT_NAMES[this.events.kind[i]]}${subject}: ${this.events.text[i]}`);
-    }
-    for (const i of closed) {
-      this.onEvent?.('disruption', `${EVENT_NAMES[this.events.kind[i]]} is over.`);
-    }
-  }
 
   /**
    * What today is doing to this link, as a percentage of the posted limit.
@@ -1902,70 +1405,22 @@ export class World {
    * January; one who went round the long way does not.
    */
   private linkConditions(link: number, company: number): number {
-    // The midpoint of the link, which is the honest place to sample: a pass
-    // is defined by its summit, not by the valley floor it starts in.
-    const start = this.graph.linkChainStart[link];
-    const len = this.graph.linkChainLen[link];
-    const tile = this.graph.chain[start + (len >> 1)];
-    const height = this.terrain.height[tile] ?? 0;
-    let pct = this.climate.speedPercent(height);
-
-    const flood = floodSeverity(this.events);
-    if (flood > 0 && height < FLOOD_LINE) {
-      pct = Math.min(pct, Math.max(0, 100 - flood));
-    }
-    const strike = strikePercent(this.events, company);
-    if (strike < 100) pct = (pct * strike) / 100;
-    return pct;
+    /*
+     * Nothing slows a way down any more.
+     *
+     * This used to be the whole of weather: snow on a pass, a river over its
+     * banks, a strike at a depot. Weather events went with `cut.md`'s events
+     * cut, and the hook is kept rather than removed because the *shape* of
+     * "this link is slower than its posted limit for a reason" is the thing
+     * gradient and surface condition will want next, and threading it back
+     * through every caller later is worse than leaving one function returning
+     * a hundred.
+     */
+    void link;
+    void company;
+    return 100;
   }
 
-  /**
-   * The authority's own capital programme, once a year.
-   *
-   * The frightening one, and deliberately so: unlike the regulator it does
-   * not care how dominant you are, only that a corridor matters and that
-   * using it is dear — which are precisely the two things that made the asset
-   * worth owning. Announced, slow, and withdrawn if the case goes away, so a
-   * player who does not fancy the competition has six years to drop the
-   * charge and make the scheme not worth building.
-   */
-  private stepPublicWorks(): void {
-    const report = stepPublicWorks(
-      this.schemes, this.assets, this.era, this.tick, TICKS_PER_YEAR,
-      (asset) => this.assetEndpoints(asset),
-    );
-
-    for (const i of report.proposed) {
-      const owner = this.assets.owner[this.schemes.against[i]];
-      if (owner !== this.player) continue;
-      this.onEvent?.(
-        'publicworks',
-        'The authority is consulting on a public road beside one of yours. '
-        + 'It says the passage is dear. Lower the charge and the case for it goes away.',
-      );
-    }
-    for (const i of report.withdrawn) {
-      const owner = this.assets.owner[this.schemes.against[i]];
-      if (owner !== this.player) continue;
-      this.onEvent?.('publicworks', 'The authority has dropped its road scheme. The case for it went away.');
-    }
-    for (const i of report.build) {
-      const path = this.tileRouter.route(this.schemes.fromTile[i], this.schemes.toTile[i]);
-      if (!path || path.length < 2) continue;
-      const cls = this.publicRoadClass();
-      if (cls < 0) continue;
-      const way = this.content.ways[cls];
-      const laid = this.layPublicWay(Mode.Road, cls, path, this.wayCharge[cls], way.buildCost);
-      if (!laid) continue;
-      const owner = this.assets.owner[this.schemes.against[i]];
-      this.onEvent?.(
-        'publicworks',
-        owner === this.player
-          ? 'The public road has opened alongside yours. Traffic has somewhere else to go.'
-          : 'The authority has opened a new public road.',
-      );
-    }
-  }
 
   /**
    * Lay a way for the authority.
@@ -1995,103 +1450,7 @@ export class World {
     return true;
   }
 
-  /**
-   * Containerisation. design.md's era table, and features.md's note that an
-   * era transition should invert the optimum rather than merely retire some
-   * lorries.
-   *
-   * The box did not make ships faster. It made *loading* faster, by about two
-   * orders of magnitude, and everything else followed from that: if a ship
-   * spends three weeks in port and one at sea, the sea leg is not the problem
-   * and a faster ship is not the answer. So this is modelled where it
-   * happened, on the transfer rate, and the consequences fall out on their own
-   * — a container fleet's round trip collapses, the same vehicles suddenly do
-   * three times the work, and the operator who kept a yard full of general
-   * cargo lorries finds their advantage was in the wrong place.
-   *
-   * Applied as a standing change to every container-capable vehicle rather
-   * than as a one-off event, because that is what it was: not something that
-   * happened in 1968, something that was true afterwards.
-   */
-  private checkContainerisation(era: number): void {
-    if (this.containerised || era < CONTAINER_ERA) return;
-    this.containerised = true;
-    let changed = 0;
-    for (let i = 0; i < this.content.vehicles.length; i++) {
-      if (!this.content.vehicles[i].handling.includes('container')) continue;
-      this.vehicleTransfer[i] = Math.round(this.vehicleTransfer[i] * CONTAINER_TRANSFER_GAIN);
-      changed++;
-    }
-    if (changed > 0) {
-      this.onEvent?.(
-        'era',
-        'The box has arrived. Anything that can carry containers now loads and '
-        + 'unloads several times faster, which is where the time in a journey '
-        + 'actually goes. Everything else you own has just become slower by '
-        + 'comparison.',
-      );
-    }
-  }
 
-  /**
-   * The region gains industry as the century turns.
-   *
-   * Worldgen places the extraction sites the 1860s had and nothing else, and
-   * nothing ever added to them — so a game run to 2100 had exactly the same
-   * industries in it as a game run to 1861. A refinery, an aluminium smelter,
-   * a resort: all in the content, all reachable in principle by a player with
-   * an extraction charter, and in practice never present anywhere. Half the
-   * cargo table could not move because nothing in the region made it.
-   *
-   * These are founded by the authority rather than by anybody, which is the
-   * right reading of what they are: the region developing, not a competitor
-   * expanding. They are a thing to serve, and whoever serves them first has
-   * found the opportunity the new era opened. That is the era transition
-   * doing what design.md 2.4 says it should — inverting the optimum — rather
-   * than merely retiring some lorries.
-   */
-  private openNewIndustries(era: number): void {
-    /*
-     * Each of this era's new industries first, then anything older that now
-     * has somebody to trade with.
-     *
-     * Drawing at random until a quota filled meant an era's rarer works
-     * simply never happened: era three brings the oil rig, the smelter and
-     * the refinery, and a quota of four filled with refineries — which are
-     * easy to site — before an oil rig was ever drawn. Crude oil existed in
-     * the content, had a producer and a consumer, and was never once made
-     * anywhere. An era ought to visibly bring the things it is the era of.
-     */
-    let founded = 0;
-    for (let defIndex = 0; defIndex < this.content.industries.length; defIndex++) {
-      if (this.content.industries[defIndex].fromEra !== era) continue;
-      const copies = 1 + this.rng.int(2);
-      for (let n = 0; n < copies; n++) {
-        const tile = this.pickSiteFor(defIndex);
-        if (tile === NONE) break;
-        if (this.foundIndustryAsAuthority(defIndex, tile) !== NONE) founded++;
-      }
-    }
-
-    // And the backlog: anything from an earlier era that this one has finally
-    // given a partner. A retail park is no use until something makes retail
-    // stock, and the thing that makes it arrives an era later than it does.
-    const backlog = 2 + this.rng.int(3);
-    let filled = 0;
-    for (let attempt = 0; attempt < 300 && filled < backlog; attempt++) {
-      const defIndex = this.rng.int(this.content.industries.length);
-      const def = this.content.industries[defIndex];
-      if (def.fromEra >= era) continue;
-      if (!this.completesAChain(defIndex)) continue;
-      const tile = this.pickSiteFor(defIndex);
-      if (tile === NONE) continue;
-      if (this.foundIndustryAsAuthority(defIndex, tile) !== NONE) { founded++; filled++; }
-    }
-
-    if (founded > 0) {
-      this.onEvent?.('era', `New industry has come to the region: ${founded} works opened this decade.`);
-    }
-  }
 
   /** Does the region already make what this works takes, or take what it
    *  makes? Either way it has somebody to trade with. */
@@ -2240,40 +1599,6 @@ export class World {
     return { from, to };
   }
 
-  /**
-   * The regulator, once a day.
-   *
-   * Everything it decides is announced, because an intervention the player
-   * only discovers by noticing their tolls have stopped earning is a bug they
-   * will report rather than an antagonist they will respect.
-   */
-  private stepRegulation(): void {
-    const report = stepRegulator(
-      this.regulator, this.assets, this.companies, this.era, this.tick,
-      this.content.balance.valuationPct,
-      (asset, from, price) => {
-        this.assets.owner[asset] = AUTHORITY;
-        this.assets.forSale[asset] = 0;
-        this.assets.charge[asset] = this.wayCharge[this.assets.cls[asset]];
-        this.companies.post(from, Line.AssetTrade, price);
-        this.router.invalidate();
-        if (from === this.player) {
-          this.onEvent?.('regulator', 'The authority has compulsorily purchased one of your ways for public benefit. You have been paid the market valuation.');
-        }
-      },
-    );
-    for (const c of report.changed) {
-      if (c.company !== this.player) continue;
-      this.onEvent?.(
-        'regulator',
-        c.up
-          ? `The authority has escalated to: ${INTERVENTION_NAMES[c.level]}.`
-          : c.level === Intervention.None
-            ? 'The authority has closed its case against you.'
-            : `The authority has stepped back to: ${INTERVENTION_NAMES[c.level]}.`,
-      );
-    }
-  }
 
   private checkCharters(): void {
     for (let c = 1; c < this.companies.count; c++) {
@@ -2307,8 +1632,6 @@ export class World {
           && cash >= req.construction.cash;
       } else if (have === Charter.Construction) {
         earned = revenue >= req.extraction.revenue && this.ownedAssets(c) >= req.extraction.assets;
-      } else if (have === Charter.Extraction) {
-        earned = revenue >= req.land.revenue && this.ownedSites(c) >= req.land.sites;
       }
       if (earned) {
         this.companies.charter[c] = have + 1;
@@ -2355,11 +1678,6 @@ export class World {
     return n;
   }
 
-  ownedSites(company: number): number {
-    let n = 0;
-    for (let s = 0; s < this.sites.count; s++) if (this.sites.owner[s] === company) n++;
-    return n;
-  }
 
   /**
    * A company that has stopped being a company.
@@ -2476,88 +1794,6 @@ export class World {
     this.entrantDue = this.tick + (2 + this.rng.int(4)) * TICKS_PER_YEAR;
   }
 
-  /**
-   * A new operator sets up, some years after somebody else failed.
-   *
-   * design.md 3.8 says insolvency is an event in the world rather than a
-   * game-over screen, and the same ought to be true of the region as a whole:
-   * a failed carrier leaves a yard, a route somebody knows is viable, and a
-   * gap in the market. Without this the region only ever loses companies —
-   * across a sixty-year sweep three of the four rivals were gone by the end
-   * and the last decades had nobody in them to compete with, buy from, or be
-   * regulated against. Every mechanism in the ownership spine needs somebody
-   * on the other side of it.
-   *
-   * They arrive on the same terms anybody else did, which is what stops this
-   * being a difficulty knob: the same starting capital, a fresh personality,
-   * and no charter. If the region is genuinely unprofitable they will fail
-   * too, and that is information rather than a bug.
-   */
-  private stepEntrants(): void {
-    /*
-     * Re-arm whenever the region is short of operators, not only on the day
-     * somebody fails.
-     *
-     * A single pending date meant two failures close together produced one
-     * replacement, and after that the region simply had fewer companies in it
-     * for ever. What matters is how many are trading now, so that is what is
-     * checked.
-     */
-    let live = 0;
-    for (let c = 1; c < this.companies.count; c++) if (!this.companies.bankrupt[c]) live++;
-    if (live >= this.config.companyCount - 1) {
-      this.entrantDue = 0;
-      return;
-    }
-    if (this.entrantDue === 0) {
-      this.entrantDue = this.tick + (2 + this.rng.int(4)) * TICKS_PER_YEAR;
-      return;
-    }
-    if (this.tick < this.entrantDue) return;
-    this.entrantDue = 0;
-
-    // Re-use a failed company's slot: the table is small and fixed, and a
-    // region that has seen eight failures has not run out of entrepreneurs.
-    let slot = NONE;
-    for (let c = 1; c < this.companies.count; c++) {
-      if (c !== this.player && this.companies.bankrupt[c]) { slot = c; break; }
-    }
-    if (slot === NONE) return;
-
-    /*
-     * Whatever the administrator could not sell passes to the authority.
-     *
-     * This is the half of design.md 3.8 that was missing, and leaving it out
-     * was quietly fatal. Bankruptcy puts a company's ways on the market, which
-     * is right; but the slot is then re-used by the next operator, and the
-     * ways were still attached to it. So every entrant was born owning the
-     * derelict network of the company that had just died of owning it —
-     * nine ways, four hundred thousand a year of upkeep, on the first morning,
-     * against a quarter of a million of starting capital. There was no
-     * sequence of good decisions that survived it. The region reliably ran out
-     * of vehicles altogether within fifty years and stayed empty for the
-     * remaining two centuries, and every entrant after the first was a
-     * formality.
-     *
-     * The authority taking them on is both the fix and what actually happens
-     * when a transport operator collapses. It also completes a path that was
-     * already half-built: network.ts values an authority-held way at a quarter
-     * of its floor precisely so somebody can pick it up cheaply later, which
-     * is the region recovering rather than the region ending.
-     */
-    for (let a = 0; a < this.assets.count; a++) {
-      if (this.assets.owner[a] !== slot) continue;
-      this.assets.owner[a] = AUTHORITY;
-      this.assets.forSale[a] = 1;
-    }
-    const name = ENTRANT_NAMES[this.rng.int(ENTRANT_NAMES.length)];
-    this.companies.revive(slot, name, this.startingCapital());
-    this.companies.isAi[slot] = 1;
-    this.companies.aggression[slot] = 30 + this.rng.int(60);
-    this.companies.horizon[slot] = 25 + this.rng.int(65);
-    this.companies.thrift[slot] = 25 + this.rng.int(65);
-    this.onEvent?.('entrant', `${name} has set up in the region.`);
-  }
 
   // ------------------------------------------------------------- commands
 
@@ -2631,37 +1867,6 @@ export class World {
       case Cmd.SetCharge:
         this.setCharge(c.a, c.b, c.issuer);
         break;
-      case Cmd.OfferAgreement: {
-        const other = c.a;
-        const granting = c.c === 1;
-        const id = propose(
-          this.agreements, c.issuer,
-          granting ? c.issuer : other,
-          granting ? other : c.issuer,
-          c.b, this.tick,
-        );
-        if (id >= 0 && (other === this.player || c.issuer === this.player)) {
-          this.onEvent?.('agreement', granting
-            ? `${this.companies.names[c.issuer]} offers ${this.companies.names[other]} passage at ${c.b}% of the usual.`
-            : `${this.companies.names[c.issuer]} asks ${this.companies.names[other]} for passage at ${c.b}% of the usual.`);
-        }
-        break;
-      }
-      case Cmd.AcceptAgreement:
-        if (accept(this.agreements, c.a, c.issuer, this.tick)) {
-          this.router.invalidate();
-          this.onEvent?.('agreement', 'Terms agreed.');
-        }
-        break;
-      case Cmd.DeclineAgreement:
-        decline(this.agreements, c.a, c.issuer);
-        break;
-      case Cmd.WithdrawAgreement:
-        if (withdraw(this.agreements, c.a, c.issuer)) {
-          this.router.invalidate();
-          this.onEvent?.('agreement', 'An access agreement has been ended.');
-        }
-        break;
       case Cmd.BuyAsset:
         this.buyAsset(c.a, c.issuer);
         break;
@@ -2670,12 +1875,6 @@ export class World {
         break;
       case Cmd.Modernise:
         this.modernise(c.issuer, c.a);
-        break;
-      case Cmd.Reclaim:
-        if (Array.isArray(c.data)) this.reclaimLand(c.issuer, c.data);
-        break;
-      case Cmd.Remediate:
-        this.remediate(c.issuer, c.a, c.b);
         break;
       case Cmd.BuildWay:
         // Tile list in `data`, because a route is the one payload that will
@@ -2801,111 +2000,8 @@ export class World {
     return true;
   }
 
-  /** What a reclamation would cost, without committing it. */
-  planReclaim(tiles: readonly number[]): ReclaimPlan {
-    return planReclamation(this.terrain, tiles, this.era);
-  }
 
-  /**
-   * Make more region. features.md 13.
-   *
-   * The only command in the game that edits the map, which is why it is
-   * hedged about so carefully in reclamation.ts. Everything downstream has to
-   * be told: the graph, because there is somewhere new to lay a road; the
-   * renderer, because the coastline moved; and the amenity field, because a
-   * polder is flat drained ground and scores like it.
-   */
-  reclaimLand(company: number, tiles: readonly number[]): boolean {
-    if (this.companies.charter[company] < Charter.Land) {
-      this.onEvent?.('refused', 'Remaking the coastline is a matter for a land charter.');
-      return false;
-    }
-    const plan = this.planReclaim(tiles);
-    if (!plan.ok) {
-      this.onEvent?.('refused', plan.problem);
-      return false;
-    }
-    if (this.companies.cash[company] < plan.cost) {
-      this.onEvent?.('refused', `That scheme costs ${Math.round(plan.cost / 100)}.`);
-      return false;
-    }
-    const changed = reclaim(this.terrain, plan);
-    if (changed.length === 0) return false;
-    this.companies.post(company, Line.Construction, plan.cost);
-    this.amenity.seed(this.terrain);
-    this.geometryVersion = -1;
-    this.rebuild();
-    if (company === this.player) {
-      this.onEvent?.('reclamation', `${changed.length} tiles won from the sea.`);
-    }
-    return true;
-  }
 
-  /**
-   * Pay to mend the ground. design.md 2.3.
-   *
-   * The design asks for a redemption arc rather than only a ratchet, and the
-   * shape of that is deliberately asymmetric: spoiling is instant and free —
-   * it is a side effect of a pit that is making you money — while mending is
-   * slow, expensive, and something you have to choose. Remediation buys credit
-   * that the monthly pass spends down over years; it does not repaint the
-   * valley the afternoon you pay for it.
-   *
-   * Radius is in amenity cells rather than tiles, because that is the grid the
-   * field is on and pretending otherwise would let a player pay for precision
-   * the model does not have.
-   */
-  remediate(company: number, tile: number, radiusCells: number): boolean {
-    if (this.era < REMEDIATION_FROM_ERA) {
-      this.onEvent?.('refused', 'Nobody restores land yet. That comes later in the century.');
-      return false;
-    }
-    if (this.companies.charter[company] < Charter.Land) {
-      this.onEvent?.('refused', 'Restoring land is a matter for a land charter.');
-      return false;
-    }
-    const size = this.config.size;
-    const x = tile % size;
-    const y = (tile / size) | 0;
-    const centre = this.amenity.cellOf(x, y);
-    const cols = this.amenity.cols;
-    const r = Math.max(0, Math.min(8, radiusCells));
-    const cx = centre % cols;
-    const cy = (centre / cols) | 0;
-
-    let deficit = 0;
-    const cells: number[] = [];
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        const nx = cx + dx;
-        const ny = cy + dy;
-        if (nx < 0 || ny < 0 || nx >= cols || ny >= this.amenity.rows) continue;
-        if (dx * dx + dy * dy > r * r) continue;
-        const c = ny * cols + nx;
-        const gap = this.amenity.potential[c] - this.amenity.current[c] - this.amenity.restored[c];
-        if (gap <= 0) continue;
-        deficit += gap;
-        cells.push(c);
-      }
-    }
-    if (deficit <= 0) {
-      this.onEvent?.('refused', 'There is nothing wrong with the ground there.');
-      return false;
-    }
-    const price = Math.round(deficit * REMEDIATION_PRICE);
-    if (this.companies.cash[company] < price) {
-      this.onEvent?.('refused', `Restoring that would cost ${Math.round(price / 100)}.`);
-      return false;
-    }
-    for (const c of cells) {
-      this.amenity.restored[c] = this.amenity.potential[c] - this.amenity.current[c];
-    }
-    this.companies.post(company, Line.Construction, price);
-    if (company === this.player) {
-      this.onEvent?.('remediation', 'Restoration is under way. It will take years, as these things do.');
-    }
-    return true;
-  }
 
   buildWay(company: number, mode: number, cls: number, path: ArrayLike<number>): boolean {
     const way = this.content.ways[cls];
@@ -3222,27 +2318,6 @@ export class World {
     hashNetwork(h, this.graph, this.assets);
     hashSites(h, this.sites, this.towns);
     hashEconomy(h, this.companies, this.contracts, this.services);
-    // The regulator is state that steers future state, so a divergence in it
-    // has to show up here rather than a decade later when a charge cap lands
-    // on one client and not the other.
-    h.array(this.regulator.level, this.companies.count);
-    h.array(this.regulator.pressure, this.companies.count);
-    h.array(this.regulator.relief, this.companies.count);
-    h.int(this.climate.weather).int(this.climate.severity);
-    h.int(this.containerised ? 1 : 0);
-    // Agreements change what everybody pays, so a divergence in them is a
-    // divergence in the economy and has to show up here rather than as an
-    // unexplained difference in two players' books a decade later.
-    h.int(this.agreements.count);
-    h.array(this.agreements.state, this.agreements.count);
-    h.array(this.agreements.grantor, this.agreements.count);
-    h.array(this.agreements.beneficiary, this.agreements.count);
-    h.array(this.agreements.ratePct, this.agreements.count);
-    h.array(this.agreements.endTick, this.agreements.count);
-    h.int(this.events.count);
-    h.array(this.events.active, this.events.count);
-    h.array(this.events.kind, this.events.count);
-    h.array(this.events.ends, this.events.count);
     h.int(this.vehicles.count);
     for (let i = 0; i < this.vehicles.count; i++) {
       if (!this.vehicles.alive[i]) {

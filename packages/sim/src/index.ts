@@ -23,11 +23,6 @@ export * from './world.ts';
 export * from './worldgen.ts';
 export * from './construction.ts';
 export * from './junction.ts';
-export * from './utilities.ts';
-export * from './objectives.ts';
-export * from './rivals.ts';
-export * from './seaair.ts';
-export * from './stress.ts';
 export * from './snapshot.ts';
 
 import { loadContent, type Content } from '@interchange/data';
@@ -43,12 +38,5 @@ export function createWorld(config: Partial<WorldConfig> = {}, content?: Content
   generateWorld(w);
   return w;
 }
-export * from './regulation.ts';
-export * from './weather.ts';
 export * from './amenity.ts';
-export * from './publicworks.ts';
-export * from './reclamation.ts';
-export * from './agreements.ts';
-export * from './transit.ts';
-export * from './towncharacter.ts';
 export * from './erosion.ts';

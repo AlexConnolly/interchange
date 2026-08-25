@@ -14,10 +14,6 @@ import {
   CHARTER_NAMES, Cmd, ContractState, LINE_IS_INCOME, LINE_NAMES, Line,
   STATE_NAMES, StopAction, TICKS_PER_DAY, MAX_STOPS, NONE, VState,
   CHARTER_REQUIREMENTS,
-  Intervention, INTERVENTION_NAMES, DOMINANCE_TILES, DOMINANCE_TRADE,
-  PATIENCE_DAYS,
-  AgreementState, AGREEMENT_STATE_NAMES, mustAnswer,
-  TownCharacter, DRIFT_YEARS,
 } from '@interchange/sim';
 import { content } from '@interchange/data';
 import { money, num, pct, shortMoney, signClass, tonnes, days } from './format.ts';
@@ -203,23 +199,6 @@ export function Inspector({
             <dd className={w.towns.served[t] > 60 ? 'pos' : w.towns.served[t] > 40 ? 'warnc' : 'neg'}>{pct(w.towns.served[t])}</dd>
             <dt>Trend</dt>
             <dd>{w.towns.served[t] > 60 ? 'growing' : w.towns.served[t] < 40 ? 'shrinking' : 'steady'}</dd>
-            <dt>Character</dt>
-            <dd>
-              {TownCharacter[w.towns.character[t]]}
-              {/*
-                * The half-sentence that turns character from a label into a
-                * thing the player can steer. There is no zoning tool; what
-                * there is, is a town telling you what your network is turning
-                * it into, early enough to change your mind.
-                */}
-              {w.towns.characterDrift[t] > DRIFT_YEARS * 20 && (
-                <span className="sub"> · becoming {TownCharacter[w.towns.characterToward[t]]}</span>
-              )}
-            </dd>
-            <dt>Passenger service</dt>
-            <dd className={w.towns.transitQuality[t] > 50 ? 'pos' : w.towns.transitQuality[t] > 20 ? 'warnc' : 'neg'}>
-              {w.towns.transitQuality[t] === 0 ? 'none' : pct(w.towns.transitQuality[t])}
-            </dd>
           </dl>
           <div className="ledger"><div className="head">Wants delivered</div></div>
           {wants.map((ci) => {
@@ -690,10 +669,7 @@ export function CharterPanel({ engine }: { engine: Engine }): JSX.Element {
             { label: 'Revenue this year', have: revenue, need: CHARTER_REQUIREMENTS.extraction.revenue },
             { label: 'Infrastructure owned', have: w.ownedAssets(p), need: CHARTER_REQUIREMENTS.extraction.assets },
           ]
-        : [
-            { label: 'Revenue this year', have: revenue, need: CHARTER_REQUIREMENTS.land.revenue },
-            { label: 'Industries owned', have: w.ownedSites(p), need: CHARTER_REQUIREMENTS.land.sites },
-          ];
+        : [];
 
   return (
     <div className="window right">
@@ -725,62 +701,10 @@ export function CharterPanel({ engine }: { engine: Engine }): JSX.Element {
           );
         })}
       </div>
-      <RegulatorNotice engine={engine} />
     </div>
   );
 }
 
-/**
- * How the authority sees you.
- *
- * Only drawn once there is something to see, because a panel that says 'no
- * action is being taken against you' every day for forty years is furniture.
- * But once the pressure is building it must be visible and it must be
- * quantified, because the whole claim of design.md 3.7 is that regulation is
- * *earned*, and a consequence the player could not see coming is not earned,
- * it is a random event. The two shares here are the two the regulator
- * actually measures — no hidden third term.
- */
-function RegulatorNotice({ engine }: { engine: Engine }): JSX.Element | null {
-  const w = engine.world;
-  const p = w.player;
-  const level = w.regulator.level[p];
-  const tiles = w.regulator.tileShare[p];
-  const trade = w.regulator.tradeShare[p];
-  const watched = tiles > DOMINANCE_TILES * 100 || trade > DOMINANCE_TRADE * 100;
-  if (level === Intervention.None && !watched) return null;
-
-  const pressure = Math.min(1, w.regulator.pressure[p] / (PATIENCE_DAYS * TICKS_PER_DAY));
-  return (
-    <div className="body" style={{ borderTop: '1px solid var(--line)' }}>
-      <div className="row">
-        <div className="grow">
-          <div className="title">
-            The authority{' '}
-            <span className={level > Intervention.Referral ? 'chip neg' : 'chip'}>
-              {INTERVENTION_NAMES[level]}
-            </span>
-          </div>
-          <div className="sub">
-            You hold {tiles}% of the region&rsquo;s way and {trade}% of its carrying trade.
-          </div>
-          {level < Intervention.CompulsoryPurchase && (
-            <>
-              <div className="sub" style={{ marginTop: 4 }}>
-                {watched
-                  ? 'A referral is being prepared. Sell, or charge less, and it lapses.'
-                  : 'No longer dominant. The case against you is being wound down.'}
-              </div>
-              <div className="meter" style={{ marginTop: 4 }}>
-                <div style={{ width: `${pressure * 100}%`, background: 'var(--bad)' }} />
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 
 // ------------------------------------------------------------- construction
@@ -888,83 +812,6 @@ export function BuildPalette({
  * costs nothing to choose, buy is a button with a price on it, and bypass is
  * the construction palette.
  */
-/**
- * Access agreements. design.md 3.6.
- *
- * "I use your line; you use my port" — the thing that entangles two operators
- * rather than merely racing them. Offered here rather than in a separate
- * screen because it belongs beside the roads it is about: the moment you want
- * one is the moment you are looking at what somebody else's way is costing
- * you.
- *
- * Only ever a discount, and both sides sign. design.md 3.10 worried that
- * differential rates would be a griefing vector, and that is exactly right for
- * *punitive* rates — so those do not exist. The worst anybody pays is the
- * posted charge.
- */
-function Agreements({ engine }: { engine: Engine }): JSX.Element | null {
-  const w = engine.world;
-  const me = w.player;
-  const mine = w.agreements.involving(me);
-  const others: number[] = [];
-  for (let c = 1; c < w.companies.count; c++) {
-    if (c === me || w.companies.bankrupt[c]) continue;
-    if (w.agreements.find(me, c) >= 0 || w.agreements.find(c, me) >= 0) continue;
-    others.push(c);
-  }
-  if (mine.length === 0 && others.length === 0) return null;
-
-  return (
-    <>
-      <div className="ledger"><div className="head">Access agreements</div></div>
-      {mine.map((id) => {
-        const grantor = w.agreements.grantor[id];
-        const other = grantor === me ? w.agreements.beneficiary[id] : grantor;
-        const granting = grantor === me;
-        const offered = w.agreements.state[id] === AgreementState.Offered;
-        const mustAnswerMe = offered && mustAnswer(w.agreements, id) === me;
-        return (
-          <div className="row" key={id}>
-            <div className="grow">
-              <div className="title">
-                {w.companies.names[other]}{' '}
-                <span className="dim">{granting ? 'uses your ways' : 'lets you use theirs'}</span>
-              </div>
-              <div className="sub">
-                {w.agreements.ratePct[id]}% of the usual charge
-                {' · '}{AGREEMENT_STATE_NAMES[w.agreements.state[id]].toLowerCase()}
-              </div>
-            </div>
-            {mustAnswerMe ? (
-              <div style={{ display: 'flex', gap: 3 }}>
-                <button className="btn tiny" onClick={() => engine.issue(Cmd.AcceptAgreement, id)}>Accept</button>
-                <button className="btn tiny" onClick={() => engine.issue(Cmd.DeclineAgreement, id)}>Decline</button>
-              </div>
-            ) : granting && w.agreements.state[id] === AgreementState.Active ? (
-              <button className="btn tiny danger" onClick={() => engine.issue(Cmd.WithdrawAgreement, id)}>End</button>
-            ) : (
-              <span className="dim" style={{ fontSize: 11 }}>{offered ? 'awaiting them' : ''}</span>
-            )}
-          </div>
-        );
-      })}
-      {others.map((c) => (
-        <div className="row" key={`offer-${c}`}>
-          <div className="grow">
-            <div className="title">{w.companies.names[c]}</div>
-            <div className="sub">no arrangement</div>
-          </div>
-          <div style={{ display: 'flex', gap: 3 }}>
-            <button className="btn tiny" title="Let them use your ways at half the usual charge"
-              onClick={() => engine.issue(Cmd.OfferAgreement, c, 50, 1)}>Offer half</button>
-            <button className="btn tiny" title="Ask to use theirs at half the usual charge"
-              onClick={() => engine.issue(Cmd.OfferAgreement, c, 50, 0)}>Ask half</button>
-          </div>
-        </div>
-      ))}
-    </>
-  );
-}
 
 export function Ownership({ engine, onFocus }: { engine: Engine; onFocus: (x: number, y: number) => void }): JSX.Element {
   const w = engine.world;
@@ -986,7 +833,6 @@ export function Ownership({ engine, onFocus }: { engine: Engine; onFocus: (x: nu
         {/* Above the asset list, not below sixty rows of it: an agreement is a
             short section and a decision, and burying it under the inventory
             means nobody finds it. */}
-        <Agreements engine={engine} />
         {rows.slice(0, 60).map((a) => {
           const owner = w.assets.owner[a];
           const mine = owner === w.player;
@@ -1122,48 +968,6 @@ export function Saves({
 
 // -------------------------------------------------------------- objectives
 
-/**
- * Objectives, the fourth pressure system (D10).
- *
- * Two at a time and no more. A board of nine is a checklist, and a checklist
- * is the opposite of "events break routine" — the player stops reading it and
- * works down it, which is the same as having none.
- */
-export function Objectives({ engine }: { engine: Engine }): JSX.Element {
-  const w = engine.world;
-  const open = w.objectives.openFor(w.player);
-  return (
-    <div className="window right">
-      <h2>From the authority</h2>
-      <div className="body">
-        {open.length === 0 && (
-          <div style={{ padding: '12px 10px', fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
-            Nothing asked of you at the moment. The authority notices what you are
-            not doing and gets in touch about it.
-          </div>
-        )}
-        {open.map((id) => {
-          const frac = Math.min(1, w.objectives.progress[id] / Math.max(1, w.objectives.target[id]));
-          const left = w.objectives.deadline[id] - w.tick;
-          return (
-            <div className="row" key={id}>
-              <div className="grow">
-                <div className="title" style={{ whiteSpace: 'normal' }}>{w.objectives.text[id]}</div>
-                <div className="sub">
-                  pays {shortMoney(w.objectives.reward[id])} ·
-                  <span className={left < TICKS_PER_DAY * 60 ? ' warnc' : ''}> {days(left, TICKS_PER_DAY)} left</span>
-                </div>
-                <div className="meter" style={{ marginTop: 4 }}>
-                  <div style={{ width: `${frac * 100}%`, background: frac >= 1 ? 'var(--good)' : 'var(--accent)' }} />
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------- industry
 

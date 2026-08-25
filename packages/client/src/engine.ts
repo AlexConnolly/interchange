@@ -21,7 +21,6 @@ import {
 } from '@interchange/sim';
 import { OverlayMode, Renderer, TOWN_KIT, hex, loadKit, type RenderSource } from '@interchange/render';
 import { content } from '@interchange/data';
-import { Session } from './session.ts';
 import { loadSettings } from './settings.ts';
 
 export interface EngineEvent {
@@ -62,11 +61,7 @@ export class Engine {
   tickMs = 0;
   private frameTimes: number[] = [];
 
-  constructor(config: Partial<WorldConfig>, session?: Session) {
-    // A shared world's session outlives the engine that opened it: the
-    // connection is made before the region is known, and the region is what
-    // the engine is built from.
-    if (session) this.session = session;
+  constructor(config: Partial<WorldConfig>) {
     this.world = createWorld(config);
     this.wireWorld();
     // A handle for the console. The sim is fully inspectable from the
@@ -129,14 +124,13 @@ export class Engine {
    * never agree again.
    */
   issue(kind: number, a = 0, b = 0, c = 0, d = 0, data?: number[] | string): void {
-    if (!this.session.issue(kind, a, b, c, d, data)) {
+    {
       this.world.queue.push(cmd(this.world.tick + 2, this.world.player, kind, a, b, c, d, data));
     }
     this.revision++;
   }
 
   /** The shared-world connection, or an idle one in single player. */
-  session = new Session();
 
   /*
    * Presentation preferences. Never consulted by the simulation — see
@@ -289,31 +283,6 @@ export class Engine {
       src.overlayField = null;
     }
 
-    if (mode === OverlayMode.Power || mode === OverlayMode.Water) {
-      const utility = mode === OverlayMode.Power ? w.power : w.water;
-      const layerMode = mode === OverlayMode.Power ? 5 : 4;
-      const sat = new Float32Array(Math.max(1, utility.grids.length));
-      utility.grids.forEach((g, i) => { sat[i] = g.satisfaction; });
-      const gridOfTile = new Int32Array(size * size).fill(-1);
-      const layer = w.layers[layerMode];
-      for (let tile = 0; tile < size * size; tile++) {
-        if (layer.cls[tile] === 255) continue;
-        const node = w.graph.nodeAt(layerMode, tile);
-        if (node >= 0) gridOfTile[tile] = utility.gridOfNode[node];
-      }
-      // A tile between two nodes belongs to the same grid as the link it is
-      // on, so fill the gaps from the link the tile was traced into.
-      for (let tile = 0; tile < size * size; tile++) {
-        if (layer.cls[tile] === 255 || gridOfTile[tile] >= 0) continue;
-        const link = layer.link[tile];
-        if (link >= 0) gridOfTile[tile] = utility.gridOfNode[w.graph.linkFrom[link]];
-      }
-      src.gridSatisfaction = sat;
-      src.gridOfTile = gridOfTile;
-    } else {
-      src.gridSatisfaction = null;
-      src.gridOfTile = null;
-    }
   }
 
   setOverlay(mode: OverlayMode): void {
@@ -373,7 +342,6 @@ export class Engine {
         let ran = 0;
         while (this.accumulator >= 1 && ran < budget) {
           this.world.step();
-          this.session.tick(this.world);
           this.accumulator -= 1;
           ran++;
         }

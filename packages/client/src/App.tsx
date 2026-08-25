@@ -1,27 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SPEED_STEPS, CHARTER_NAMES, TICKS_PER_DAY, Cmd, Mode, createWorld,
-  SEASON_NAMES, WEATHER_NAMES, Weather,
 } from '@interchange/sim';
 import { OverlayMode } from '@interchange/render';
 import { content } from '@interchange/data';
 import { Engine } from './engine.ts';
-import { Session } from './session.ts';
 import { SettingsPanel } from './Settings.tsx';
 import { loadSettings } from './settings.ts';
 import { WorldView, type Picked } from './WorldView.tsx';
-import { BuildPalette, CharterPanel, Contracts, Finance, Fleet, FleetList, Industries, Inspector, Objectives, Ownership, Saves, Services } from './panels.tsx';
+import { BuildPalette, CharterPanel, Contracts, Finance, Fleet, FleetList, Industries, Inspector, Ownership, Saves, Services } from './panels.tsx';
 import { Reports } from './Reports.tsx';
 import { loadWorld, saveWorld } from './saves.ts';
 import { applyPreview, clearPreview, emptyBuildState, updatePlan } from './build.ts';
 import { JunctionLab } from './JunctionLab.tsx';
-import { Perf } from './Perf.tsx';
 import { ArtReview } from './ArtReview.tsx';
 import { money, num, shortMoney } from './format.ts';
 
 const C = content();
 
-type Window_ = 'services' | 'contracts' | 'fleet' | 'finance' | 'charter' | 'build' | 'ownership' | 'industry' | 'objectives' | null;
+type Window_ = 'services' | 'contracts' | 'fleet' | 'finance' | 'charter' | 'build' | 'ownership' | 'industry' | null;
 
 /**
  * A region is a seed and a size, so a region is a URL. `?seed=1860&size=512`
@@ -45,7 +42,6 @@ export function App(): JSX.Element {
   const params = useMemo(urlParams, []);
   // The performance harness is a different application that happens to share a
   // renderer, so it forks here rather than living inside the game's state.
-  if (params.perf) return <Perf />;
   if (params.art) return <ArtReview />;
   const [seed, setSeed] = useState(() => params.seed ?? 1860 + Math.floor(Math.random() * 9000));
   const [size, setSize] = useState(() => params.size ?? 512);
@@ -64,29 +60,8 @@ export function App(): JSX.Element {
         setSeed={setSeed}
         setSize={setSize}
         onStart={() => {
-          setEngine(new Engine({ seed, size, townCount: size >= 512 ? 14 : 9, companyCount: 4 }));
+          setEngine(new Engine({ seed, size, townCount: 5, companyCount: 1 }));
           setStarted(true);
-        }}
-        onJoin={(url, room, name) => {
-          /*
-           * A shared world builds its region from what the room says, not from
-           * the seed on this card. Two clients that each generated their own
-           * would be in different worlds holding the same command log, which
-           * is the most confusing failure available: everything appears to
-           * work and nothing lines up.
-           */
-          const session = new Session();
-          session.connect(url, room, name, (config) => {
-            const joined = new Engine({
-              seed: config.seed,
-              size: config.size,
-              townCount: config.townCount,
-              companyCount: config.companyCount,
-            }, session);
-            setEngine(joined);
-            setStarted(true);
-            return joined.world;
-          }, () => nudge((n) => n + 1));
         }}
       />
     );
@@ -95,12 +70,11 @@ export function App(): JSX.Element {
 }
 
 function StartCard({
-  seed, size, setSeed, setSize, onStart, onJoin,
+  seed, size, setSeed, setSize, onStart,
 }: {
   seed: number; size: number;
   setSeed: (n: number) => void; setSize: (n: number) => void;
   onStart: () => void;
-  onJoin: (url: string, room: string, name: string) => void;
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -116,9 +90,10 @@ function StartCard({
       <div className="card">
         <h1>Interchange</h1>
         <div className="tag">
-          An isometric transport and development sim spanning 1860 to 2100. You
-          start with a single horse dray hauling somebody else’s ore. The roads
-          belong to the regional authority, and you pay to use every one of them.
+          One district, ten years, and a yard with two trucks. You start hauling
+          milk from a farm to the creamery, on roads that belong to the council,
+          and you pay for every mile of it. Buy trucks, then yards, then the
+          road itself.
         </div>
         <div className="fields">
           <label>
@@ -126,17 +101,16 @@ function StartCard({
             <input
               type="number"
               value={seed}
-              onChange={(e) => setSeed(Number(e.target.value) || 1860)}
+              onChange={(e) => setSeed(Number(e.target.value) || 1985)}
             />
           </label>
           <label>
             Region size
+            {/* One size. decisions.md D6: "small worlds that look beautiful"
+                and a 32 km square are not compatible, and the tiers were a
+                performance hedge for a scale no longer being built. */}
             <select value={size} onChange={(e) => setSize(Number(e.target.value))}>
-              <option value={256}>256 × 256 — quick</option>
-              <option value={384}>384 × 384 — compact</option>
-              <option value={512}>512 × 512 — standard</option>
-              <option value={768}>768 × 768 — large</option>
-              <option value={1024}>1024 × 1024 — full region</option>
+              <option value={256}>256 × 256 — one district</option>
             </select>
           </label>
         </div>
@@ -153,42 +127,11 @@ function StartCard({
               // comes back to a start card that never started.
               setTimeout(onStart, 24);
             }}
-          >{busy ? 'Surveying the region…' : 'Begin, 1860'}</button>
-          <button className="btn" onClick={() => setSeed(1860 + Math.floor(Math.random() * 9000))}>
+          >{busy ? 'Surveying the district…' : 'Begin, 1985'}</button>
+          <button className="btn" onClick={() => setSeed(1985 + Math.floor(Math.random() * 9000))}>
             New seed
           </button>
-          <button className="btn" onClick={() => setSharing((v) => !v)}>
-            {sharing ? 'Play alone' : 'Shared world'}
-          </button>
         </div>
-        {sharing && (
-          <>
-            <div className="fields">
-              <label>
-                Relay
-                <input value={relay} onChange={(e) => setRelay(e.target.value)} />
-              </label>
-              <label>
-                Room
-                <input value={room} onChange={(e) => setRoom(e.target.value)} />
-              </label>
-              <label>
-                Your name
-                <input value={who} onChange={(e) => setWho(e.target.value)} />
-              </label>
-            </div>
-            <div style={{ padding: '0 4px 8px', fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
-              Everyone who types the same room name gets the same region: the
-              name is the seed. The relay orders everybody&rsquo;s decisions and
-              hands the same list to every machine — nobody sends a world.
-            </div>
-            <div className="actions">
-              <button className="btn primary" onClick={() => onJoin(relay, room, who)}>
-                Join {room}
-              </button>
-            </div>
-          </>
-        )}
       </div>
     </div>
   );
@@ -373,33 +316,6 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
             </div>
           )}
           <div className="cell">
-            {/* The sky, only when it is doing something. Rain in the status bar
-                every other week is furniture; snow over a pass is a reason the
-                lorries are late, and the player should not have to guess. */}
-            <div className="label">{SEASON_NAMES[w.climate.season(w.day)]}</div>
-            <div className="value small">
-              {w.climate.weather === Weather.Clear
-                ? 'Clear'
-                : `${WEATHER_NAMES[w.climate.weather]}${w.climate.severity > 70 ? ' (hard)' : ''}`}
-            </div>
-          </div>
-          {engine.session.active && (
-            <div className="cell">
-              {/* Who else is in here, and whether anybody has disagreed.
-                  The desync count is shown rather than hidden: it is the one
-                  number the whole architecture is staked on, and a client that
-                  quietly resynced would be concealing it. */}
-              <div className="label">
-                {engine.session.info.room}
-                {engine.session.info.state === 'spectating' ? ' · watching' : ''}
-              </div>
-              <div className={`value small ${engine.session.info.desyncs > 0 ? 'neg' : ''}`}>
-                {engine.session.info.players.length} here
-                {engine.session.info.desyncs > 0 ? ` · ${engine.session.info.desyncs} desync` : ''}
-              </div>
-            </div>
-          )}
-          <div className="cell">
             <div className="label">Charter</div>
             <div className="value small">{CHARTER_NAMES[w.companies.charter[w.player]]}</div>
           </div>
@@ -495,14 +411,12 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
         {picked.kind !== 'none'
           ? <Inspector engine={engine} picked={picked} activeService={activeService} onFocus={focus} />
           : rightWindow === 'finance' ? <Finance engine={engine} />
-          : rightWindow === 'objectives' ? <Objectives engine={engine} />
           : rightWindow === 'charter' ? <CharterPanel engine={engine} />
           : null}
 
         <div className="rail" style={{ gridColumn: 3, justifySelf: 'end' }}>
           <RailButton label="Charter" icon="✦" on={rightWindow === 'charter' && picked.kind === 'none'} onClick={() => { setPicked({ kind: 'none', id: -1, tile: -1 }); setRightWindow(rightWindow === 'charter' ? null : 'charter'); }} />
           <RailButton label="Finance" icon="£" on={rightWindow === 'finance' && picked.kind === 'none'} onClick={() => { setPicked({ kind: 'none', id: -1, tile: -1 }); setRightWindow(rightWindow === 'finance' ? null : 'finance'); }} />
-          <RailButton label="Objectives" icon="⚑" on={rightWindow === 'objectives' && picked.kind === 'none'} onClick={() => { setPicked({ kind: 'none', id: -1, tile: -1 }); setRightWindow(rightWindow === 'objectives' ? null : 'objectives'); }} />
         </div>
 
         <div className="log">

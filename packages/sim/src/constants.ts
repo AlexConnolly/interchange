@@ -34,8 +34,22 @@ export const MONTHS_PER_YEAR = 12;
 export const DAYS_PER_YEAR = DAYS_PER_MONTH * MONTHS_PER_YEAR;
 export const TICKS_PER_YEAR = TICKS_PER_DAY * DAYS_PER_YEAR;
 
-export const START_YEAR = 1860;
-export const END_YEAR = 2100;
+/*
+ * One era, 1985 to 1995. decisions.md D7.
+ *
+ * The old span was 1860 to 2100 across eight eras, and it was the single
+ * largest source of difficulty in the project: it multiplied content eightfold
+ * and produced a class of bug nothing else could - era-gated baskets, rates
+ * flat against tenfold cost growth, starting capital frozen at 1860 levels.
+ * What it was buying was a sense of advancement, and that job belongs to the
+ * purchase ladder instead.
+ *
+ * The mid-eighties for one non-aesthetic reason: privatisation. Buying
+ * infrastructure off the state is a real transaction of that decade and would
+ * be fiction in almost any other.
+ */
+export const START_YEAR = 1985;
+export const END_YEAR = 1995;
 
 /** Speed multipliers the player can select. Index 0 is paused. */
 export const SPEED_STEPS = [0, 1, 2, 5, 20] as const;

@@ -75,7 +75,14 @@ describe('the construction palette', () => {
 
   it('will not lay a class the era has not opened', () => {
     const w = builderWorld();
-    const late = C.ways.findIndex((x) => x.era >= 5 && x.buildCost > 0);
+    /*
+     * Measured against the world's own era rather than a hard-coded one.
+     *
+     * This asked for a class from era five or later, which was safely in the
+     * future when the game began in 1860 and is the present now that it begins
+     * in 1985. A gate test that names an era is a test that expires.
+     */
+    const late = C.ways.findIndex((x) => x.era > w.era && x.buildCost > 0);
     expect(late).toBeGreaterThanOrEqual(0);
     const mode = MODE_NAMES.indexOf(C.ways[late].mode as never);
     expect(w.buildWay(w.player, mode, late, straightRun(w, 5))).toBe(false);

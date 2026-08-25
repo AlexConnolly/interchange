@@ -494,22 +494,10 @@ export function stepTowns(
   demandPerThousand: Float64Array,
   producePerThousand: Float64Array,
   growthPerDay: number,
-  /** Multiplier on any seasonal cargo, and which cargo that is. Tourism is
-   *  the whole of it: nobody takes a holiday in a wet February, and a model
-   *  that ignores that is not modelling tourism. */
-  seasonal: { cargo: number; multiplier: number },
-  /** Which cargo is people, and how much of their travel the car has taken. */
-  transit: { cargo: number; shareLost: (town: number) => number },
-  /** What this town's character does to its appetite for each cargo.
-   *  towncharacter.ts, and it applies to what a town sends as well as what it
-   *  wants — a dormitory's extra passengers are commuters leaving it. */
-  character: { appetite: (town: number, cargo: number) => number },
 ): void {
   const cargoCount = towns.cargoCount;
-  const passengerCargo = transit.cargo;
   for (let t = 0; t < towns.count; t++) {
     const pop = towns.population[t];
-    const carAway = transit.shareLost(t);
 
     /*
      * Towns make people, post and holidays.
@@ -531,9 +519,7 @@ export function stepTowns(
        * not produce passengers for whoever happens to turn up; it produces
        * the ones a service is good enough to win.
        */
-      const made = ((per * pop) / 1000)
-        * (c === passengerCargo ? 1 - carAway : 1)
-        * character.appetite(t, c);
+      const made = (per * pop) / 1000;
       const i = t * cargoCount + c;
       // People will wait for a bus, but not indefinitely: a few days of
       // departures and then they walk, and the town notices.
@@ -553,9 +539,7 @@ export function stepTowns(
       // Fractional on purpose. Rounding each cargo up to a whole tonne a day
       // put a floor under a small town's basket that was larger than the
       // basket, so every town wanted a dozen tonnes a day whatever its size.
-      const need = ((per * pop) / 1000)
-        * (c === seasonal.cargo ? seasonal.multiplier : 1)
-        * character.appetite(t, c);
+      const need = (per * pop) / 1000;
       const i = t * cargoCount + c;
       towns.demand[i] = Math.max(1, Math.ceil(need));
       wanted += need;
