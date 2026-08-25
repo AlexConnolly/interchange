@@ -29,6 +29,7 @@ import {
 import { content } from '@interchange/data';
 import type { Renderer } from '@interchange/render';
 import { money, useAnchor } from './Markers.tsx';
+import { anchorAt } from './anchor.ts';
 import { Icon } from './Icons.tsx';
 
 const C = content();
@@ -189,16 +190,23 @@ export function Yard({
   const bays = world.yards.bays[yard];
   const free = Math.max(0, bays - based.length);
 
+  /*
+   * Above the place or below it, and adrift when the place has left the frame.
+   *
+   * Discrete choices, so they can come from React at its own pace. Where the
+   * bubble actually *is* comes from `anchorAt` and is recomputed in the frame
+   * loop, so it does not lag the map by three frames while you drag.
+   */
   const below = anchor !== null && anchor.y < 330;
-  const left = anchor === null
-    ? window.innerWidth / 2
-    : Math.max(166, Math.min(window.innerWidth - 166, anchor.x));
-  const top = anchor === null ? 90 : anchor.y + (below ? 20 : -26);
+  const adrift = anchor === null;
 
   return (
     <div
-      className={`bubble ${below ? 'below' : ''} ${anchor === null ? 'adrift' : ''}`}
-      style={{ left, top }}
+      className={`bubble ${below ? 'below' : ''} ${adrift ? 'adrift' : ''}`}
+      style={adrift ? { left: window.innerWidth / 2, top: 90 } : undefined}
+      {...(anchor === null ? {} : anchorAt(anchor.wx, anchor.wy, anchor.wz, {
+        dy: below ? 20 : -26, clamp: 166,
+      }))}
     >
       <div className="sheet-head">
         <span className="sheet-icon"><Icon id="yard" size={24} /></span>

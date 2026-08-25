@@ -38,6 +38,7 @@ import { type World, ContractState } from '@interchange/sim';
 import { content } from '@interchange/data';
 import type { Renderer } from '@interchange/render';
 import { money, bodyFor, useAnchor } from './Markers.tsx';
+import { anchorAt } from './anchor.ts';
 import { BodyIcon, Icon } from './Icons.tsx';
 
 const C = content();
@@ -123,15 +124,15 @@ export function Place({
    * actively asserts a connection that is not there.
    */
   const below = anchor !== null && anchor.y < 330;
-  const left = anchor === null
-    ? window.innerWidth / 2
-    : Math.max(HALF + 10, Math.min(window.innerWidth - HALF - 10, anchor.x));
-  const top = anchor === null ? 90 : anchor.y + (below ? 20 : -26);
+  const adrift = anchor === null;
 
   return (
     <div
-      className={`bubble ${below ? 'below' : ''} ${anchor === null ? 'adrift' : ''}`}
-      style={{ left, top }}
+      className={`bubble ${below ? 'below' : ''} ${adrift ? 'adrift' : ''}`}
+      style={adrift ? { left: window.innerWidth / 2, top: 90 } : undefined}
+      {...(anchor === null ? {} : anchorAt(anchor.wx, anchor.wy, anchor.wz, {
+        dy: below ? 20 : -26, clamp: HALF + 10,
+      }))}
     >
       <div className="sheet-head">
         <span className="sheet-icon" style={{ color: def.colour }}>

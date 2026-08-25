@@ -83,6 +83,20 @@ const YEAR: { from: number; crop: Crop }[] = [
 ];
 
 /**
+ * The stages that somebody has to go out and do.
+ *
+ * The line this draws is between what the weather does and what a farm does.
+ * Grass greening, a crop coming up, wheat turning gold: those need nobody, and
+ * they happen on the day the calendar says. Ploughing, drilling, cutting and
+ * clearing need a tractor on the field, and they are the only stages a tractor
+ * is allowed to write - which is what turns the tractors from scenery into the
+ * thing that changes the district.
+ */
+export const NEEDS_WORK: ReadonlySet<number> = new Set<number>([
+  Crop.Plough, Crop.Drilled, Crop.Stubble, Crop.Bare,
+]);
+
+/**
  * What an arable field looks like on a given day.
  *
  * `offset` shifts a parcel's year by up to a month either way, so a district

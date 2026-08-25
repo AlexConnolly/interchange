@@ -54,6 +54,10 @@ export interface FarmworkWorld {
   fields: () => FarmField[];
   usable: (tile: number) => boolean;
   route: (from: number, to: number) => number[];
+  /** A pass has been made over this tile. Turn it over, drill it, cut it. */
+  work: (tile: number) => void;
+  /** Is there a job to do on this tile? Used to choose where to send one. */
+  needsWork: (tile: number) => boolean;
 }
 
 type Phase = 'idle' | 'out' | 'entering' | 'working' | 'leaving' | 'home';
@@ -75,6 +79,8 @@ interface Tractor {
   along: number;
   /** True when the furrows run along X rather than Z. */
   lengthwise: boolean;
+  /** The last tile it turned over, so it is not asked again every frame. */
+  lastTile: number;
   /** Where it is and which way it faces, so a phase change does not teleport. */
   x: number;
   z: number;
@@ -89,6 +95,13 @@ export class Farmwork {
   private fieldsCache: FarmField[] = [];
   private farmsCache: { tile: number; x: number; z: number }[] = [];
   private age = 0;
+  /**
+   * How many more tractors may start out already in a field.
+   *
+   * Only spent at the beginning. After that a tractor that wants a field drives
+   * to it, because by then there is someone watching the lanes.
+   */
+  private opening = Math.ceil(TRACTORS / 2);
 
   constructor(world: FarmworkWorld) {
     this.world = world;
@@ -111,7 +124,7 @@ export class Farmwork {
    * the field first would occasionally send one across the district past three
    * other farms to reach it.
    */
-  private dispatch(t: Tractor): boolean {
+  private dispatch(t: Tractor, alreadyThere = false): boolean {
     const farm = this.pick(this.farmsCache);
     if (!farm) return false;
     const near = this.fieldsCache.filter((f) => {
@@ -119,8 +132,21 @@ export class Farmwork {
       const cz = (f.z0 + f.z1) / 2;
       return Math.hypot(cx - farm.x, cz - farm.z) < REACH;
     });
-    const field = this.pick(near);
+    /*
+     * A field with work in it, if there is one.
+     *
+     * Otherwise the tractors of the district potter about in finished fields
+     * while the one that needs cutting stands ripe for a fortnight. `needsWork`
+     * is asked at the field's gateway tile, which is inside the parcel, so one
+     * question settles it for the whole field.
+     */
+    const wanting = near.filter((f) => this.world.needsWork(
+      Math.floor(f.entryZ) * this.world.size + Math.floor(f.entryX),
+    ));
+    const field = this.pick(wanting.length > 0 ? wanting : near);
     if (!field) return false;
+    // A tractor already in its field still needs a way home, so the route is
+    // required either way. Nothing else would notice until it tried to leave.
     const path = this.world.route(farm.tile, field.road);
     if (path.length < 3) return false;
 
@@ -139,6 +165,26 @@ export class Farmwork {
     t.passes = Math.max(2, Math.min(14, Math.round(across / 0.9)));
     t.pass = 0;
     t.along = 0;
+    /*
+     * Some of them start out in the field rather than driving to it.
+     *
+     * Without this the district is empty for the first half minute of every
+     * session, because seven tractors all begin in their yards and a field is
+     * twenty tiles of lane away. The opening shot is the one every player sees
+     * and most of them judge the game on, and it should be of a worked
+     * countryside — so half the tractors begin mid-furrow, at a random pass,
+     * exactly as if they had been out since breakfast. Which, in the fiction,
+     * they have.
+     */
+    if (alreadyThere) {
+      t.phase = 'working';
+      t.pass = Math.floor(this.rnd() * t.passes);
+      t.along = this.rnd();
+      const at = this.furrow(t);
+      t.x = at.x;
+      t.z = at.z;
+      t.heading = (Math.atan2(at.dx, -at.dz) / (Math.PI * 2) + 1) % 1;
+    }
     return true;
   }
 
@@ -204,7 +250,7 @@ export class Farmwork {
          */
         phase: 'idle', wait: this.rnd() * 1.5, path: [], leg: 1, t: 0,
         field: null, farmTile: -1, pass: 0, passes: 4, along: 0,
-        lengthwise: true, x: 0, z: 0, heading: 0, speed: 0.6,
+        lengthwise: true, lastTile: -1, x: 0, z: 0, heading: 0, speed: 0.6,
       });
     }
 
@@ -217,7 +263,14 @@ export class Farmwork {
           // A dispatch can fail on the first frame or two, before influence has
           // been resolved and while there is nothing usable to drive to. Try
           // again shortly rather than treating it as a permanent verdict.
-          if (t.wait <= 0 && !this.dispatch(t)) t.wait = 2;
+          if (t.wait <= 0) {
+            const straightToWork = this.opening > 0;
+            if (this.dispatch(t, straightToWork)) {
+              if (straightToWork) this.opening--;
+            } else {
+              t.wait = 2;
+            }
+          }
           // Nothing to draw: it is in the yard, behind the farm buildings.
           continue;
 
@@ -332,11 +385,42 @@ export class Farmwork {
           t.x = at.x;
           t.z = at.z;
           t.heading = (Math.atan2(at.dx, -at.dz) / (Math.PI * 2) + 1) % 1;
+          /*
+           * And the ground under it changes.
+           *
+           * Only when the tile changes, not every frame: the sim's `workField`
+           * is idempotent, but each real change drops a chunk of ground for
+           * rebuilding and there is no sense asking sixty times for the one
+           * answer. Two tiles are offered - the one under the tractor and the
+           * one just behind it - so a fast pass across a corner cannot skip a
+           * tile and leave a hole in the furrow.
+           */
+          {
+            const tx = Math.floor(t.x);
+            const tz = Math.floor(t.z);
+            const here = tz * size + tx;
+            if (here !== t.lastTile) {
+              this.world.work(here);
+              if (t.lastTile >= 0) this.world.work(t.lastTile);
+              t.lastTile = here;
+            }
+          }
           break;
         }
       }
 
       if (n >= vx.length) break;
+      /*
+       * Not drawn outside your influence.
+       *
+       * "Tractors that are out of frame, like in the fog of war, should not be
+       * showing." Quite right, and it is not only a matter of taste: the ground
+       * out there is drawn faded, so a tractor at full colour on top of it reads
+       * as a rendering fault. It keeps working - the district carries on whether
+       * you can see it or not - it just is not shown.
+       */
+      const onTile = Math.floor(t.z) * size + Math.floor(t.x);
+      if (onTile < 0 || onTile >= size * size || !this.world.usable(onTile)) continue;
       vx[n] = t.x;
       vz[n] = t.z;
       vHeading[n] = t.heading;

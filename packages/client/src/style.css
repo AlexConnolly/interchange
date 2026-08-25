@@ -102,6 +102,10 @@ html, body, #root, .app {
  * labels on screen is a wall of text pretending to be a map. */
 .mark {
   position: absolute;
+  /* Off screen until the frame loop places it. Without this a marker flashes at
+     the top-left corner for the one frame between React mounting it and
+     `syncAnchors` projecting it. */
+  left: -9999px;
   transform: translate(-50%, -100%);
   border: 0;
   background: none;
@@ -158,6 +162,7 @@ html, body, #root, .app {
    the winter-tyre rule is this badge plus a white field. */
 .alert {
   position: absolute;
+  left: -9999px;
   transform: translate(-50%, -100%);
   display: flex;
   align-items: center;
@@ -830,6 +835,7 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
  * "is it on a job" question is answered from across the district. */
 .mine-mark {
   position: absolute;
+  left: -9999px;
   transform: translate(-50%, -100%);
   width: 12px;
   height: 12px;

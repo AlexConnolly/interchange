@@ -37,7 +37,7 @@ import {
 } from './network.ts';
 import { Router, type RouteCosts } from './pathfinding.ts';
 import { TileRouter } from './tilerouter.ts';
-import { Crop, arableStage, grassStage } from './fields.ts';
+import { Crop, NEEDS_WORK, arableStage, grassStage } from './fields.ts';
 import { Heap } from './heap.ts';
 import {
   APPROVAL_DRIFT_PER_DAY, APPROVAL_PER_LOAD, APPROVAL_REST, PLANNING_FROM_VEHICLES,
@@ -604,8 +604,10 @@ export class World {
   }
 
   private stepDay(): void {
-    // The farming year, once a day. Cheap, and usually a no-op.
+    // The farming year, once a day. The season step is usually a no-op; the
+    // catch-up brings on whatever no tractor has got round to.
     this.stepSeason();
+    this.catchUpFields();
 
     /*
      * Approval drifts back toward indifference.
@@ -3144,13 +3146,15 @@ export class World {
     const fields = this.terrain.fields;
     if (this.cropBase === null) {
       this.cropBase = new Uint8Array(fields.crop);
+      this.cropWant = new Uint8Array(fields.crop);
     }
     const month = this.month;
     if (month === this.seasonMonth) return;
     this.seasonMonth = month;
+    this.daysWorking = 0;
 
     const size = this.config.size;
-    let changed = false;
+    const want = this.cropWant as Uint8Array;
     for (let t = 0; t < size * size; t++) {
       const p2 = fields.parcel[t];
       if (p2 < 0) continue;
@@ -3158,21 +3162,129 @@ export class World {
       // A month either way, from the parcel id, so a valley does not turn gold
       // in one frame.
       const offset = ((p2 * 2654435761) >>> 0) % 3;
-      const want = base === Crop.Wheat || base === Crop.WheatRipe || base === Crop.Plough
+      const stage = base === Crop.Wheat || base === Crop.WheatRipe || base === Crop.Plough
         ? arableStage(month, offset)
         : grassStage(month, offset, base);
-      if (fields.crop[t] !== want) {
-        fields.crop[t] = want;
-        changed = true;
+      want[t] = stage;
+      /*
+       * Growth needs nobody, so it happens the moment the calendar says so.
+       *
+       * The distinction this draws is the whole of the feature: a crop coming up
+       * green, or turning gold, is the weather doing it and there is no reason
+       * to wait. Ploughing, drilling, cutting and clearing are *work*, and work
+       * wants a tractor - so those stages are only written by `workField`
+       * below, or by the days-later catch-up for the fields nobody got round
+       * to.
+       */
+      if (!NEEDS_WORK.has(stage) && fields.crop[t] !== stage) {
+        fields.crop[t] = stage;
+        this.fieldTouched(t);
       }
     }
-    if (changed) this.seasonRevision++;
+  }
+
+  /**
+   * A tractor has worked over this tile. Show it.
+   *
+   * "If they run over a ground that's not been ploughed, then the ground below
+   * them should be ploughed... and then if they're going over it when it's
+   * ploughed, it should turn into a drilled field." Exactly that, with the
+   * calendar deciding which of those jobs is the job of the month: in October a
+   * field wants ploughing and a pass turns it over, in August it wants cutting
+   * and a pass leaves stubble behind.
+   *
+   * Which means a tractor is not decoration any more. It is the thing that
+   * changes the district, one tile at a time, in the order a farm would do it.
+   */
+  workField(tile: number): void {
+    const want = this.cropWant;
+    if (!want) return;
+    const fields = this.terrain.fields;
+    if (tile < 0 || tile >= fields.crop.length) return;
+    if (fields.parcel[tile] < 0) return;
+    const stage = want[tile] as Crop;
+    if (fields.crop[tile] === stage) return;
+    if (!NEEDS_WORK.has(stage)) return;
+    fields.crop[tile] = stage;
+    this.fieldTouched(tile);
+  }
+
+  /**
+   * Is there anything for a tractor to do on this tile?
+   *
+   * Used to choose which field to send one to, so the tractors of a district are
+   * where the work is. Without it they potter about in finished fields while the
+   * one that needs cutting stands ripe for a fortnight.
+   */
+  fieldNeedsWork(tile: number): boolean {
+    const want = this.cropWant;
+    const fields = this.terrain.fields;
+    if (!want || tile < 0 || tile >= fields.crop.length) return false;
+    if (fields.parcel[tile] < 0) return false;
+    const stage = want[tile] as Crop;
+    return NEEDS_WORK.has(stage) && fields.crop[tile] !== stage;
+  }
+
+  /**
+   * The rest of the district, worked off screen.
+   *
+   * Seven tractors cannot plough forty fields, and a field that sat in stubble
+   * until Christmas because no tractor was sent to it would be a bug you could
+   * see from the air. So each day a growing share of every unfinished field
+   * comes up to its stage anyway - as if a farmer you were not watching had been
+   * out on it, which is exactly what has happened.
+   *
+   * A share rather than the lot, because the intermediate state is the best
+   * thing about it: a field half turned over, the line between the ploughed part
+   * and the stubble sitting wherever the day left it, is what farmland actually
+   * looks like in October.
+   */
+  private catchUpFields(): void {
+    const want = this.cropWant;
+    if (!want) return;
+    this.daysWorking++;
+    // Six days to finish a field unaided. A day is four minutes, so a district
+    // settles into its season over about half an hour of play.
+    const share = Math.min(1, this.daysWorking / 6);
+    const fields = this.terrain.fields;
+    const size = this.config.size;
+    for (let t = 0; t < size * size; t++) {
+      if (fields.parcel[t] < 0) continue;
+      const stage = want[t] as Crop;
+      if (fields.crop[t] === stage || !NEEDS_WORK.has(stage)) continue;
+      // Deterministic per tile and stable from day to day, so the worked part of
+      // a field grows rather than flickering about inside it.
+      const h = ((t * 2246822519) ^ (this.seasonMonth * 3266489917)) >>> 0;
+      if ((h & 0xffff) / 0x10000 > share) continue;
+      fields.crop[t] = stage;
+      this.fieldTouched(t);
+    }
+  }
+
+  /**
+   * One tile has changed colour. Remember it, so the renderer can rebuild the
+   * piece of ground it is in rather than the whole district.
+   */
+  private fieldTouched(tile: number): void {
+    this.seasonRevision++;
+    // Bounded: past a few thousand it is cheaper to rebuild everything than to
+    // carry the list, and the client falls back to exactly that.
+    if (this.dirtyFields.size < 4096) this.dirtyFields.add(tile);
   }
 
   /** Bumped whenever the fields change appearance. The renderer watches it. */
   seasonRevision = 0;
+  /**
+   * Tiles whose colour has changed and whose ground has not been rebuilt yet.
+   *
+   * The client drains it every frame. Tiles rather than chunks because the sim
+   * has no business knowing how the ground is cut up for drawing.
+   */
+  readonly dirtyFields = new Set<number>();
   private seasonMonth = -1;
+  private daysWorking = 0;
   private cropBase: Uint8Array | null = null;
+  private cropWant: Uint8Array | null = null;
 
   /** Is this place one of yours, and a depot? For the panel's wording. */
   isDepot(site: number): boolean {

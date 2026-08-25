@@ -90,6 +90,42 @@ function cornerHeight(src: GroundSource, x: number, y: number): number {
 }
 
 /**
+ * The height of the ground surface at any point, exactly as drawn.
+ *
+ * "The cars are still bouncing on the ground. I think they sample the max
+ * height of the square rather than floating along its current height" — which is
+ * precisely what was happening. The old reading took the *highest of the four
+ * corners of the tile*, which is one value for the whole tile, so a vehicle
+ * crossing a slope climbed in tile-sized steps and hopped at every boundary.
+ *
+ * This reads the surface itself. Same corner heights, same choice of diagonal,
+ * and then the barycentric interpolation inside whichever of the two triangles
+ * the point actually falls in — so the answer is not merely smooth, it is the
+ * height of the very triangle being rendered under the wheels. It lives here,
+ * next to the loop that builds those triangles, because the two agreeing is the
+ * whole point and a copy in another file would drift.
+ */
+export function groundHeightAt(src: GroundSource, x: number, z: number): number {
+  const tx = Math.floor(x);
+  const tz = Math.floor(z);
+  const h00 = cornerHeight(src, tx, tz);
+  const h10 = cornerHeight(src, tx + 1, tz);
+  const h01 = cornerHeight(src, tx, tz + 1);
+  const h11 = cornerHeight(src, tx + 1, tz + 1);
+  const u = x - tx;
+  const v = z - tz;
+  // The same shorter-diagonal test the mesh uses, so a ridge is a ridge here too.
+  if (Math.abs(h00 - h11) > Math.abs(h10 - h01)) {
+    return u >= v
+      ? h00 + (h10 - h00) * u + (h11 - h10) * v
+      : h00 + (h01 - h00) * v + (h11 - h01) * u;
+  }
+  return u + v <= 1
+    ? h00 + (h10 - h00) * u + (h01 - h00) * v
+    : h11 + (h01 - h11) * (1 - u) + (h10 - h11) * (1 - v);
+}
+
+/**
  * Build the ground for one chunk of the map.
  *
  * Chunked because a 128² district is sixteen thousand tiles and rebuilding all

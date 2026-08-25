@@ -26,7 +26,7 @@ const FIELD: FarmField = {
   entryZ: 12.5,
 };
 
-function district(): Farmwork {
+function district(worked?: Set<number>): Farmwork {
   return new Farmwork({
     size: SIZE,
     farms: () => [{ tile: t(4, 10), x: 4.5, z: 10.5 }],
@@ -34,12 +34,14 @@ function district(): Farmwork {
     usable: () => true,
     // Out along the lane, and back the same way.
     route: (from) => (from === t(4, 10) ? [...LANE] : [...LANE].reverse()),
+    work: (tile) => { worked?.add(tile); },
+    needsWork: () => true,
   });
 }
 
 /** Run the district for a while, collecting every position drawn. */
-function run(seconds: number): { x: number; z: number }[] {
-  const farm = district();
+function run(seconds: number, worked?: Set<number>): { x: number; z: number }[] {
+  const farm = district(worked);
   const cap = 64;
   const vx = new Float32Array(cap);
   const vz = new Float32Array(cap);
@@ -57,6 +59,23 @@ function run(seconds: number): { x: number; z: number }[] {
 }
 
 describe('tractors', () => {
+  it('work the ground they pass over, and only inside the field', () => {
+    // The whole point of them, and the assertion that matters: every tile they
+    // report working must be one of the field's own. A tractor that ploughed
+    // the lane it drove down would be very obvious and very wrong.
+    const worked = new Set<number>();
+    run(120, worked);
+    expect(worked.size).toBeGreaterThan(6);
+    for (const tile of worked) {
+      const x = tile % SIZE;
+      const z = Math.floor(tile / SIZE);
+      expect(x).toBeGreaterThanOrEqual(FIELD.x0);
+      expect(x).toBeLessThanOrEqual(FIELD.x1);
+      expect(z).toBeGreaterThanOrEqual(FIELD.z0);
+      expect(z).toBeLessThanOrEqual(FIELD.z1);
+    }
+  });
+
   it('come out of the farm and get drawn', () => {
     expect(run(20).length).toBeGreaterThan(0);
   });

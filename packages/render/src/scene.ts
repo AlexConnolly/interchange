@@ -33,7 +33,9 @@ import {
   Object3D, OrthographicCamera, HemisphereLight, PCFSoftShadowMap, PointLight,
   Scene as ThreeScene, Vector3, WebGLRenderer,
 } from 'three';
-import { buildGround, toMesh, HEIGHT_TO_WORLD, type GroundSource } from './ground.ts';
+import {
+  buildGround, groundHeightAt, toMesh, HEIGHT_TO_WORLD, type GroundSource,
+} from './ground.ts';
 import { Mesh } from './geometry.ts';
 import { buildRoads, buildCatsEyes, type RoadSource } from './roads.ts';
 import type { Model } from './glb.ts';
@@ -803,7 +805,7 @@ export class Renderer {
       filled++;
       // A little above the ground: a window is at head height, and a light at
       // ground level lights the grass and not the wall behind it.
-      light.position.set(c.x, this.groundTop(src, c.x, c.z) + 0.34, c.z);
+      light.position.set(c.x, groundHeightAt(src, c.x, c.z) + 0.34, c.z);
       /*
        * Dim, and dimmer than the first guess by half.
        *
@@ -1101,7 +1103,7 @@ export class Renderer {
       if (counts[mi] >= batch.instanceMatrix.count) continue;
       const x = src.sx[i];
       const z = src.sz[i];
-      this.tmp.position.set(x, this.groundTop(src, x, z), z);
+      this.tmp.position.set(x, groundHeightAt(src, x, z), z);
       this.tmp.rotation.set(0, src.sRot[i] * Math.PI * 2, 0);
       const k = src.sScale[i];
       this.tmp.scale.set(k, k, k);
@@ -1210,8 +1212,12 @@ export class Renderer {
   }
 
   /**
-   * The highest of the four corner heights of the tile under a point, computed
-   * the same way `ground.ts` computes them so the two cannot disagree.
+   * The highest of the four corner heights of the tile under a point.
+   *
+   * For things with a flat base — buildings, mostly. A house on a slope has to
+   * sit at the *high* corner or it sinks into the hill behind it, and it has a
+   * plinth for exactly that reason. Anything that moves wants `groundHeightAt`
+   * instead: a tile-wide constant is what made vehicles bounce.
    */
   private groundTop(src: RenderSource, x: number, z: number): number {
     const s = src.size;
@@ -1233,6 +1239,36 @@ export class Renderer {
       }
     }
     return top === -Infinity ? 0 : top;
+  }
+
+  /**
+   * Throw away the one piece of ground a tile is in.
+   *
+   * For a tractor turning over the tile it is standing on. The whole-district
+   * rebuild below is the right answer for a change of season, when every field
+   * in the county changes at once; it is absurdly the wrong one for a single
+   * tile, and it would happen several times a second while a tractor is out.
+   *
+   * The streamer rebuilds whatever is missing within its own time budget, so
+   * dropping a chunk is the entire mechanism — there is nothing to schedule.
+   */
+  dropChunkAt(x: number, z: number): void {
+    const cx = Math.floor(x / CHUNK);
+    const cz = Math.floor(z / CHUNK);
+    const key = cz * this.cols + cx;
+    const chunk = this.chunks.get(key);
+    if (!chunk) return;
+    this.scene.remove(chunk.ground);
+    chunk.ground.geometry.dispose();
+    if (chunk.roads) {
+      this.scene.remove(chunk.roads);
+      chunk.roads.geometry.dispose();
+    }
+    if (chunk.studs) {
+      this.scene.remove(chunk.studs);
+      chunk.studs.geometry.dispose();
+    }
+    this.chunks.delete(key);
   }
 
   /**
@@ -1299,10 +1335,16 @@ export class Renderer {
       const tile = Math.min(src.size * src.size - 1,
         (Math.round(z) * src.size + Math.round(x)) | 0);
       const lv = src.level[tile];
-      // The ground's own corner height, not the tile's raw value — the same fix
-      // the buildings and the roads needed, and the reason vehicles kept
-      // "disappearing under the ground" on slopes.
-      const y = (lv !== 0 ? HEIGHT_TO_WORLD(lv) : this.groundTop(src, x, z)) + 0.045;
+      /*
+       * The surface under this exact point, not the tile it is standing in.
+       *
+       * `groundTop` — the highest of the four corners — is one number for a whole
+       * tile, so a vehicle crossing a slope climbed a step at every boundary and
+       * bounced the whole way down a hill. `groundHeightAt` interpolates inside
+       * the very triangle being drawn beneath the wheels, so the ride is as
+       * smooth as the ground is.
+       */
+      const y = (lv !== 0 ? HEIGHT_TO_WORLD(lv) : groundHeightAt(src, x, z)) + 0.045;
       /*
        * Where it is drawn, eased toward where the simulation says it is.
        *

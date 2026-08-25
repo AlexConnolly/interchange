@@ -30,6 +30,7 @@ import { ContractState, type World } from '@interchange/sim';
 import { content } from '@interchange/data';
 import type { Renderer } from '@interchange/render';
 import { Icon } from './Icons.tsx';
+import { anchorAt } from './anchor.ts';
 
 const C = content();
 
@@ -41,8 +42,10 @@ interface Marked {
   name: string;
   mine: boolean;
   work: boolean;
+  /** Where it is in the world. The frame loop turns this into pixels. */
   x: number;
   y: number;
+  z: number;
 }
 
 export function Markers({
@@ -80,11 +83,15 @@ export function Markers({
         key: string, site: number, yard: number, id: string, name: string,
         tile: number, mine: boolean, work: boolean,
       ): void => {
-        const x = tile % size;
-        const z = Math.floor(tile / size);
-        const at = renderer.project(x + 0.5, world.terrain.height[tile], z + 0.5);
-        if (!at) return;
-        out.push({ key, site, yard, id, name, mine, work, x: at.x, y: at.y });
+        // The world point, not the screen point. Projecting it is the frame
+        // loop's job now, which is the only way a marker and the camera under it
+        // can agree — see `anchor.ts`.
+        out.push({
+          key, site, yard, id, name, mine, work,
+          x: (tile % size) + 0.5,
+          y: world.terrain.height[tile],
+          z: Math.floor(tile / size) + 0.5,
+        });
       };
 
       for (let s = 0; s < world.sites.count; s++) {
@@ -110,7 +117,7 @@ export function Markers({
         <button
           key={m.key}
           className={`mark ${m.mine ? 'mine' : ''} ${m.work ? 'working' : ''}`}
-          style={{ left: m.x, top: m.y }}
+          {...anchorAt(m.x, m.y, m.z)}
           onClick={() => (m.yard >= 0 ? onOpenYard(m.yard) : onOpenSite(m.site))}
           title={m.name}
         >
@@ -142,11 +149,28 @@ export function Markers({
  * same thing, and because the two had already drifted apart once — the yard's
  * copy was the one that misbehaved.
  */
+/**
+ * A bubble's anchor: where it is on screen, and where it is in the world.
+ *
+ * The screen figures decide the *shape* of the bubble — above the place or
+ * below it, pointing at it or adrift because it has gone off frame — and those
+ * are discrete choices that a twenty-hertz answer settles perfectly well. The
+ * world figures are what the frame loop projects to place it, every frame, so
+ * the bubble does not trail the map it is pointing at.
+ */
+export interface Anchored {
+  x: number;
+  y: number;
+  wx: number;
+  wy: number;
+  wz: number;
+}
+
 export function useAnchor(
   world: World, renderer: Renderer, tile: number,
-): { x: number; y: number } | null {
-  const [anchor, setAnchor] = useState<{ x: number; y: number } | null>(null);
-  const last = useRef<{ x: number; y: number } | null>(null);
+): Anchored | null {
+  const [anchor, setAnchor] = useState<Anchored | null>(null);
+  const last = useRef<Anchored | null>(null);
 
   useOverlayTick(() => {
       if (tile < 0) {
@@ -154,18 +178,18 @@ export function useAnchor(
         return;
       }
       const size = world.terrain.size;
-      const at = renderer.project(
-        (tile % size) + 0.5, world.terrain.height[tile],
-        Math.floor(tile / size) + 0.5,
-      );
+      const wx = (tile % size) + 0.5;
+      const wy = world.terrain.height[tile];
+      const wz = Math.floor(tile / size) + 0.5;
+      const at = renderer.project(wx, wy, wz);
       const was = last.current;
       if (at === null) {
         if (was !== null) { last.current = null; setAnchor(null); }
         return;
       }
       if (was !== null && Math.abs(was.x - at.x) < 0.5 && Math.abs(was.y - at.y) < 0.5) return;
-      last.current = at;
-      setAnchor(at);
+      last.current = { x: at.x, y: at.y, wx, wy, wz };
+      setAnchor(last.current);
   });
 
   return anchor;
@@ -198,11 +222,11 @@ export function Mine({
   onOpen: (vehicle: number) => void;
 }): JSX.Element {
   const [marks, setMarks] = useState<
-    { v: number; x: number; y: number; busy: boolean }[]>([]);
+    { v: number; x: number; y: number; z: number; busy: boolean }[]>([]);
 
   useOverlayTick(() => {
       const size = world.terrain.size;
-      const out: { v: number; x: number; y: number; busy: boolean }[] = [];
+      const out: { v: number; x: number; y: number; z: number; busy: boolean }[] = [];
       for (let v = 0; v < world.vehicles.count; v++) {
         if (!world.vehicles.alive[v]) continue;
         if (world.vehicles.company[v] !== world.player) continue;
@@ -224,10 +248,9 @@ export function Mine({
         }
         const tile = Math.max(0, Math.min(size * size - 1,
           Math.round(z) * size + Math.round(x)));
-        const at = renderer.project(x, world.terrain.height[tile], z);
-        if (!at) continue;
         out.push({
-          v, x: at.x, y: at.y - 16, busy: world.vehicles.service[v] !== -1,
+          v, x, y: world.terrain.height[tile], z,
+          busy: world.vehicles.service[v] !== -1,
         });
       }
       setMarks(out);
@@ -239,7 +262,7 @@ export function Mine({
         <button
           key={m.v}
           className={`mine-mark ${m.busy ? 'busy' : ''}`}
-          style={{ left: m.x, top: m.y }}
+          {...anchorAt(m.x, m.y, m.z, { dy: -16 })}
           onClick={() => onOpen(m.v)}
           title={m.busy ? 'On a job' : 'Idle'}
         />
@@ -413,31 +436,33 @@ export function Alerts({
   world: World;
   renderer: Renderer;
 }): JSX.Element {
-  const [pins, setPins] = useState<{ v: number; x: number; y: number; why: string }[]>([]);
+  type Pin = { v: number; x: number; y: number; z: number; why: string };
+  const [pins, setPins] = useState<Pin[]>([]);
 
-  useEffect(() => {
-    let raf = 0;
-    const tick = (): void => {
-      raf = requestAnimationFrame(tick);
-      const size = world.terrain.size;
-      const out: { v: number; x: number; y: number; why: string }[] = [];
-      for (const b of world.blockedVehicles()) {
-        const tile = Math.min(size * size - 1,
-          Math.round(b.z) * size + Math.round(b.x));
-        const at = renderer.project(b.x, world.terrain.height[tile], b.z);
-        if (!at) continue;
-        out.push({ v: b.vehicle, x: at.x, y: at.y - 26, why: b.reason });
-      }
-      setPins(out);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [world, renderer]);
+  /*
+   * Which lorries are stuck, twenty times a second; where the badge sits, every
+   * frame. This one used to run its own sixty-hertz loop calling `setState` with
+   * a fresh array, which is the shape of thing that locked the renderer up once
+   * — and it did not even buy smoothness, because the position it was working so
+   * hard to recompute went through React anyway.
+   */
+  useOverlayTick(() => {
+    const size = world.terrain.size;
+    const out: Pin[] = [];
+    for (const b of world.blockedVehicles()) {
+      const tile = Math.min(size * size - 1,
+        Math.round(b.z) * size + Math.round(b.x));
+      out.push({
+        v: b.vehicle, x: b.x, y: world.terrain.height[tile], z: b.z, why: b.reason,
+      });
+    }
+    setPins(out);
+  });
 
   return (
     <>
       {pins.map((p) => (
-        <div key={p.v} className="alert" style={{ left: p.x, top: p.y }}>
+        <div key={p.v} className="alert" {...anchorAt(p.x, p.y, p.z, { dy: -26 })}>
           <span className="flake">❄</span>{p.why}
         </div>
       ))}

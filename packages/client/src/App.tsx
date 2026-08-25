@@ -18,13 +18,14 @@ import {
 } from '@interchange/sim';
 import { loadContent } from '@interchange/data';
 import {
-  Renderer, RoadClass, TILES_ACROSS_DEFAULT, RUN, loadKit, type RenderSource,
+  CHUNK, Renderer, RoadClass, TILES_ACROSS_DEFAULT, RUN, loadKit, type RenderSource,
 } from '@interchange/render';
 import { Alerts, Earnings, Markers, Mine, money } from './Markers.tsx';
 import { Ambient, areaDemand } from './ambient.ts';
 import { eveningFor, litness, type Evening } from './evening.ts';
 import { Sound, type Heard } from './sound.ts';
 import { Farmwork, type FarmField } from './farmwork.ts';
+import { syncAnchors } from './anchor.ts';
 import { Fleet, Yard } from './Fleet.tsx';
 import { Planning } from './Planning.tsx';
 import { Dock } from './Dock.tsx';
@@ -718,6 +719,8 @@ export function App(): JSX.Element {
       size: DISTRICT,
       usable: (t) => world.influence.usable(t),
       route: (from, to) => world.roadRoute(from, to),
+      work: (tile) => world.workField(tile),
+      needsWork: (tile) => world.fieldNeedsWork(tile),
       farms: () => {
         const out: { tile: number; x: number; z: number }[] = [];
         for (let i = 0; i < world.sites.count; i++) {
@@ -1446,15 +1449,37 @@ export function App(): JSX.Element {
       src.dayNumber = world.day;
 
       /*
-       * The fields have moved on a stage: rebuild the ground.
+       * The fields have changed: rebuild the ground they are in.
        *
        * Watched rather than pushed, because the simulation must not know a
        * renderer exists — the same rule the earnings queue follows. A counter
        * the client compares is the whole interface.
+       *
+       * What is rebuilt depends on how much moved. A tractor turning over a tile
+       * behind it is a handful of tiles a second and must cost one chunk; a
+       * change of season is every field in the county and is cheaper to rebuild
+       * whole than to enumerate. The threshold is where those two costs cross,
+       * and the list of tiles is what tells them apart.
        */
       if (world.seasonRevision !== season) {
         season = world.seasonRevision;
-        renderer.dropChunks();
+        const dirty = world.dirtyFields;
+        if (dirty.size === 0 || dirty.size > 900) {
+          renderer.dropChunks();
+        } else {
+          // Chunk keys, not tiles: a field is many tiles inside one chunk, and
+          // dropping the same chunk forty times would rebuild it forty times.
+          const chunks = new Set<number>();
+          for (const t of dirty) {
+            const x = t % DISTRICT;
+            const z = (t / DISTRICT) | 0;
+            const key = ((z / CHUNK) | 0) * DISTRICT + ((x / CHUNK) | 0);
+            if (chunks.has(key)) continue;
+            chunks.add(key);
+            renderer.dropChunkAt(x, z);
+          }
+        }
+        dirty.clear();
       }
 
       renderer.render(src, dt);
@@ -1510,6 +1535,16 @@ export function App(): JSX.Element {
        * initial zeroes — which reads exactly like a game that has no money in
        * it. Anything the player reads should be paced by time, never by frames.
        */
+      /*
+       * And the HTML pinned to the world, right after the camera moved.
+       *
+       * Last thing in the frame and not a moment earlier: everything above may
+       * have moved the camera — a drag, a fly-to, the easing that follows one —
+       * and a marker projected before that has moved is a marker one frame
+       * behind, which is exactly the jumping this replaced.
+       */
+      syncAnchors(canvas.parentElement as HTMLElement, (wx, wy, wz) => renderer.project(wx, wy, wz));
+
       if (now - hudTick > 250) {
         hudTick = now;
         const mean = frames.reduce((a, b) => a + b, 0) / Math.max(1, frames.length);
