@@ -80,10 +80,65 @@ const PROP_MODELS = [
   'prop_bale_round', 'prop_bale_wrapped', 'prop_bale_stack',
   'prop_stook', 'prop_sheep', 'prop_cattle', 'prop_muck', 'prop_trough',
   'prop_lamp_post',
+  // The yard props. Everything above stands in a field; everything from here
+  // stands *at a business*, and exists to answer what the place is.
+  'prop_log_stack', 'prop_timber_stack', 'prop_stone_heap', 'prop_sacks',
+  'prop_churns', 'prop_tank', 'prop_pallets', 'prop_pen',
 ];
 
 /** Index of the lamp post within `PROP_MODELS`. It is placed by its own rule. */
 const PROP_LAMP = 8;
+
+/**
+ * What stands in each trade's yard, by industry id.
+ *
+ * "There's really no way of working out what each business is without looking at
+ * the icon. A livestock farm with no animals." Quite — and the building alone was
+ * never going to carry it: at forty pixels a creamery and a feed mill are both a
+ * shed with a silo, and the icon floating over them is a label, not a depiction.
+ *
+ * So each trade gets the objects that only it would have lying about. The rule for
+ * choosing them is that they have to be identifiable *as silhouettes* — pale
+ * cylinders on a stand for a dairy, round timber for forestry against sawn boards
+ * for the sawmill, grey angular heaps for stone. A gate or a sign would be more
+ * literal and completely invisible.
+ *
+ * Two or three each, because a yard with eight things in it reads as a scrapyard
+ * whatever the things are.
+ */
+const P_BALE = 0;
+const P_STOOK = 3;
+const P_SHEEP = 4;
+const P_CATTLE = 5;
+const P_MUCK = 6;
+const P_TROUGH = 7;
+const P_LOGS = 9;
+const P_TIMBER = 10;
+const P_STONE = 11;
+const P_SACKS = 12;
+const P_CHURNS = 13;
+const P_TANK = 14;
+const P_PALLETS = 15;
+const P_PEN = 16;
+
+const YARD: Record<string, number[]> = {
+  'dairy-farm': [P_CHURNS, P_CATTLE, P_MUCK],
+  'arable-farm': [P_BALE, P_STOOK, P_SACKS],
+  'livestock-farm': [P_PEN, P_SHEEP, P_CATTLE, P_TROUGH],
+  creamery: [P_CHURNS, P_TANK, P_PALLETS],
+  mill: [P_SACKS, P_PALLETS],
+  brewery: [P_SACKS, P_TANK, P_PALLETS],
+  quarry: [P_STONE, P_STONE, P_PALLETS],
+  forestry: [P_LOGS, P_LOGS],
+  sawmill: [P_LOGS, P_TIMBER, P_TIMBER],
+  'concrete-plant': [P_STONE, P_TANK],
+  terminal: [P_PALLETS, P_PALLETS, P_TIMBER],
+  'builders-merchant': [P_TIMBER, P_PALLETS, P_SACKS],
+  'filling-station': [P_TANK, P_PALLETS],
+  abattoir: [P_PEN, P_TROUGH],
+  'village-shop': [P_PALLETS, P_SACKS],
+  'distribution-centre': [P_PALLETS, P_PALLETS, P_TIMBER],
+};
 
 /** Crop indices, matching `Crop` in the sim's fields.ts. */
 const CROP_PASTURE = 0;
@@ -440,6 +495,66 @@ export function App(): JSX.Element {
     interface Placed {
       x: number; z: number; model: number; rot: number; tile: number; evening: Evening;
     }
+    const trees: Scattered[] = [];
+
+    /**
+     * Fill a business's yard with the things that say what it is.
+     *
+     * Placed on the ring of tiles around the building rather than on it, and
+     * never on a road: a yard is the ground beside the shed, and a pallet in the
+     * middle of the lane is worse than no pallet at all. Deterministic from the
+     * site's own tile, so a business looks the same every time you come back to
+     * it — a yard that rearranged itself would be the houses-change-every-day
+     * complaint all over again.
+     */
+    const fillYard = (tile: number, industry: string): void => {
+      const want = YARD[industry];
+      if (!want) return;
+      const bx = tile % DISTRICT;
+      const bz = Math.floor(tile / DISTRICT);
+      let h = ((tile * 2654435761) ^ 0x5f2d) >>> 0;
+      const rnd = (): number => {
+        h = (h * 1664525 + 1013904223) >>> 0;
+        return ((h >>> 8) & 0xffff) / 0x10000;
+      };
+      /*
+       * The ring, in a fixed order, shuffled by the tile.
+       *
+       * A fixed order alone would put every trade's first prop on the same side
+       * of every building in the district, which reads as a template. Shuffling
+       * the *ring* rather than the props keeps each yard's contents stable while
+       * making no two yards face the same way.
+       */
+      const ring: [number, number][] = [
+        [1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1],
+      ];
+      for (let i = ring.length - 1; i > 0; i--) {
+        const j = Math.floor(rnd() * (i + 1));
+        [ring[i], ring[j]] = [ring[j], ring[i]];
+      }
+      let put = 0;
+      for (const [dx, dz] of ring) {
+        if (put >= want.length) break;
+        const x = bx + dx;
+        const z = bz + dz;
+        if (x < 0 || z < 0 || x >= DISTRICT || z >= DISTRICT) continue;
+        const at = z * DISTRICT + x;
+        if (roadClass[at] >= 0) continue;
+        if (world.terrain.height[at] <= 0) continue;
+        trees.push({
+          // Off centre, so a yard is not a grid of objects.
+          x: x + 0.25 + rnd() * 0.5,
+          z: z + 0.25 + rnd() * 0.5,
+          model: TREE_MODELS.length + want[put],
+          rot: rnd(),
+          // Barely varied. These are manufactured things and a pallet twice the
+          // size of the next pallet reads as a mistake, where a tree does not.
+          scale: 0.92 + rnd() * 0.16,
+        });
+        put++;
+      }
+    };
+
     const placed: Placed[] = [];
     /*
      * The world seed, so two districts light up differently.
@@ -502,6 +617,7 @@ export function App(): JSX.Element {
         tile,
         evening: eveningFor(bx, bz, seed),
       });
+      fillYard(tile, world.content.industries[world.sites.def[i]].id);
     }
 
     /*
@@ -580,7 +696,6 @@ export function App(): JSX.Element {
      * plantation, and the district gets somewhere to look.
      */
     interface Scattered { x: number; z: number; model: number; rot: number; scale: number }
-    const trees: Scattered[] = [];
     /*
      * Where the street lamps are, kept separately as well as scattered.
      *

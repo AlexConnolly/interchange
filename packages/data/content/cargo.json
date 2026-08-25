@@ -44,6 +44,17 @@
     "colour": "#a8894a"
   },
   {
+    "id": "beer",
+    "name": "Beer",
+    "tier": "processing",
+    "handling": "liquid",
+    "density": 62,
+    "perishability": 8,
+    "basePrice": 1150,
+    "fromEra": 1,
+    "colour": "#a9601f"
+  },
+  {
     "id": "aggregate",
     "name": "Aggregate",
     "tier": "extraction",

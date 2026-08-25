@@ -34,6 +34,23 @@ HIDE_PALE = (0.878, 0.855, 0.808, 1)
 SOIL = (0.478, 0.353, 0.243, 1)
 TIMBER = (0.478, 0.360, 0.243, 1)
 
+# The yard palette. Everything below stands *at a business* rather than in a
+# field, and it exists to answer "what is this place?" from four hundred feet
+# without reading the icon over it — "a livestock farm with no animals", which is
+# fair, and true of every other trade too. A quarry with no stone in the yard is
+# a shed.
+LOG = (0.494, 0.376, 0.259, 1)
+LOG_END = (0.780, 0.686, 0.522, 1)
+SAWN = (0.847, 0.769, 0.612, 1)
+STONE = (0.616, 0.604, 0.573, 1)
+STONE_PALE = (0.714, 0.706, 0.678, 1)
+SACK = (0.784, 0.741, 0.639, 1)
+CHURN = (0.792, 0.812, 0.824, 1)
+TANK = (0.855, 0.863, 0.855, 1)
+PALLET = (0.639, 0.518, 0.361, 1)
+CRATE = (0.549, 0.400, 0.271, 1)
+HURDLE = (0.600, 0.510, 0.384, 1)
+
 
 def _paint(obj, rgba, name, rough=0.85):
     obj.data.materials.append(lib.material(name, rgba, rough=rough))
@@ -219,6 +236,143 @@ def lamp_post():
     return made
 
 
+def log_stack():
+    """Round timber in the round, stacked. Forestry and the sawmill.
+
+    Read from the *ends*: a pale disc against a dark side is what says log rather
+    than beam, so the ends get their own lighter material and the cylinders lie
+    across the view. Three on two is the smallest stack that reads as a stack.
+    """
+    made = []
+    for i, (x, z) in enumerate([(-0.036, 0.018), (0.0, 0.018), (0.036, 0.018),
+                                (-0.018, 0.052), (0.018, 0.052)]):
+        o = lib.cyl('log%d' % i, 0.018, 0.018, 0.150,
+                    loc=(x, 0, z), rot=(math.pi / 2, 0, 0), segments=7)
+        _paint(o, LOG, 'log')
+        made.append(o)
+    for i, side in enumerate((-1, 1)):
+        c = lib.box('logend%d' % i, (0.100, 0.006, 0.070),
+                    loc=(0, side * 0.076, 0.035))
+        _paint(c, LOG_END, 'logend')
+        made.append(c)
+    return made
+
+
+def timber_stack():
+    """Sawn boards, banded. The palest thing in any yard, which is the point:
+    against a dark log stack twenty yards away it says the difference between the
+    wood going in and the wood coming out."""
+    made = []
+    for i in range(4):
+        o = lib.box('board%d' % i, (0.170, 0.075, 0.014),
+                    loc=(0, 0, 0.010 + i * 0.017))
+        _paint(o, SAWN if i % 2 == 0 else STRAW, 'sawn%d' % (i % 2))
+        made.append(o)
+    return made
+
+
+def stone_heap():
+    """Crushed stone, tipped. Angular where a muck heap is rounded — the quarry
+    and the concrete plant both want grey, and grey in a green district is
+    already unusual enough to carry the meaning."""
+    made = []
+    o = lib.cyl('heapstone', 0.088, 0.020, 0.056, loc=(0, 0, 0.027), segments=6)
+    _paint(o, STONE, 'stone', rough=0.95)
+    made.append(o)
+    b = lib.box('block0', (0.038, 0.034, 0.026), loc=(0.075, -0.045, 0.013),
+                rot=(0, 0, 0.4))
+    _paint(b, STONE_PALE, 'stonepale', rough=0.95)
+    made.append(b)
+    return made
+
+
+def sacks():
+    """A pallet of sacks. The mill and the village shop: bagged goods, which is
+    what both of them actually move."""
+    made = []
+    p = lib.box('sackpal', (0.110, 0.080, 0.012), loc=(0, 0, 0.006))
+    _paint(p, PALLET, 'pallet')
+    made.append(p)
+    for i, (x, y) in enumerate([(-0.030, -0.020), (0.030, -0.020),
+                                (-0.030, 0.020), (0.030, 0.020), (0.0, 0.0)]):
+        # No chamfer. It cost more triangles than the sacks did, on a model
+        # whose whole silhouette is four pale lumps on a pallet.
+        o = lib.box('sack%d' % i, (0.048, 0.036, 0.026),
+                    loc=(x, y, 0.012 + (0.026 if i == 4 else 0)))
+        _paint(o, SACK, 'sack')
+        made.append(o)
+    return made
+
+
+def churns():
+    """Milk churns on a stand at the gate. The single most recognisable object in
+    English dairying, and the reason a dairy farm should never be mistaken for an
+    arable one: pale cylinders in a row, at the roadside, waiting for the lorry."""
+    made = []
+    st = lib.box('churnstand', (0.130, 0.052, 0.010), loc=(0, 0, 0.026))
+    _paint(st, TIMBER, 'timber')
+    made.append(st)
+    for i in range(4):
+        o = lib.cyl('churn%d' % i, 0.017, 0.013, 0.044,
+                    loc=(-0.048 + i * 0.032, 0, 0.053), segments=7)
+        _paint(o, CHURN, 'churn', rough=0.45)
+        made.append(o)
+    return made
+
+
+def tank():
+    """An upright tank. The creamery, the filling station and the concrete plant
+    all have one, and at this size a tall pale cylinder beside a shed is as
+    industrial as the district gets."""
+    made = []
+    o = lib.cyl('tank', 0.048, 0.048, 0.130, loc=(0, 0, 0.065), segments=9)
+    _paint(o, TANK, 'tank', rough=0.4)
+    made.append(o)
+    cap = lib.cyl('tankcap', 0.050, 0.036, 0.020, loc=(0, 0, 0.138), segments=9)
+    _paint(cap, STONE_PALE, 'tankcap', rough=0.5)
+    made.append(cap)
+    return made
+
+
+def pallets():
+    """Stacked pallets and a crate. Builders' merchant, terminal, distribution
+    centre: the yards whose whole trade is *things in transit*, and a pallet is
+    what that looks like when it is standing still."""
+    made = []
+    for i in range(3):
+        o = lib.box('pal%d' % i, (0.100, 0.076, 0.011),
+                    loc=(0, 0, 0.006 + i * 0.014))
+        _paint(o, PALLET, 'pallet')
+        made.append(o)
+    c = lib.box('crate', (0.070, 0.060, 0.058), loc=(0.090, 0.030, 0.029),
+                chamfer=0.004)
+    _paint(c, CRATE, 'crate')
+    made.append(c)
+    return made
+
+
+def pen():
+    """A hurdle pen. Livestock and the abattoir — the animals are the giveaway
+    but they wander, and a pen is the part of a stock farm that stays put."""
+    made = []
+    for i, (x, y, lx, ly) in enumerate([
+        (0, -0.070, 0.150, 0.008), (0, 0.070, 0.150, 0.008),
+        (-0.075, 0, 0.008, 0.140), (0.075, 0, 0.008, 0.140),
+    ]):
+        r = lib.box('hurdle%d' % i, (lx, ly, 0.006), loc=(x, y, 0.034))
+        _paint(r, HURDLE, 'hurdle')
+        made.append(r)
+        b = lib.box('hurdlelow%d' % i, (lx, ly, 0.006), loc=(x, y, 0.016))
+        _paint(b, HURDLE, 'hurdle')
+        made.append(b)
+    for i, (x, y) in enumerate([(-0.075, -0.070), (0.075, -0.070),
+                                (-0.075, 0.070), (0.075, 0.070)]):
+        o = lib.box('penpost%d' % i, (0.012, 0.012, 0.046), loc=(x, y, 0.023))
+        _paint(o, TIMBER, 'timber')
+        made.append(o)
+    return made
+
+
 BUILDS = [
     ('prop_lamp_post', lamp_post),
     ('prop_bale_round', bale_round),
@@ -229,6 +383,14 @@ BUILDS = [
     ('prop_cattle', cattle),
     ('prop_muck', muck_heap),
     ('prop_trough', trough),
+    ('prop_log_stack', log_stack),
+    ('prop_timber_stack', timber_stack),
+    ('prop_stone_heap', stone_heap),
+    ('prop_sacks', sacks),
+    ('prop_churns', churns),
+    ('prop_tank', tank),
+    ('prop_pallets', pallets),
+    ('prop_pen', pen),
 ]
 
 

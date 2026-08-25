@@ -31,6 +31,9 @@ from boxmodel import Form  # noqa: E402
 # Straight off palette.ts BUILT, which is straight off the target frame.
 BRICK = (0.639, 0.384, 0.290, 1)
 RENDER = (0.812, 0.769, 0.682, 1)
+# Oak, banded. A cask is the one container in the district that is neither steel
+# nor a box, and the colour is doing that work on its own.
+CASK = (0.475, 0.333, 0.208, 1)
 SLATE = (0.290, 0.302, 0.333, 1)
 # Terracotta pantile, and adding it was not decoration.
 #
@@ -529,11 +532,51 @@ def church():
         pitched('vcn', 0.46, 0.26, 0.24, 0.14, STONE, SLATE), 0.34, 0.0)
 
 
+def brewery():
+    """A country brewery, and it is a *tower*.
+
+    Every other works in the district is wider than it is tall. A brewery is the
+    exception and always was: brewing runs downhill, so the malt goes in at the
+    top and the beer comes out at the bottom, and a Victorian tower brewery is
+    four floors of that stacked up with a chimney beside it. That silhouette is
+    the whole identification — the tallest roof in the parish next to the tallest
+    chimney, and nothing else here looks remotely like it.
+
+    The casks are the second cue and they are why the yard is deep: rows of barrels
+    outside a building is a thing only one trade does.
+    """
+    p = pad('brp', 1.05, 0.92)
+    # The tower itself: narrow, tall, steep roof.
+    #
+    # Tall *for this district*, which is 0.44 and not the 0.62 I first gave it.
+    # The mill's silo is the current record at 0.67 and everything else is between
+    # a third and a half; a brewery that topped out at one and a half tiles was
+    # not the tallest roof in the parish, it was a cathedral, and it would have
+    # made every other works look like a shed by comparison.
+    p += moved(pitched('brt', 0.36, 0.34, 0.44, 0.16, BRICK, SLATE, ridge='y'),
+               -0.22, 0.14)
+    # The chimney, taller than the tower, which is what makes it read as steam.
+    p += chimney('brc', r=0.038, h=0.72, at=(-0.44, -0.10))
+    # Malt silos, because the grain has to get up there somehow.
+    p += silo('brs1', r=0.078, h=0.40, at=(0.02, 0.26))
+    p += silo('brs2', r=0.078, h=0.34, at=(0.02, 0.04))
+    # The cask store, low and long against the tower.
+    p += moved(barn('brb', w=0.44, d=0.26, body=RENDER, roof=SLATE), 0.26, -0.24)
+    # And the casks, on their side in two rows. A brewery yard, in four boxes.
+    for i in range(4):
+        p += [_paint(lib.cyl('brk%d' % i, 0.036, 0.036, 0.058,
+                             loc=(-0.10 + i * 0.085, -0.34, 0.036),
+                             rot=(0, math.pi / 2, 0), segments=8),
+                     CASK, 'brk_mat', rough=0.7)]
+    return p
+
+
 BUILDS = [
     ('plc_dairy_farm', dairy_farm),
     ('plc_arable_farm', arable_farm),
     ('plc_creamery', creamery),
     ('plc_mill', mill),
+    ('plc_brewery', brewery),
     ('plc_quarry', quarry),
     ('plc_forestry', forestry),
     ('plc_sawmill', sawmill),

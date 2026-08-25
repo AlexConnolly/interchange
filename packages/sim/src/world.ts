@@ -360,6 +360,18 @@ export class World {
     this.townWant = {
       goods: 6, food: 8, coal: 5, textiles: 2, planks: 2, cement: 2,
       paper: 1, glass: 1, fuel: 2, electronics: 1, luxury: 1, retail: 3,
+      /*
+       * Beer, which a village wants rather more of than it wants glass.
+       *
+       * Worth saying that most of the keys above no longer name anything: this
+       * basket is inherited from the two-century spec and of its twelve entries
+       * only `fuel` still matches a cargo in the trimmed content, so the lookup
+       * quietly skips the rest. That is not a bug — an unknown id is meant to be
+       * skipped, and the district's economy is deliberately business-to-business
+       * with the village shop as its retail end. But it does mean a town's
+       * shopping list is currently one line long, and beer is the second.
+       */
+      beer: 4,
       // Visitors, which a town wants far more of in August than in February.
       // Seasonally scaled where the basket is consumed rather than here, so
       // the number in this table stays a plain annual average.

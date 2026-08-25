@@ -96,6 +96,31 @@
     "colour": "#a89050"
   },
   {
+    "id": "brewery",
+    "name": "Brewery",
+    "kind": "processing",
+    "deposit": 0,
+    "recipe": {
+      "inputs": {
+        "grain": 4
+      },
+      "outputs": {
+        "beer": 3
+      },
+      "period": 52
+    },
+    "footprint": 3,
+    "foundCost": 1650000,
+    "powerNeed": 0,
+    "waterNeed": 0,
+    "labourNeed": 0,
+    "amenityPenalty": 3,
+    "amenityRadius": 4,
+    "fromEra": 1,
+    "kit": "works",
+    "colour": "#8c5a2b"
+  },
+  {
     "id": "quarry",
     "name": "Quarry",
     "kind": "extraction",
@@ -320,7 +345,8 @@
     "recipe": {
       "inputs": {
         "meat": 2,
-        "dairy": 2
+        "dairy": 2,
+        "beer": 2
       },
       "outputs": {},
       "period": 30
