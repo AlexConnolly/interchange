@@ -1501,10 +1501,20 @@ export function App(): JSX.Element {
           id: src.vId[i],
           x: src.vx[i],
           z: src.vz[i],
-          // The two cars are the last two models in the fleet list.
-          // The two cars are the lighter engine; the tractor is a diesel like
-          // the lorries, which is why the test is a range and not a threshold.
-          light: model === modelNames.length - 3 || model === modelNames.length - 2,
+          /*
+           * Which engine it has, by where its model sits in the list.
+           *
+           * The order is the content's lorries, then the two cars, then the
+           * tractor — so the two cars are third- and second-from-last and the
+           * tractor is last. Reading it off the index is ugly and it is also the
+           * only place in the client that needs to know, which is why it has not
+           * earned a table of its own.
+           */
+          engine: model === TRACTOR_MODEL
+            ? 'tractor'
+            : (model === modelNames.length - 3 || model === modelNames.length - 2)
+              ? 'petrol'
+              : 'diesel',
         });
       }
       sound.engines(heard, renderer.camX, renderer.camZ);

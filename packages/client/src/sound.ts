@@ -44,6 +44,14 @@ export const MANIFEST = {
   engine: 'engine-diesel.mp3',
   /** A car, lighter and higher. Looped. */
   engineCar: 'engine-petrol.mp3',
+  /**
+   * A tractor, which is a diesel but not that diesel.
+   *
+   * Worth a third clip rather than reusing the lorry's, because the difference
+   * is not subtle: a lorry hums and a tractor knocks, and the knock is most of
+   * what tells you there is one out in a field you cannot quite see.
+   */
+  engineTractor: 'engine-tractor.mp3',
   /** A horn, one press. Two would be better than one but one will do. */
   horn: 'horn.mp3',
   /** Light wind in hedges. Long, looped, and it must not have a shape you can
@@ -92,12 +100,14 @@ interface Voice {
   clip: SoundName | null;
 }
 
+/** Which engine a thing has. Three, because a tractor is not a lorry. */
+export type Engine = 'diesel' | 'petrol' | 'tractor';
+
 export interface Heard {
   id: number;
   x: number;
   z: number;
-  /** True for a car, false for anything with a diesel engine in it. */
-  light: boolean;
+  engine: Engine;
 }
 
 export class Sound {
@@ -268,7 +278,9 @@ export class Sound {
   }
 
   private clipFor(h: Heard): SoundName {
-    return h.light ? 'engineCar' : 'engine';
+    if (h.engine === 'petrol') return 'engineCar';
+    if (h.engine === 'tractor') return 'engineTractor';
+    return 'engine';
   }
 
   private play(v: Voice, h: Heard): void {
