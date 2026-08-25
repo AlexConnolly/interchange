@@ -102,6 +102,18 @@ export const CHUNK = 16;
 export const TILES_ACROSS_DEFAULT = 26;
 
 /**
+ * The framing the game actually opens at, a little wider than the reference.
+ *
+ * Named because two things need it and they were disagreeing. The camera set it
+ * as a bare expression at the point of use, so the audio — which normalises its
+ * distances against the *reference* framing — was computing every distance as if
+ * the player were forty per cent further away than they are, at the one zoom they
+ * spend most of their time at. A dial that two systems have to share is a
+ * constant, not an expression.
+ */
+export const TILES_ACROSS_OPENING = TILES_ACROSS_DEFAULT * 1.4;
+
+/**
  * How many real lights the scene keeps.
  *
  * Eight. Three renders forward, so this number appears in every shader in the

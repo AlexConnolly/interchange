@@ -346,12 +346,27 @@ export class Sound {
    * clicking mess. A voice whose vehicle has gone out of earshot fades to nothing
    * and becomes available.
    */
-  engines(heard: Heard[], camX: number, camZ: number): void {
+  engines(heard: Heard[], camX: number, camZ: number, zoom = 1): void {
     const ctx = this.ctx;
     if (!ctx || this.voices.length === 0) return;
 
+    /*
+     * Distance measured in *view widths*, not tiles.
+     *
+     * "Doesn't get louder as I zoom in" — and it did not, because the distance to
+     * a lorry in tiles is the same however close the camera is. But zooming in is
+     * the one thing this game has instead of walking towards something, so it has
+     * to be the same thing to the ears as it is to the eyes.
+     *
+     * `zoom` is the frame width over its default, so scaling the distance by it
+     * makes the whole world audibly nearer as the view narrows and further as it
+     * widens. It is applied before anything else, so it moves the selection of
+     * which vehicles are worth a voice as well as how loud they are: zoomed out
+     * over the whole district the traffic thins to a few of the closest, and
+     * zoomed in on one lane you hear that lane.
+     */
     const inRange = heard
-      .map((h) => ({ h, d: Math.hypot(h.x - camX, h.z - camZ) }))
+      .map((h) => ({ h, d: Math.hypot(h.x - camX, h.z - camZ) * zoom }))
       .filter((e) => e.d < EARSHOT)
       .sort((a, b) => a.d - b.d)
       .slice(0, this.voices.length);
@@ -438,14 +453,27 @@ export class Sound {
   /**
    * How loud a vehicle is at a given distance, 0..1.
    *
-   * Squared, so it falls away quickly at first and then tails off — which is
-   * both what a point source does and what stops a dozen distant engines summing
-   * into a wash. At half of earshot a lorry is a quarter as loud as one alongside
-   * you, where the panner's linear model had it at two thirds.
+   * An inverse-square roll-off about a reference distance, tapered to nothing at
+   * earshot. The shape is the whole point, and the previous shape was wrong in a
+   * way that hid two complaints at once.
+   *
+   * `(1 - d/earshot)²` sounds like a reasonable falloff and is nearly *flat* over
+   * the first few tiles — 0.92 at two tiles against 0.85 at four. But almost every
+   * audible vehicle is in those first few tiles, so in practice nothing had any
+   * dynamic range: every engine on screen was the same loudness, which reads as
+   * "far too loud for no apparent reason", and scaling the distance for zoom moved
+   * a number that the curve then threw away.
+   *
+   * `ref² / (ref² + d²)` puts the interesting part of the curve where the vehicles
+   * are: half volume at five tiles, a fifth at ten, a twentieth at twenty. The
+   * quartic taper is only there to reach exactly zero at the cutoff so a vehicle
+   * leaving earshot does not pop.
    */
   private static level(d: number): number {
-    const near = Math.max(0, 1 - d / EARSHOT);
-    return near * near;
+    const ref = 5;
+    const roll = (ref * ref) / (ref * ref + d * d);
+    const edge = Math.max(0, 1 - (d / EARSHOT) ** 4);
+    return roll * edge;
   }
 
   private aim(v: Voice, h: Heard, d: number): void {
@@ -475,13 +503,19 @@ export class Sound {
    * frame reads as a fault. The gap is randomised so it does not become a
    * metronome.
    */
-  maybeHorn(heard: Heard[], camX: number, camZ: number, now: number): void {
+  maybeHorn(
+    heard: Heard[], camX: number, camZ: number, now: number, zoom = 1,
+  ): void {
     const ctx = this.ctx;
     if (!ctx || heard.length === 0) return;
     if (now - this.lastHorn < this.hornGap) return;
     this.lastHorn = now;
     this.hornGap = 9000 + Math.random() * 26000;
-    const near = heard.filter((h) => Math.hypot(h.x - camX, h.z - camZ) < EARSHOT * 0.7);
+    // Same view-width distance the engines use, so a horn cannot come from a
+    // vehicle too far off to have been given an engine.
+    const near = heard.filter(
+      (h) => Math.hypot(h.x - camX, h.z - camZ) * zoom < EARSHOT * 0.7,
+    );
     if (near.length === 0) return;
     const pick = near[Math.floor(Math.random() * near.length)];
     this.oneShot('horn', 0.42, pick.x, pick.z);

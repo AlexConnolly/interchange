@@ -18,7 +18,8 @@ import {
 } from '@interchange/sim';
 import { loadContent } from '@interchange/data';
 import {
-  CHUNK, Renderer, RoadClass, TILES_ACROSS_DEFAULT, RUN, loadKit, type RenderSource,
+  CHUNK, Renderer, RoadClass, TILES_ACROSS_DEFAULT, TILES_ACROSS_OPENING,
+  RUN, loadKit, type RenderSource,
 } from '@interchange/render';
 import { Alerts, Earnings, Markers, Mine, money } from './Markers.tsx';
 import { Ambient, areaDemand } from './ambient.ts';
@@ -956,7 +957,19 @@ export function App(): JSX.Element {
      * the point of the mechanic — but not so wide that the roads become threads,
      * which 2.4x did.
      */
-    renderer.tilesAcross = TILES_ACROSS_DEFAULT * 1.4;
+    renderer.tilesAcross = TILES_ACROSS_OPENING;
+    /*
+     * `?across=` to force the zoom, in tiles across the frame.
+     *
+     * After the opening framing, not before it. The first version of this was
+     * before and was silently overwritten, which made a measurement of the zoom
+     * behaviour read as if the feature did not work when what did not work was
+     * the way of asking for it.
+     */
+    const askedAcross = Number(params.get('across'));
+    if (params.has('across') && Number.isFinite(askedAcross)) {
+      renderer.tilesAcross = Math.max(14, Math.min(70, askedAcross));
+    }
 
     /*
      * The fleet, straight out of the art pipeline.
@@ -1676,8 +1689,18 @@ export function App(): JSX.Element {
               : 'diesel',
         });
       }
-      sound.engines(heard, renderer.camX, renderer.camZ);
-      sound.maybeHorn(heard, renderer.camX, renderer.camZ, now);
+      /*
+       * How wide the frame is, against the framing the game opens at.
+       *
+       * One number, and it is what makes zooming in sound like walking closer.
+       * Normalised against the *opening* zoom rather than the reference one so
+       * that `zoom` is 1 where the player spends most of their time — otherwise
+       * every distance in the mix is inflated by forty per cent before anything
+       * else happens.
+       */
+      const zoom = renderer.tilesAcross / TILES_ACROSS_OPENING;
+      sound.engines(heard, renderer.camX, renderer.camZ, zoom);
+      sound.maybeHorn(heard, renderer.camX, renderer.camZ, now, zoom);
       // Wind always, a little more of it when it is blowing up; rain only when
       // it is actually raining.
       sound.ambientLevel('wind', 0.10 + renderer.cloud * 0.16);
