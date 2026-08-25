@@ -39,10 +39,23 @@ export const WayFlag = {
 export interface WayClassProfile {
   buildCost: number;
   maxGradient: number;
+  /** Height units one lock chamber lifts, or zero for a way that cannot be
+   *  locked. Only water has this. */
+  locking: number;
   minRadius: number;
   bridgeCostPct: number;
   tunnelCostPct: number;
 }
+
+/**
+ * Height units one lock chamber lifts a boat.
+ *
+ * A height unit is half a metre (scale.md), and a lock chamber is about two
+ * metres, so four. It is a constant rather than content because it is a fact
+ * about water and gates rather than a balance figure: a deeper lock is not a
+ * design option, it is a different physics.
+ */
+export const LOCK_LIFT = 4;
 
 export interface AlignmentTile {
   tile: number;
@@ -64,6 +77,9 @@ export interface Alignment {
   tunnels: number;
   /** Steepest gradient on the finished formation, for the readout. */
   steepest: number;
+  /** Lock chambers on a water alignment. A canal does not climb; a lock does,
+   *  which is why this is counted separately from earthworks. */
+  locks: number;
   /** Tiles that already carried this mode of yours and are being upgraded. */
   reused: number;
   /** Tiles belonging to someone else that the alignment runs onto. */
@@ -173,6 +189,7 @@ export function planAlignment(
     bridges: 0,
     tunnels: 0,
     steepest: 0,
+    locks: 0,
     reused: 0,
     foreign: 0,
     ok: true,
@@ -213,9 +230,34 @@ export function planAlignment(
     if (worst <= 0.5) break;
   }
 
-  // Ends can still be illegal if the terrain simply will not allow it.
+  /*
+   * Locks, and why a canal is not just a very flat road.
+   *
+   * A canal has a maximum gradient of two height units per tile, which is to
+   * say none: water does not run uphill and a level pound is level. Relaxing
+   * the profile the way a railway does cannot help, because there is no
+   * embankment tall enough to make a valley flat. So a canal built by the
+   * rules every other way class follows is a canal that can only be laid on
+   * ground that is already dead level, which in this terrain is almost
+   * nowhere — the class existed in the content for the whole project and not
+   * one could ever be built.
+   *
+   * The answer is the one the eighteenth century found. A canal climbs in
+   * steps: a run of level pound, a lock, another level pound. So a water
+   * alignment is allowed to step, the steps are counted, and each one is
+   * charged for — which makes a flight of locks up a valley expensive and
+   * slow and characterful, exactly as it should be, rather than illegal.
+   */
+  const stepped = profile.locking > 0;
   for (let i = 1; i < n; i++) {
     const g = Math.abs(level[i] - level[i - 1]);
+    if (stepped && g > maxGrad) {
+      // One lock per chamber-worth of lift, rounded up. A lock chamber raises
+      // a boat about two metres, so a long climb is a flight rather than one
+      // enormous chamber, and it is priced like a flight.
+      out.locks += Math.max(1, Math.ceil(g / profile.locking));
+      continue;
+    }
     if (g > out.steepest) out.steepest = g;
   }
   if (out.steepest > maxGrad * 1.6) {
@@ -324,6 +366,13 @@ export function planAlignment(
       foreign: otherOwner,
     });
   }
+
+  // A lock is a masonry chamber with gates, and it costs about what a short
+  // stretch of the canal itself does. Charged after the per-tile pass so it
+  // shows in the estimate as its own line, the way a viaduct does: "nine
+  // thousand pounds, of which six is the flight of locks" is a different
+  // sentence from "nine thousand pounds".
+  if (out.locks > 0) out.totalCost += out.locks * profile.buildCost * 2;
 
   void cls;
   return out;

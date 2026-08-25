@@ -712,6 +712,10 @@ function RegulatorNotice({ engine }: { engine: Engine }): JSX.Element | null {
  * "£40,000, of which £31,000 is a viaduct" is a different sentence from
  * "£40,000" and leads to a different decision.
  */
+/** Headings for the construction palette. MODE_NAMES is lower case because it
+ *  is an identifier; this is prose. */
+const MODE_LABELS = ['Road', 'Rail', 'Canal', 'Air', 'Pipeline', 'Transmission', 'Conveyor'];
+
 export function BuildPalette({
   engine, state, onSelect, onDemolish,
 }: {
@@ -743,7 +747,7 @@ export function BuildPalette({
         )}
         {canBuild && [...byMode.entries()].map(([mode, list]) => (
           <div key={mode}>
-            <div className="ledger"><div className="head">{mode === 1 ? 'Rail' : 'Road'}</div></div>
+            <div className="ledger"><div className="head">{MODE_LABELS[mode]}</div></div>
             {list.map((way) => (
               <div
                 key={way.id}
@@ -775,6 +779,12 @@ export function BuildPalette({
               {state.plan.earthworks > 0 && (<><dt>Cut and fill</dt><dd>{state.plan.earthworks} tiles</dd></>)}
               {state.plan.bridges > 0 && (<><dt>Bridge</dt><dd className="warnc">{state.plan.bridges} tiles</dd></>)}
               {state.plan.tunnels > 0 && (<><dt>Tunnel</dt><dd className="warnc">{state.plan.tunnels} tiles</dd></>)}
+              {state.plan.locks > 0 && (
+                <><dt>Locks</dt>
+                <dd className="warnc">
+                  {state.plan.locks} {state.plan.locks > 3 ? '(a flight)' : state.plan.locks === 1 ? 'chamber' : 'chambers'}
+                </dd></>
+              )}
               {state.plan.reused > 0 && (<><dt>Over existing</dt><dd>{state.plan.reused} tiles</dd></>)}
               <dt>Total</dt>
               <dd className={w.companies.cash[w.player] >= state.plan.totalCost ? '' : 'neg'}>

@@ -41,7 +41,7 @@ import {
 import { DEPOSIT_NAMES, TileFlag, generateTerrain, SEA_LEVEL, type Terrain, type WorldConfig } from './terrain.ts';
 import { ObjectiveTable, checkObjectives, generateObjective, type ObjectiveContext } from './objectives.ts';
 import { THINK_DAYS, stepRival } from './rivals.ts';
-import { alignForRadius, layAlignment, planAlignment, removeWayTile, type Alignment } from './construction.ts';
+import { alignForRadius, layAlignment, planAlignment, removeWayTile, LOCK_LIFT, type Alignment } from './construction.ts';
 import { balanceGrids, buildGrids, computeLabour, emptyUtilityState } from './utilities.ts';
 import {
   VState, VehicleTable, buildNodeGeometry, projectVehicles, stepTraffic,
@@ -1828,6 +1828,10 @@ export class World {
       {
         buildCost: way.buildCost,
         maxGradient: way.maxGradient,
+        // Only water locks. A road that cannot climb a hill goes round it; a
+        // canal builds a staircase, and that difference is most of what makes
+        // a canal a canal.
+        locking: way.mode === 'water' ? LOCK_LIFT : 0,
         minRadius: way.minRadius,
         bridgeCostPct: way.bridgeCostPct,
         tunnelCostPct: way.tunnelCostPct,

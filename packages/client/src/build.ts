@@ -13,7 +13,7 @@
  * it *before* they spend the money, which is what makes the choice a choice.
  */
 
-import { Mode, type Alignment, type World } from '@interchange/sim';
+import { MODE_NAMES, Mode, type Alignment, type World } from '@interchange/sim';
 import { content } from '@interchange/data';
 import type { Engine } from './engine.ts';
 
@@ -44,17 +44,15 @@ export function availableWays(world: World): { index: number; id: string; name: 
   const out: { index: number; id: string; name: string; mode: number; cost: number }[] = [];
   C.ways.forEach((w, i) => {
     if (w.era > era) return;
-    // Sea lanes and air corridors are not laid; they exist. Wires, pipes and
-    // conveyors arrive with the utility networks in Act III.
+    // Sea lanes and air corridors are not laid; they exist. Everything else
+    // that costs money is something somebody builds, including the three
+    // networks — a transmission line and a canal are as much infrastructure
+    // as a road, and design.md 3.5 is explicit that they share one economic
+    // language, which they cannot do if only one of them can be laid.
     if (w.buildCost === 0) return;
-    if (w.mode !== 'road' && w.mode !== 'rail') return;
-    out.push({
-      index: i,
-      id: w.id,
-      name: w.name,
-      mode: w.mode === 'rail' ? Mode.Rail : Mode.Road,
-      cost: w.buildCost,
-    });
+    const mode = MODE_NAMES.indexOf(w.mode as never);
+    if (mode < 0) return;
+    out.push({ index: i, id: w.id, name: w.name, mode, cost: w.buildCost });
   });
   return out;
 }
