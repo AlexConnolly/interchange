@@ -6,6 +6,7 @@ import {
 import { OverlayMode } from '@interchange/render';
 import { content } from '@interchange/data';
 import { Engine } from './engine.ts';
+import { Session } from './session.ts';
 import { WorldView, type Picked } from './WorldView.tsx';
 import { BuildPalette, CharterPanel, Contracts, Finance, Fleet, FleetList, Industries, Inspector, Objectives, Ownership, Saves, Services } from './panels.tsx';
 import { Reports } from './Reports.tsx';
@@ -47,6 +48,8 @@ export function App(): JSX.Element {
   const [seed, setSeed] = useState(() => params.seed ?? 1860 + Math.floor(Math.random() * 9000));
   const [size, setSize] = useState(() => params.size ?? 512);
   const [started, setStarted] = useState(params.play);
+  // Session state lives outside React, so a change in it has to be pushed in.
+  const [, nudge] = useState(0);
   const [engine, setEngine] = useState<Engine | null>(() =>
     params.play ? new Engine({ seed: params.seed ?? 1860, size: params.size ?? 512, townCount: (params.size ?? 512) >= 512 ? 14 : 9, companyCount: 4 }) : null,
   );
@@ -62,6 +65,27 @@ export function App(): JSX.Element {
           setEngine(new Engine({ seed, size, townCount: size >= 512 ? 14 : 9, companyCount: 4 }));
           setStarted(true);
         }}
+        onJoin={(url, room, name) => {
+          /*
+           * A shared world builds its region from what the room says, not from
+           * the seed on this card. Two clients that each generated their own
+           * would be in different worlds holding the same command log, which
+           * is the most confusing failure available: everything appears to
+           * work and nothing lines up.
+           */
+          const session = new Session();
+          session.connect(url, room, name, (config) => {
+            const joined = new Engine({
+              seed: config.seed,
+              size: config.size,
+              townCount: config.townCount,
+              companyCount: config.companyCount,
+            }, session);
+            setEngine(joined);
+            setStarted(true);
+            return joined.world;
+          }, () => nudge((n) => n + 1));
+        }}
       />
     );
   }
@@ -69,13 +93,22 @@ export function App(): JSX.Element {
 }
 
 function StartCard({
-  seed, size, setSeed, setSize, onStart,
+  seed, size, setSeed, setSize, onStart, onJoin,
 }: {
   seed: number; size: number;
   setSeed: (n: number) => void; setSize: (n: number) => void;
   onStart: () => void;
+  onJoin: (url: string, room: string, name: string) => void;
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [relay, setRelay] = useState(() => {
+    const here = globalThis.location;
+    const proto = here?.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${here?.host ?? 'localhost:8787'}/relay`;
+  });
+  const [room, setRoom] = useState('the-vale');
+  const [who, setWho] = useState('Player');
   return (
     <div className="start">
       <div className="card">
@@ -122,7 +155,38 @@ function StartCard({
           <button className="btn" onClick={() => setSeed(1860 + Math.floor(Math.random() * 9000))}>
             New seed
           </button>
+          <button className="btn" onClick={() => setSharing((v) => !v)}>
+            {sharing ? 'Play alone' : 'Shared world'}
+          </button>
         </div>
+        {sharing && (
+          <>
+            <div className="fields">
+              <label>
+                Relay
+                <input value={relay} onChange={(e) => setRelay(e.target.value)} />
+              </label>
+              <label>
+                Room
+                <input value={room} onChange={(e) => setRoom(e.target.value)} />
+              </label>
+              <label>
+                Your name
+                <input value={who} onChange={(e) => setWho(e.target.value)} />
+              </label>
+            </div>
+            <div style={{ padding: '0 4px 8px', fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
+              Everyone who types the same room name gets the same region: the
+              name is the seed. The relay orders everybody&rsquo;s decisions and
+              hands the same list to every machine — nobody sends a world.
+            </div>
+            <div className="actions">
+              <button className="btn primary" onClick={() => onJoin(relay, room, who)}>
+                Join {room}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -303,6 +367,22 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
                 : `${WEATHER_NAMES[w.climate.weather]}${w.climate.severity > 70 ? ' (hard)' : ''}`}
             </div>
           </div>
+          {engine.session.active && (
+            <div className="cell">
+              {/* Who else is in here, and whether anybody has disagreed.
+                  The desync count is shown rather than hidden: it is the one
+                  number the whole architecture is staked on, and a client that
+                  quietly resynced would be concealing it. */}
+              <div className="label">
+                {engine.session.info.room}
+                {engine.session.info.state === 'spectating' ? ' · watching' : ''}
+              </div>
+              <div className={`value small ${engine.session.info.desyncs > 0 ? 'neg' : ''}`}>
+                {engine.session.info.players.length} here
+                {engine.session.info.desyncs > 0 ? ` · ${engine.session.info.desyncs} desync` : ''}
+              </div>
+            </div>
+          )}
           <div className="cell">
             <div className="label">Charter</div>
             <div className="value small">{CHARTER_NAMES[w.companies.charter[w.player]]}</div>

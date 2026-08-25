@@ -245,6 +245,10 @@ if (isMain) {
   const port = Number(process.argv[2] ?? 8787);
   const relay = new Relay();
   const server = createServer((req, res) => {
+    // CORS on the health endpoint only: it is the one thing a page served
+    // from somewhere else might reasonably ask for, and the socket does its
+    // own origin handling through the upgrade.
+    res.setHeader('access-control-allow-origin', '*');
     if (req.url === '/health') {
       const rooms = [...relay.rooms.values()].map((r) => ({
         name: r.name, players: r.players.size, tick: r.tick, desyncs: r.desyncCount,

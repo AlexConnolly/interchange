@@ -26,6 +26,9 @@ importers:
       '@interchange/render':
         specifier: workspace:*
         version: link:../render
+      '@interchange/server':
+        specifier: workspace:*
+        version: link:../server
       '@interchange/sim':
         specifier: workspace:*
         version: link:../sim

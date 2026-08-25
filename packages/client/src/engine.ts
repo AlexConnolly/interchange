@@ -21,6 +21,7 @@ import {
 } from '@interchange/sim';
 import { OverlayMode, Renderer, hex, type RenderSource } from '@interchange/render';
 import { content } from '@interchange/data';
+import { Session } from './session.ts';
 
 export interface EngineEvent {
   kind: string;
@@ -48,7 +49,11 @@ export class Engine {
   tickMs = 0;
   private frameTimes: number[] = [];
 
-  constructor(config: Partial<WorldConfig>) {
+  constructor(config: Partial<WorldConfig>, session?: Session) {
+    // A shared world's session outlives the engine that opened it: the
+    // connection is made before the region is known, and the region is what
+    // the engine is built from.
+    if (session) this.session = session;
     this.world = createWorld(config);
     this.wireWorld();
     // A handle for the console. The sim is fully inspectable from the
@@ -97,12 +102,24 @@ export class Engine {
     for (const fn of this.listeners) fn();
   }
 
-  /** Queue a command for the player. Always two ticks out, so that the local
-   *  path and the multiplayer path are the same path (architecture.md §2). */
+  /**
+   * Queue a command for the player. Always two ticks out, so that the local
+   * path and the multiplayer path are the same path (architecture.md 2).
+   *
+   * In a shared world it goes to the relay instead and comes back like
+   * anybody else's — it must not be applied locally first, because then this
+   * client would have simulated a tick nobody else has and the two would
+   * never agree again.
+   */
   issue(kind: number, a = 0, b = 0, c = 0, d = 0, data?: number[] | string): void {
-    this.world.queue.push(cmd(this.world.tick + 2, this.world.player, kind, a, b, c, d, data));
+    if (!this.session.issue(kind, a, b, c, d, data)) {
+      this.world.queue.push(cmd(this.world.tick + 2, this.world.player, kind, a, b, c, d, data));
+    }
     this.revision++;
   }
+
+  /** The shared-world connection, or an idle one in single player. */
+  session = new Session();
 
   issueAs(issuer: number, kind: number, a = 0, b = 0, c = 0, d = 0, data?: number[] | string): void {
     this.world.queue.push(cmd(this.world.tick + 2, issuer, kind, a, b, c, d, data));
@@ -291,6 +308,7 @@ export class Engine {
         let ran = 0;
         while (this.accumulator >= 1 && ran < budget) {
           this.world.step();
+          this.session.tick(this.world);
           this.accumulator -= 1;
           ran++;
         }
