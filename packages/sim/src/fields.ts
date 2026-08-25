@@ -47,9 +47,68 @@ export const Crop = {
   WheatRipe: 4,
   Plough: 5,
   Rough: 6,
+  /** Turned and drilled: bare earth with drill lines in it. */
+  Drilled: 7,
+  /** Up and green, but nowhere near a crop yet. */
+  Growing: 8,
+  /** Cut, and the straw still on it. */
+  Stubble: 9,
+  /** Cut and cleared, waiting for the plough. */
+  Bare: 10,
 } as const;
 export type Crop = (typeof Crop)[keyof typeof Crop];
-export const CROP_COUNT = 7;
+export const CROP_COUNT = 11;
+
+/**
+ * The arable year, in order, with the month each stage begins.
+ *
+ * This is the whole reason for the four new crops. A field that is the same
+ * colour in February and August is scenery; a field that is turned earth in
+ * autumn, drilled in spring, green by May, gold in August and stubble in
+ * September is a *place where the year passes* — and it costs four colours and a
+ * lookup, because the crop was always only ever scenery (see the note on `Crop`)
+ * and scenery can be chosen to look right.
+ *
+ * Winter wheat, which is what most of England grows: in the ground before
+ * Christmas, harvested in high summer. Months are 0-based, so 8 is September.
+ */
+const YEAR: { from: number; crop: Crop }[] = [
+  { from: 0, crop: Crop.Growing },     // January: in the ground, low and green
+  { from: 3, crop: Crop.Wheat },       // April: away
+  { from: 6, crop: Crop.WheatRipe },   // July: turning
+  { from: 7, crop: Crop.Stubble },     // August: cut
+  { from: 8, crop: Crop.Bare },        // September: cleared
+  { from: 9, crop: Crop.Plough },      // October: turned over
+  { from: 10, crop: Crop.Drilled },    // November: drilled
+];
+
+/**
+ * What an arable field looks like on a given day.
+ *
+ * `offset` shifts a parcel's year by up to a month either way, so a district
+ * does not turn gold all at once — real farms drill and cut on different days,
+ * and a whole valley changing colour in one frame would look like a switch being
+ * thrown. Derived from the parcel id by the caller, so it is stable.
+ */
+export function arableStage(month: number, offset: number): Crop {
+  const m = ((month - offset) % 12 + 12) % 12;
+  let crop: Crop = YEAR[0].crop;
+  for (const step of YEAR) if (m >= step.from) crop = step.crop;
+  return crop;
+}
+
+/**
+ * And grass, which changes far less — but not nothing.
+ *
+ * A meadow is cut for hay in June and is pasture the rest of the year. Getting
+ * this wrong in the other direction is the risk: grass that cycled as hard as
+ * wheat would make the whole district pulse, and grass in England is green.
+ */
+export function grassStage(month: number, offset: number, base: Crop): Crop {
+  if (base !== Crop.Meadow) return base;
+  const m = ((month - offset) % 12 + 12) % 12;
+  return m === 6 || m === 7 ? Crop.Stubble : Crop.Meadow;
+}
 
 /** Crops that want good flat ground, in rough order of how much they want it.
  *  A ploughed field on a hillside is possible and a wheat field on a cliff is

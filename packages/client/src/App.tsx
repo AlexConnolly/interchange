@@ -24,6 +24,7 @@ import { Alerts, Earnings, Markers, Mine, money } from './Markers.tsx';
 import { Ambient, areaDemand } from './ambient.ts';
 import { eveningFor, litness, type Evening } from './evening.ts';
 import { Sound, type Heard } from './sound.ts';
+import { Farmwork, type FarmField } from './farmwork.ts';
 import { Fleet, Yard } from './Fleet.tsx';
 import { Planning } from './Planning.tsx';
 import { Dock } from './Dock.tsx';
@@ -317,7 +318,16 @@ export function App(): JSX.Element {
      * later, by which time there has been a summer to earn in and a November of
      * "No winter tyres" warnings to read.
      */
-    world.tick = 60 * TICKS_PER_DAY;
+    /*
+     * Day sixty is April. `?day=200` starts in high summer, `?day=280` in the
+     * snow — the same affordance as `?time` and `?rain`, and for the third time
+     * the same reason: the farming year takes sixteen hours to go round, so
+     * looking at August means either an override or an afternoon.
+     */
+    const askedDay = Number(params.get('day'));
+    world.tick = (params.has('day') && Number.isFinite(askedDay)
+      ? Math.max(0, Math.floor(askedDay))
+      : 60) * TICKS_PER_DAY;
     const wayNames = world.content.ways.map((w) => w.id);
     const layer = world.layers[Mode.Road];
 
@@ -354,6 +364,7 @@ export function App(): JSX.Element {
       vLivery: new Uint8Array(512),
       vModel: new Uint8Array(512),
       vId: new Int32Array(512),
+      vStopped: new Uint8Array(512),
       placeCount: 0,
       px: new Float32Array(320),
       pz: new Float32Array(320),
@@ -640,7 +651,92 @@ export function App(): JSX.Element {
       }
     }
 
+    /*
+     * Which fields can be worked, and where a tractor gets into each.
+     *
+     * One pass over the map for the bounds, then for each parcel the *road tile
+     * nearest it* and a point just inside the field beside that road. That pair
+     * is the gateway — the tractor drives the lanes to the road tile and then
+     * straight across the boundary — and it is all the "gates and paths towards
+     * all the fields" that is actually needed, with no geometry at all.
+     *
+     * Only arable, and only fields big enough to be worth a pass or two: a
+     * tractor working a strip two tiles wide reads as a tractor stuck in a hedge.
+     */
+    const workable: FarmField[] = [];
+    {
+      const parcel = world.terrain.fields.parcel;
+      const bounds = new Map<number, { x0: number; z0: number; x1: number; z1: number }>();
+      for (let z = 0; z < DISTRICT; z++) {
+        for (let x = 0; x < DISTRICT; x++) {
+          const p2 = parcel[z * DISTRICT + x];
+          if (p2 < 0) continue;
+          const b = bounds.get(p2);
+          if (!b) bounds.set(p2, { x0: x, z0: z, x1: x, z1: z });
+          else {
+            if (x < b.x0) b.x0 = x;
+            if (x > b.x1) b.x1 = x;
+            if (z < b.z0) b.z0 = z;
+            if (z > b.z1) b.z1 = z;
+          }
+        }
+      }
+      for (const [p2, b] of bounds) {
+        if (b.x1 - b.x0 < 3 || b.z1 - b.z0 < 3) continue;
+        // The nearest road tile to the field's edge, searched outward from the
+        // bounding box. Bounded, because a field with no road within six tiles is
+        // one no tractor is getting to.
+        let road = -1;
+        let entryX = 0;
+        let entryZ = 0;
+        let bestD = Infinity;
+        for (let z = Math.max(0, b.z0 - 6); z <= Math.min(DISTRICT - 1, b.z1 + 6); z++) {
+          for (let x = Math.max(0, b.x0 - 6); x <= Math.min(DISTRICT - 1, b.x1 + 6); x++) {
+            const t = z * DISTRICT + x;
+            if (roadClass[t] < 0) continue;
+            const cx = Math.max(b.x0, Math.min(b.x1, x));
+            const cz = Math.max(b.z0, Math.min(b.z1, z));
+            const d = (cx - x) ** 2 + (cz - z) ** 2;
+            if (d < bestD) {
+              bestD = d;
+              road = t;
+              // A point a tile inside the field from the road, which is the
+              // gateway. Clamped into the bounds so it is never outside the
+              // field it is supposed to be the way into.
+              entryX = Math.max(b.x0 + 0.5, Math.min(b.x1 + 0.5, cx + 0.5));
+              entryZ = Math.max(b.z0 + 0.5, Math.min(b.z1 + 0.5, cz + 0.5));
+            }
+          }
+        }
+        if (road < 0 || bestD > 25) continue;
+        workable.push({ parcel: p2, ...b, road, entryX, entryZ });
+      }
+    }
+
     const renderer = new Renderer(canvas);
+    const farmwork = new Farmwork({
+      size: DISTRICT,
+      usable: (t) => world.influence.usable(t),
+      route: (from, to) => world.roadRoute(from, to),
+      farms: () => {
+        const out: { tile: number; x: number; z: number }[] = [];
+        for (let i = 0; i < world.sites.count; i++) {
+          const ind = world.content.industries[world.sites.def[i]];
+          // Any farm. Which farm and what it grows is deliberately not checked:
+          // the point is a worked district, and a rule nobody can see only costs.
+          if (ind.deposit !== 9) continue;
+          const tile = world.siteAccessTile[i];
+          if (tile < 0 || !world.influence.usable(tile)) continue;
+          out.push({ tile, x: world.sites.x[i], z: world.sites.y[i] });
+        }
+        return out;
+      },
+      fields: () => workable.filter(
+        (f) => world.influence.usable(f.road)
+          && Math.abs((f.x0 + f.x1) / 2 - renderer.camX) < 70,
+      ),
+    });
+
     // `?rain=1` for a downpour, `?rain=0.4` for a shower. See `forceRain`.
     if (params.has('rain')) {
       const r = Number(params.get('rain'));
@@ -671,6 +767,22 @@ export function App(): JSX.Element {
     const clamp = (v: number): number => Math.max(inset, Math.min(DISTRICT - inset, v));
     renderer.camX = clamp(opening.x);
     renderer.camZ = clamp(opening.y);
+    /*
+     * `?at=x,z` to open somewhere else, in tiles.
+     *
+     * Alongside `?time`, `?day` and `?rain`: the four things you need to be able
+     * to force in order to photograph a given moment. Without it, checking that a
+     * tractor works a field in the way it should means waiting for one to pick a
+     * field the opening shot happens to contain.
+     */
+    const at = params.get('at');
+    if (at) {
+      const [ax, az] = at.split(',').map(Number);
+      if (Number.isFinite(ax) && Number.isFinite(az)) {
+        renderer.camX = clamp(ax);
+        renderer.camZ = clamp(az);
+      }
+    }
 
     // Where you begin: one small pocket, and nothing else visible.
     /*
@@ -698,6 +810,16 @@ export function App(): JSX.Element {
        * in it while you wait for a farm to fill a churn.
        */
       world.primeStock();
+      /*
+       * And put the fields at the right stage of the year *now*.
+       *
+       * `stepSeason` runs on a day boundary, and the first one is a whole game
+       * day away — four real minutes — so without this the opening frame shows
+       * whatever the generator happened to paint rather than what the month
+       * calls for. Starting in July and looking at ploughed earth is the kind of
+       * wrong that is invisible in the code and obvious on screen.
+       */
+      world.stepSeason();
 
       /*
        * The van is chosen by the work, not the other way round.
@@ -773,8 +895,9 @@ export function App(): JSX.Element {
      */
     const modelNames = [
       ...world.content.vehicles.map((v) => `veh_${v.id.replace(/-/g, '_')}`),
-      'veh_car_saloon', 'veh_car_estate',
+      'veh_car_saloon', 'veh_car_estate', 'veh_tractor',
     ];
+    const TRACTOR_MODEL = modelNames.length - 1;
     /*
      * What the traffic is made of, and it is not all cars.
      *
@@ -787,8 +910,8 @@ export function App(): JSX.Element {
     const byId = (id: string): number =>
       Math.max(0, world.content.vehicles.findIndex((v) => v.id === id));
     const ambientModels = [
-      modelNames.length - 2, modelNames.length - 2, modelNames.length - 2,
-      modelNames.length - 1, modelNames.length - 1,
+      modelNames.length - 3, modelNames.length - 3, modelNames.length - 3,
+      modelNames.length - 2, modelNames.length - 2,
       byId('van-transit'), byId('van-transit'),
       byId('rigid-box'),
       byId('artic-box'),
@@ -1068,6 +1191,7 @@ export function App(): JSX.Element {
     // Reused every frame: allocating thirty objects sixty times a second to hand
     // the same information to the mixer is pure garbage.
     const heard: Heard[] = [];
+    let season = -1;
 
     let raf = 0;
     let last = performance.now();
@@ -1075,8 +1199,30 @@ export function App(): JSX.Element {
     const frames: number[] = [];
     let hudTick = 0;
 
+    let blamed = false;
     const loop = (now: number): void => {
       raf = requestAnimationFrame(loop);
+      try {
+        body(now);
+      } catch (err) {
+        /*
+         * One report, then carry on.
+         *
+         * An exception thrown inside a `requestAnimationFrame` callback does not
+         * stop the loop — the next frame was scheduled on the first line — so
+         * the symptom is not a crash. It is a canvas frozen on its last good
+         * frame with an interface still at its initial values, which looks
+         * exactly like a rendering bug and is not one. Saying so once is the
+         * difference between ten minutes and an hour.
+         */
+        if (!blamed) {
+          blamed = true;
+          console.error('[frame] threw, and the loop is now a still image', err);
+        }
+      }
+    };
+
+    const body = (now: number): void => {
       const dt = Math.min(0.25, (now - last) / 1000);
       last = now;
 
@@ -1141,17 +1287,41 @@ export function App(): JSX.Element {
         src.vLivery[n] = world.vehicles.company[i] & 3;
         src.vModel[n] = world.vehicles.type[i];
         src.vId[n] = i;
+        // Standing at a stop rather than travelling. `link === -1` is how the
+        // traffic model says "not on a road right now", which is exactly the
+        // condition the renderer must not ease through.
+        src.vStopped[n] = world.vehicles.link[i] === -1 ? 1 : 0;
         n++;
       }
       // And the traffic, appended after the fleet. Scenery that moves, and the
       // difference between a road and a grey stripe. How much of it there is
       // depends on where you are looking: a lane by a hamlet is not the road
       // into the market town.
-      ambient.demand = areaDemand(townList, renderer.camX, renderer.camZ, 22);
+      /*
+       * And far less of it at night.
+       *
+       * "It feels weird that cars are all through the night" — and it is: a lane
+       * in 1985 at two in the morning has nothing on it. Down to a twelfth at the
+       * darkest, which leaves the occasional set of headlamps crossing the
+       * district rather than a stream, and makes those headlamps worth watching.
+       */
+      const awake = 1 - renderer.night * 0.92;
+      ambient.demand = areaDemand(townList, renderer.camX, renderer.camZ, 22) * awake;
+      const fleetEnd = n;
       n = ambient.step(
         dt, renderer.camX, renderer.camZ, renderer.tilesAcross * 0.8, n,
         src.vx, src.vz, src.vHeading, src.vLivery, src.vModel, src.vId,
       );
+      // Tractors, after the traffic. They share the vehicle arrays so they get
+      // instanced drawing, headlamps at dusk, motion smoothing and engine sound
+      // without any of those systems knowing tractors exist.
+      n = farmwork.step(
+        dt, TRACTOR_MODEL, n,
+        src.vx, src.vz, src.vHeading, src.vLivery, src.vModel, src.vId,
+      );
+      // Traffic and tractors manage their own standing about, so the renderer
+      // should ease them normally.
+      for (let k = fleetEnd; k < n; k++) src.vStopped[k] = 0;
       src.vehicleCount = n;
 
       /*
@@ -1275,6 +1445,18 @@ export function App(): JSX.Element {
       src.snow = world.snow;
       src.dayNumber = world.day;
 
+      /*
+       * The fields have moved on a stage: rebuild the ground.
+       *
+       * Watched rather than pushed, because the simulation must not know a
+       * renderer exists — the same rule the earnings queue follows. A counter
+       * the client compares is the whole interface.
+       */
+      if (world.seasonRevision !== season) {
+        season = world.seasonRevision;
+        renderer.dropChunks();
+      }
+
       renderer.render(src, dt);
 
       /*
@@ -1295,7 +1477,9 @@ export function App(): JSX.Element {
           x: src.vx[i],
           z: src.vz[i],
           // The two cars are the last two models in the fleet list.
-          light: model >= modelNames.length - 2,
+          // The two cars are the lighter engine; the tractor is a diesel like
+          // the lorries, which is why the test is a range and not a threshold.
+          light: model === modelNames.length - 3 || model === modelNames.length - 2,
         });
       }
       sound.engines(heard, renderer.camX, renderer.camZ);
@@ -1304,6 +1488,18 @@ export function App(): JSX.Element {
       // it is actually raining.
       sound.ambientLevel('wind', 0.10 + renderer.cloud * 0.16);
       sound.ambientLevel('rain', renderer.rain * 0.55);
+      /*
+       * Music by season, crossfaded.
+       *
+       * `snow` is the obvious signal and the wrong one: it is zero for eight
+       * months, so the winter track would appear only in the fortnight either
+       * side of Christmas. What is wanted is the *half of the year*, which is a
+       * cosine of the date — coldest in January, warmest in July — so the two
+       * pieces trade places gradually across spring and autumn.
+       */
+      const yearAt = (world.day % 288) / 288;
+      const winterness = 0.5 + 0.5 * Math.cos(yearAt * Math.PI * 2);
+      sound.music(winterness, 0.42);
 
       /*
        * The HUD, four times a second, by clock rather than by frame count.

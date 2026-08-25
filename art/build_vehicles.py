@@ -58,12 +58,21 @@ def wheels(name, axles, half_width, radius, length):
     """
     made = []
     m = lib.material('tyre', TYRE, rough=0.9)
+    # The axle runs *across* the vehicle, and for a long time it did not.
+    #
+    # `lib.cyl` builds along Z. The rotation here was `(0, pi/2, 0)`, which maps
+    # Z to X — so every wheel in the game had its axle pointing along the
+    # direction of travel, like a roller. It is invisible on a small wheel from
+    # four hundred feet, which is why it survived the whole fleet; a tractor has
+    # wheels big enough to see and it was obvious immediately.
+    #
+    # `(pi/2, 0, 0)` maps Z to Y, which is across the vehicle. Where a wheel goes.
     for i, ox in enumerate(axles):
         for side in (-1, 1):
             o = lib.cyl('%s_w%d%s' % (name, i, '+' if side > 0 else '-'),
                         radius, radius, half_width * 0.22,
                         loc=(ox * length, side * half_width * 0.92, radius),
-                        rot=(0, math.pi / 2, 0), segments=8)
+                        rot=(math.pi / 2, 0, 0), segments=8)
             o.data.materials.append(m)
             made.append(o)
     return made
@@ -218,6 +227,8 @@ def cab(name, length, half_width, height, floor):
 
 def tank_body(name, length, half_width, radius, floor):
     """A cylindrical tank, lying along the vehicle."""
+    # This one is right as it stands: a tank lies *along* the vehicle, so its
+    # axis really is X. Only the wheels were wrong.
     o = lib.cyl(name, radius, radius, length,
                 loc=(0, 0, floor + radius), rot=(0, math.pi / 2, 0), segments=10)
     o.data.materials.append(lib.material('tank', TANK, rough=0.35, metal=0.35))
@@ -353,7 +364,80 @@ def car(estate=False):
     return parts
 
 
+def tractor():
+    """A tractor, and it is nearly all wheels.
+
+    The silhouette is the whole job. At forty pixels a tractor and a van are the
+    same box unless the *back wheels are enormous* — that one proportion is what
+    the eye reads, and everything else here exists to hold it up: a narrow bonnet
+    in front, a tall thin cab set back over the rear axle, and a bar of an
+    implement dragging behind.
+
+    Painted in the livery slot like everything else, so a farm's tractor takes a
+    colour. Which is not quite right — a tractor belongs to the farm, not to the
+    haulier — and it is right *enough*, because what it buys is that no two
+    tractors in the district are the same colour.
+    """
+    L = TILE * 0.34
+    hw = 0.070
+    parts = []
+
+    # Bonnet: low and narrow, forward of the cab.
+    bonnet = lib.box('tr_bonnet', (L * 0.44, hw * 1.15, 0.072),
+                     loc=(L * 0.20, 0, 0.088), chamfer=0.005)
+    lib.repaint(bonnet, [(lib.livery_material(), lambda c: True)])
+    parts.append(bonnet)
+
+    # Cab: tall, glazed, set back.
+    f = Form(size=(L * 0.30, hw * 1.7, 0.115), at=(-L * 0.13, 0, 0.135))
+    f.bevel(amount=0.004)
+    cabin = f.build('tr_cab')
+    lib.repaint(cabin, [
+        (lib.material('trcab', (0.86, 0.86, 0.84, 1), rough=0.6), lambda c: True),
+        (lib.material('trglass', GLASS, rough=0.18), lambda c: c.z > 0.115),
+    ])
+    parts.append(cabin)
+    # A roof, because the flat top of the cab is what reads at this size.
+    parts.append(_tr_paint(lib.box('tr_roof', (L * 0.34, hw * 1.85, 0.012),
+                                   loc=(-L * 0.13, 0, 0.196)),
+                           (0.30, 0.31, 0.33, 1), 'trroof'))
+
+    tyre = lib.material('tyre', TYRE, rough=0.9)
+    # Rear wheels: the whole point. Nearly the height of the bonnet.
+    for i, side in enumerate((-1, 1)):
+        o = lib.cyl('tr_rear%d' % i, 0.072, 0.072, hw * 0.44,
+                    loc=(-L * 0.17, side * hw * 1.02, 0.072),
+                    rot=(math.pi / 2, 0, 0), segments=9)
+        o.data.materials.append(tyre)
+        parts.append(o)
+        f2 = lib.cyl('tr_front%d' % i, 0.040, 0.040, hw * 0.32,
+                     loc=(L * 0.30, side * hw * 0.86, 0.040),
+                     rot=(math.pi / 2, 0, 0), segments=8)
+        f2.data.materials.append(tyre)
+        parts.append(f2)
+
+    # The implement: a bar with tines, dragged. Says "working" rather than
+    # "driving", which is the difference between a tractor and a small lorry.
+    parts.append(_tr_paint(lib.box('tr_bar', (0.026, hw * 2.5, 0.020),
+                                   loc=(-L * 0.52, 0, 0.052)),
+                           (0.36, 0.24, 0.20, 1), 'trbar'))
+    for i in range(5):
+        y = (i / 4 - 0.5) * hw * 2.2
+        parts.append(_tr_paint(lib.box('tr_tine%d' % i, (0.014, 0.010, 0.038),
+                                       loc=(-L * 0.54, y, 0.030)),
+                               (0.42, 0.43, 0.45, 1), 'trtine'))
+
+    parts += lamps('tr', L * 0.44, -L * 0.50, hw, 0.150)
+    return parts
+
+
+def _tr_paint(obj, rgba, name):
+    obj.data.materials.append(lib.material(name, rgba, rough=0.7))
+    return obj
+
+
 BUILDS = [
+    ('veh_tractor', tractor),
     ('veh_car_saloon', lambda: car(False)),
     ('veh_car_estate', lambda: car(True)),
     ('veh_van_transit', lambda: van(False)),

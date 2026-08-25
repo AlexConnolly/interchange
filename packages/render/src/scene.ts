@@ -85,6 +85,18 @@ export interface RenderSource extends GroundSource, RoadSource {
    */
   vId: Int32Array;
   /**
+   * 1 while a vehicle is standing at a stop rather than travelling.
+   *
+   * The renderer eases a vehicle's drawn position toward the simulated one,
+   * which is what smooths the uneven arrival of positions from a variable number
+   * of ticks a frame. At a stop that easing is wrong: a lorry loading was seen to
+   * "aggressively bump the thing for a second or two", which is the drawn
+   * position still chasing a target that has just jumped to the far end of the
+   * link it arrived on. Standing still is a state, and it has to be said out
+   * loud.
+   */
+  vStopped: Uint8Array;
+  /**
    * Buildings. One per business, plus the village housing.
    *
    * Fed as a flat list rather than read off the world, because *which* of them
@@ -162,6 +174,7 @@ export class Renderer {
   private readonly material: MeshLambertMaterial;
   private readonly roadMaterial: MeshLambertMaterial;
   private readonly routeMaterial: MeshBasicMaterial;
+  private readonly streetGlow: MeshBasicMaterial;
   /** Everything that emits: cat's eyes and lamps. Unlit, additive, and its
    *  opacity is how far into the night we are. */
   private readonly glow: MeshBasicMaterial;
@@ -307,6 +320,23 @@ export class Renderer {
       transparent: true,
       opacity: 0.85,
       depthWrite: false,
+    });
+
+    /*
+     * The street lights, on their own dimmer.
+     *
+     * A copy of the glow material rather than the same one, because they are the
+     * one class of light that goes off while it is still dark: the village is lit
+     * until midnight and then it is not, which is both true of a lot of England
+     * and the single best thing that happens to this district at night.
+     */
+    this.streetGlow = new MeshBasicMaterial({
+      vertexColors: true,
+      side: DoubleSide,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      opacity: 0,
     });
 
     this.glow = new MeshBasicMaterial({
@@ -582,6 +612,21 @@ export class Renderer {
     // the darkness alone would suggest: by the time the ground is properly dark
     // the lights are already the brightest things on screen.
     this.glow.opacity = Math.min(1, this.night * 1.25);
+    /*
+     * And the street lights, which go out at midnight.
+     *
+     * `t` is 0.75 at midnight (the sun is at its lowest), so they burn from dusk
+     * until then and the small hours are properly dark — which is when the lit
+     * windows and a lorry's headlamps become the only things on screen, and the
+     * best-looking half hour of the day.
+     *
+     * Faded over a twentieth of a day rather than switched, because a whole
+     * district going dark in one frame reads as a bug however true it is.
+     */
+    const past = t - 0.75;
+    const dimming = past < 0 ? 1 : Math.max(0, 1 - past / 0.05);
+    this.streetGlow.opacity = this.glow.opacity * dimming;
+    this.streetOn = dimming;
   }
 
   /**
@@ -664,6 +709,8 @@ export class Renderer {
 
   /** How far into the night, 0..1. Read by the glow pass, and by the clock. */
   night = 0;
+  /** 1 while the street lights are burning, 0 after midnight. */
+  streetOn = 0;
   private readonly clear = new Color();
   private readonly sunRGB: [number, number, number] = [0, 0, 0];
 
@@ -773,7 +820,9 @@ export class Renderer {
         // 1985 is unmistakable. Higher and wider than a window, because it is
         // eight metres up and pointed at the road.
         light.color.setRGB(1, 0.62, 0.24);
-        light.intensity = this.night * 0.85;
+        // Times the same midnight switch, or the pools of light would stay on
+        // the road after the lamps above them had gone out.
+        light.intensity = this.night * 0.85 * this.streetOn;
         light.distance = 2.9;
         light.position.y += 0.16;
       } else if (c.warm) {
@@ -1021,7 +1070,12 @@ export class Renderer {
      */
     this.scatterLamps = models.map((model) => {
       if (!model.lamps) return null;
-      const mesh = new InstancedMesh(model.lamps, this.glow, capacity);
+      // Their own material, so the street lights can go out without taking the
+      // windows and the headlamps with them. The only lit thing in the scatter
+      // layer is the lamp post, so one material is exactly the right granularity
+      // — a per-instance colour would be three hundred writes a frame to say the
+      // same thing to every one of them.
+      const mesh = new InstancedMesh(model.lamps, this.streetGlow, capacity);
       mesh.castShadow = false;
       mesh.receiveShadow = false;
       mesh.frustumCulled = false;
@@ -1181,6 +1235,36 @@ export class Renderer {
     return top === -Infinity ? 0 : top;
   }
 
+  /**
+   * Throw away every built chunk, so the ground is rebuilt from scratch.
+   *
+   * The crop is baked into the chunk's vertex colours, which is what makes the
+   * ground one draw call per chunk and no per-frame work at all — and the price
+   * of that is that a field changing colour cannot be a uniform. It has to be
+   * rebuilt.
+   *
+   * That is fine because it is rare: the farming year turns a stage over about
+   * eight times, so this runs eight times in sixteen hours of play. Rebuilding
+   * the visible district takes a few frames and the streaming budget already
+   * handles arriving chunks gracefully, because that is the case it was written
+   * for.
+   */
+  dropChunks(): void {
+    for (const chunk of this.chunks.values()) {
+      this.scene.remove(chunk.ground);
+      chunk.ground.geometry.dispose();
+      if (chunk.roads) {
+        this.scene.remove(chunk.roads);
+        chunk.roads.geometry.dispose();
+      }
+      if (chunk.studs) {
+        this.scene.remove(chunk.studs);
+        chunk.studs.geometry.dispose();
+      }
+    }
+    this.chunks.clear();
+  }
+
   /** Bump to force the buildings to be laid out again — the caller does this
    *  when influence has grown and more of the district is visible. */
   placeRevision = 0;
@@ -1237,6 +1321,17 @@ export class Renderer {
       const id = src.vId[i];
       const want = Math.PI / 2 - src.vHeading[i] * Math.PI * 2;
       let seen = this.smooth.get(id);
+      if (seen !== undefined && src.vStopped[i] === 1) {
+        // Standing at a stop: leave it exactly where it is. No easing toward a
+        // target, because the target is no longer where the lorry is.
+        this.tmp.position.set(seen.x, y, seen.z);
+        this.tmp.rotation.set(0, seen.a, 0);
+        this.tmp.updateMatrix();
+        const at = this.counts[slot]++;
+        batch.setMatrixAt(at, this.tmp.matrix);
+        this.lamps[mi][li]?.setMatrixAt(at, this.tmp.matrix);
+        continue;
+      }
       if (seen === undefined || Math.abs(seen.x - x) + Math.abs(seen.z - z) > 3) {
         // New, or teleported: snap. Easing across a jump of three tiles would
         // draw a lorry sliding across a field.

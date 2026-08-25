@@ -37,6 +37,7 @@ import {
 } from './network.ts';
 import { Router, type RouteCosts } from './pathfinding.ts';
 import { TileRouter } from './tilerouter.ts';
+import { Crop, arableStage, grassStage } from './fields.ts';
 import { Heap } from './heap.ts';
 import {
   APPROVAL_DRIFT_PER_DAY, APPROVAL_PER_LOAD, APPROVAL_REST, PLANNING_FROM_VEHICLES,
@@ -603,6 +604,9 @@ export class World {
   }
 
   private stepDay(): void {
+    // The farming year, once a day. Cheap, and usually a no-op.
+    this.stepSeason();
+
     /*
      * Approval drifts back toward indifference.
      *
@@ -3121,6 +3125,54 @@ export class World {
     this.rebuild();
     return true;
   }
+
+  /**
+   * Move every field on to the stage the calendar says it should be at.
+   *
+   * Rewrites `terrain.fields.crop` in place and bumps `seasonRevision` when
+   * anything actually changed, so the renderer knows to rebuild the chunks it
+   * has cached. It is called once a day and usually changes nothing: stages turn
+   * over about eight times a year, so eight rebuilds a year against sixteen
+   * hours of play is not a cost worth avoiding.
+   *
+   * The *base* crop is kept alongside, because a stage is a function of the base
+   * and the month and cannot be derived from the current appearance — you cannot
+   * tell a ploughed arable field from a ploughed one that is really pasture, and
+   * without the base the whole district would drift into wheat.
+   */
+  stepSeason(): void {
+    const fields = this.terrain.fields;
+    if (this.cropBase === null) {
+      this.cropBase = new Uint8Array(fields.crop);
+    }
+    const month = this.month;
+    if (month === this.seasonMonth) return;
+    this.seasonMonth = month;
+
+    const size = this.config.size;
+    let changed = false;
+    for (let t = 0; t < size * size; t++) {
+      const p2 = fields.parcel[t];
+      if (p2 < 0) continue;
+      const base = this.cropBase[t] as Crop;
+      // A month either way, from the parcel id, so a valley does not turn gold
+      // in one frame.
+      const offset = ((p2 * 2654435761) >>> 0) % 3;
+      const want = base === Crop.Wheat || base === Crop.WheatRipe || base === Crop.Plough
+        ? arableStage(month, offset)
+        : grassStage(month, offset, base);
+      if (fields.crop[t] !== want) {
+        fields.crop[t] = want;
+        changed = true;
+      }
+    }
+    if (changed) this.seasonRevision++;
+  }
+
+  /** Bumped whenever the fields change appearance. The renderer watches it. */
+  seasonRevision = 0;
+  private seasonMonth = -1;
+  private cropBase: Uint8Array | null = null;
 
   /** Is this place one of yours, and a depot? For the panel's wording. */
   isDepot(site: number): boolean {

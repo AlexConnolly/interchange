@@ -55,6 +55,16 @@ export const MANIFEST = {
   click: 'ui-click.mp3',
   /** A slightly warmer one for a purchase going through. */
   confirm: 'ui-confirm.mp3',
+  /**
+   * Music, one track for the warm half of the year and one for the cold.
+   *
+   * Crossfaded on the *season* rather than switched, because a cut between two
+   * pieces of music is the most jarring thing an interface can do — and because
+   * the seasons themselves cross over: there is a fortnight in October that is
+   * neither, and the music should be neither too.
+   */
+  musicSummer: 'music-summer.mp3',
+  musicWinter: 'music-winter.mp3',
 } as const;
 
 export type SoundName = keyof typeof MANIFEST;
@@ -362,6 +372,28 @@ export class Sound {
     // Web Audio nodes are collected once they have finished and disconnected,
     // but only if nothing still references them — hence the explicit tidy.
     source.onended = () => { source.disconnect(); gain.disconnect(); };
+  }
+
+  /**
+   * The two music tracks, crossfaded by how far into winter it is.
+   *
+   * Both loop from the moment there is any music at all, and only their gains
+   * move. Starting the winter track when winter arrives would mean it always
+   * begins at its first bar on the first cold day, which is a cue — and a piece
+   * of background music that announces itself has stopped being background.
+   *
+   * `winter` is 0 in high summer and 1 in deep winter. The two gains are a
+   * constant-power pair rather than a linear pair: two tracks at half volume
+   * each are *quieter* than one at full, so a linear crossfade dips in the
+   * middle and the district goes oddly silent every April.
+   */
+  music(winter: number, volume: number): void {
+    const w = Math.max(0, Math.min(1, winter));
+    // sin/cos of a quarter turn: the squares sum to one, so total power holds.
+    const a = Math.cos(w * Math.PI / 2);
+    const b = Math.sin(w * Math.PI / 2);
+    this.ambientLevel('musicSummer', a * volume);
+    this.ambientLevel('musicWinter', b * volume);
   }
 
   /**

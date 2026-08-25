@@ -24,6 +24,8 @@ on names.
 | `rain.mp3` | Steady rain | **Looped**, long, same reason |
 | `ui-click.mp3` | Pressing something | Short and soft. It plays on *every* button, so anything with character in it will wear out fast |
 | `ui-confirm.mp3` | A purchase going through | Slightly warmer than the click |
+| `music-summer.mp3` | Background music, warm half of the year | **Looped.** Present: *Settled in F* |
+| `music-winter.mp3` | Background music, cold half | **Looped.** Present: *Room of Ashen Notes* |
 
 `.mp3` because every browser decodes it and the files are small. `.ogg` or
 `.wav` work too — change the extension in `MANIFEST` if you use them.
@@ -57,3 +59,7 @@ work.
   gap so they do not become a metronome.
 - **Clicks** are wired to every `button` in the interface by one listener, so
   nothing has to remember to make a noise.
+- **Music** is the two tracks running at once, crossfaded on how far into winter
+  it is, with a constant-power pair of gains so the middle of the fade is not a
+  dip. Both start together and never restart, so the winter track does not
+  announce the first cold day by beginning at its first bar.

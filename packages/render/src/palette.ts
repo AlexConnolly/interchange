@@ -36,10 +36,24 @@ export const CROP: RGB[] = [
   hex('#7fa04a'), // pasture
   hex('#8fae55'), // pasture, rich
   hex('#a8b656'), // meadow
-  hex('#d8c05e'), // wheat
-  hex('#e0cb70'), // wheat, ripe
+  hex('#9db855'), // wheat, away and still green
+  hex('#dfc164'), // wheat, ripe
   hex('#8c6a4c'), // ploughed
   hex('#8a9c68'), // rough grazing — unenclosed, so no hedge round it
+  /*
+   * The four stages of the arable year that were missing, and the spread between
+   * them is the point. Drilled earth is darker and greyer than ploughed because
+   * it has been rolled; growing wheat is a much bluer green than pasture; stubble
+   * is the palest thing in the district; bare ground after the straw is off is
+   * ploughed earth again but flatter.
+   *
+   * `wheat` moved too. It was a gold that belonged to a ripe crop, which left
+   * nothing for the three months of green between drilling and harvest.
+   */
+  hex('#6e5540'), // drilled: rolled earth, darker than ploughed
+  hex('#7e9c5f'), // growing: low and blue-green
+  hex('#d6cfa2'), // stubble: straw, the palest thing in the district
+  hex('#9a8464'), // bare: cleared, waiting for the plough
 ];
 
 export const LAND = {
