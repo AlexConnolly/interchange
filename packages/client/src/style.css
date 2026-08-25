@@ -467,7 +467,27 @@ html, body, #root, .app {
   font-size: 11px;
   font-weight: 650;
 }
+/* Green when you can start it, red when you cannot, blue when it is running.
+ *
+ * Three states rather than two, and the pill is where they belong because the
+ * pill is already the thing that decides whether an offer is an offer. Green is
+ * doing real work here: it is the only colour in the panel that means *press
+ * this*, and a list where three of nine rows are green is read in one glance
+ * where a list of nine identical rows is read one row at a time. */
+.needs.can { background: rgba(72, 156, 96, 0.18); color: #2f6b45; }
 .needs.cannot { background: rgba(208, 80, 80, 0.15); color: #a83c3c; }
+
+/* And the row itself, quietly.
+ *
+ * A tinted edge rather than a tinted row: the pill already carries the colour,
+ * and painting the whole row as well turns a list into a set of traffic lights.
+ * The blocked ones fade instead — still legible, still clickable, because a job
+ * you cannot take today is exactly the argument for buying a lorry and hiding it
+ * would remove the reason. */
+.job.ready { border-color: rgba(72, 156, 96, 0.42); background: rgba(240, 250, 242, 0.75); }
+.job.ready:hover { background: #f5fdf7; border-color: rgba(72, 156, 96, 0.6); }
+.job.blocked { opacity: 0.62; }
+.job.blocked:hover { opacity: 1; }
 .needs b { font-weight: 650; opacity: 0.75; }
 .needs b::before { content: "\00b7 "; }
 .pay i { font-style: normal; font-weight: 500; opacity: 0.55; font-size: 11px; }

@@ -194,6 +194,10 @@ export function Contracts({
    */
   const rows: {
     id: number; offered: boolean; running: boolean; vehicle: number; away: number;
+    /** A free lorry of the right sort, right now — so this can be said yes to. */
+    ready: string | null;
+    /** You own the right sort of lorry at all, free or not. */
+    ownsKind: boolean;
   }[] = [];
 
   /*
@@ -230,7 +234,31 @@ export function Contracts({
     const away = Math.hypot(
       world.sites.x[b.from[i]] - homeX, world.sites.y[b.from[i]] - homeZ,
     );
-    rows.push({ id: i, offered, running: vehicle >= 0, vehicle, away });
+    /*
+     * Can this actually be said yes to, today, with what is in the yard?
+     *
+     * "Why isn't it obvious which contracts I can commit to with the vehicles I
+     * have?" It was not, and the row was answering a different question: it named
+     * the *body the job needs* — "Tipper", "Chilled box" — and left the reader to
+     * remember what they owned and whether any of it was free. That is the one
+     * piece of arithmetic the game already knows and the player does not.
+     *
+     * Three states, not two, and the third is the one that makes the list useful.
+     * `driversFor` only returns vehicles with no service on them, so a suitable
+     * hit there means a lorry is standing in a yard able to start now.
+     * `fleetCanCarry` asks the weaker question — do you own that sort at all —
+     * and the gap between the two answers is "your tipper is out on a job", which
+     * is a completely different situation from "you have no tipper". One is wait
+     * ten minutes; the other is buy a lorry.
+     */
+    let ready: string | null = null;
+    let ownsKind = false;
+    if (offered) {
+      ownsKind = world.fleetCanCarry(b.cargo[i]);
+      const free = world.driversFor(i).find((d) => d.suitable);
+      if (free) ready = C.vehicles[world.vehicles.type[free.vehicle]].name;
+    }
+    rows.push({ id: i, offered, running: vehicle >= 0, vehicle, away, ready, ownsKind });
   }
 
   /*
@@ -246,9 +274,23 @@ export function Contracts({
     const ax = x.offered || !x.running ? 0 : 1;
     const ay = y.offered || !y.running ? 0 : 1;
     if (ax !== ay) return ax - ay;
+    /*
+     * Among the work waiting, the ones you can start beat the ones you cannot.
+     *
+     * A third key, above distance, because "near" is only worth reading once
+     * "possible" has been settled: an offer four tiles away that needs a tanker
+     * you do not own is further from being done than one across the district you
+     * have a free lorry for.
+     */
+    if (ax === 0) {
+      const cx = x.ready ? 0 : x.ownsKind ? 1 : 2;
+      const cy = y.ready ? 0 : y.ownsKind ? 1 : 2;
+      if (cx !== cy) return cx - cy;
+    }
     return x.away - y.away;
   });
   const waiting = rows.filter((r) => r.offered || !r.running).length;
+  const canStart = rows.filter((r) => r.ready !== null).length;
 
   return (
     <div className="bubble fixed">
@@ -259,7 +301,8 @@ export function Contracts({
           <div className="sheet-sub">
             {rows.length === 0 ? 'Nothing on the board'
               : waiting === 0 ? `${rows.length} on the go, all covered`
-                : `${waiting} waiting of ${rows.length}`}
+                : canStart === 0 ? `${waiting} waiting, none you can start`
+                  : `${canStart} you can start of ${waiting} waiting`}
           </div>
         </div>
         <button className="x" onClick={onClose} aria-label="Close">×</button>
@@ -277,7 +320,8 @@ export function Contracts({
           return (
             <button
               key={r.id}
-              className="job"
+              className={`job${r.ready !== null ? ' ready' : ''}`
+                + `${r.offered && r.ready === null ? ' blocked' : ''}`}
               onClick={() => (r.vehicle >= 0
                 ? onGoDriver(r.vehicle)
                 : onGoSite(b.from[r.id]))}
@@ -288,14 +332,22 @@ export function Contracts({
                 <span className="grow">{from.name} → {to.name}</span>
                 <span className="pay">{money(b.pay[r.id])}<i>/t</i></span>
               </span>
-              <span className={`needs ${r.running ? '' : 'cannot'}`}>
+              <span
+                className={`needs${r.running ? '' : r.ready !== null ? ' can' : ' cannot'}`}
+              >
                 <BodyIcon handling={cargo.handling} />
+                {/*
+                  * What the pill says depends on what you can do about it, and
+                  * naming the actual lorry is the point: "Refrigerated van free"
+                  * is an instruction, where "Chilled box" was a specification.
+                  */}
                 {r.running
                   ? `${C.vehicles[world.vehicles.type[r.vehicle]].name} · ${b.delivered[r.id]} loads`
-                  : bodyFor(cargo.handling)}
-                {/* What to do about it, which differs: an offer wants taking,
-                    a contract with no lorry wants one putting on it. */}
-                {r.offered && <b>free to take</b>}
+                  : r.ready !== null ? r.ready
+                    : bodyFor(cargo.handling)}
+                {r.offered && r.ready !== null && <b>free — take it</b>}
+                {r.offered && r.ready === null && r.ownsKind && <b>yours are all out</b>}
+                {r.offered && r.ready === null && !r.ownsKind && <b>none in your fleet</b>}
                 {!r.offered && !r.running && <b>nobody on it</b>}
               </span>
             </button>
