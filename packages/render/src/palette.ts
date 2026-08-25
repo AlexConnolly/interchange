@@ -54,6 +54,23 @@ export const CROP: RGB[] = [
   hex('#7e9c5f'), // growing: low and blue-green
   hex('#d6cfa2'), // stubble: straw, the palest thing in the district
   hex('#9a8464'), // bare: cleared, waiting for the plough
+  /*
+   * And the woods, which are the darkest ground in the district by a distance.
+   *
+   * That is the whole job of these two colours. The trees do the drawing, but a
+   * canopy has gaps and what shows through them has to read as forest floor, not
+   * as the pasture next door with trees standing on it. Everything else in `CROP`
+   * sits between #7f and #df; these sit twenty per cent below the darkest of them,
+   * so a wood is a dark mass at any zoom, including the one where the trees are
+   * three pixels tall and the colour is all there is.
+   *
+   * Broadleaf is warm and slightly olive — leaf litter and dappled light.
+   * Plantation is colder and bluer, which is the actual difference between an
+   * oak wood and a spruce block seen from a hill, and the reason conifers are
+   * the thing people object to on a skyline.
+   */
+  hex('#4e6b39'), // broadleaf wood: dark, warm, a little olive
+  hex('#3c5844'), // conifer plantation: darker still, and blue with it
 ];
 
 export const LAND = {

@@ -12,7 +12,7 @@
 import { ACCESS_SCALE, AUTHORITY, DIR_BIT, DIR_DX, DIR_DY, DIR_OPPOSITE, Mode } from './constants.ts';
 import { NONE } from './network.ts';
 import { generateRoads } from './roadnet.ts';
-import { Crop } from './fields.ts';
+import { Crop, isWood } from './fields.ts';
 import { Deposit, SEA_LEVEL, TileFlag, type Terrain } from './terrain.ts';
 import { Charter } from './economy.ts';
 import { SiteState } from './sites.ts';
@@ -228,12 +228,16 @@ export function generateWorld(w: World): void {
     const sumX = new Float64Array(n);
     const sumY = new Float64Array(n);
     const tally = new Int32Array(n);
+    // What the field generator decided, before this pass has an opinion. Only
+    // the woods are read back out of it — see below.
+    const firstCrop = new Int32Array(n).fill(-1);
     for (let t = 0; t < size * size; t++) {
       const p2 = fields.parcel[t];
       if (p2 < 0 || p2 >= n) continue;
       sumX[p2] += t % size;
       sumY[p2] += (t / size) | 0;
       tally[p2]++;
+      firstCrop[p2] = fields.crop[t];
     }
 
     /** Beyond this, nobody is farming it. Twenty tiles is a long walk with a
@@ -250,6 +254,22 @@ export function generateWorld(w: World): void {
         const d = Math.hypot(farms[f].x - cx2, farms[f].y - cy2);
         if (d < bestD) { bestD = d; nearest = f; }
       }
+      /*
+       * A wood keeps what it was given, near a farm or far from one.
+       *
+       * This pass decides land use from the nearest farm, and it runs *after* the
+       * field generator — so whatever it does not explicitly preserve, it
+       * overwrites. That is where the woodland went the first time: the generator
+       * planted the steep parcels, every one of them was then either handed to a
+       * farm and turned back into wheat or put out of reach and flattened to
+       * rough, and the crop histogram came out with no trees in it at all. No
+       * error anywhere. Both passes were doing exactly what they said.
+       *
+       * Slope is the argument for a wood, and this pass cannot see slope. So the
+       * generator's verdict stands: a farm with a wood on the hill above it
+       * simply has a wood on the hill above it, which is most English farms.
+       */
+      if (isWood(firstCrop[p2])) { cropOf[p2] = firstCrop[p2]; continue; }
       if (nearest < 0 || bestD > REACH) continue;
       /*
        * Variation *within* the holding, keyed off the parcel id.

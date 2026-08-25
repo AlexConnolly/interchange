@@ -14,7 +14,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  createWorld, Mode, NO_WAY, TICKS_PER_DAY, facilitiesFor, type World,
+  createWorld, Crop, Mode, NO_WAY, TICKS_PER_DAY, facilitiesFor, isWood,
+  type World,
 } from '@interchange/sim';
 import { loadContent } from '@interchange/data';
 import {
@@ -47,10 +48,33 @@ const DISTRICT = 128;
  * How many things the instanced scatter layer can hold: trees, field props and
  * street lamps together.
  *
- * One number for all three because they are one draw call, and the passes that
- * fill it are ordered by how much their absence hurts — see the note above them.
+ * One number for all three because they are one draw call per model, and the
+ * passes that fill it are ordered by how much their absence hurts — see the note
+ * above them.
+ *
+ * Seven thousand, up from eighteen hundred, and the whole of the increase is the
+ * woods. A district is a tenth to a sixth woodland and a wood needs three or four
+ * trees to the tile to close its canopy, which is four to five thousand trees on
+ * its own — an order of magnitude more than the hedgerows ever wanted. Measured
+ * across three seeds: 2,830, 3,542 and 4,741 trees of woodland.
+ *
+ * It is a district-wide figure, not a drawn one. What actually reaches the
+ * renderer is filtered by influence every frame, so early on this is mostly
+ * headroom.
  */
-const SCATTER_MAX = 1800;
+const SCATTER_MAX = 7000;
+
+/**
+ * Per-model instance capacity in the renderer's scatter batches.
+ *
+ * Separate from `SCATTER_MAX` because the two bound different things: that is
+ * how many objects exist, this is how many of *one model* can be drawn. They
+ * cannot be the same number without allocating the whole budget twenty times
+ * over, and the split has to be generous rather than exact — a conifer wood is
+ * one species by definition, so a single plantation sends a thousand instances
+ * to `tree_pine` and none to anything else.
+ */
+const SCATTER_BATCH = 2600;
 
 /**
  * One audio engine for the page.
@@ -72,6 +96,18 @@ const sound = new Sound();
 const TREE_MODELS = [
   'tree_oak', 'tree_ash', 'tree_hawthorn', 'tree_pine', 'tree_autumn', 'tree_bare',
 ];
+
+/**
+ * The three at the front are the broadleaves, and the order above is load-bearing.
+ *
+ * A wood picks from a *slice* of the list rather than from all of it, because the
+ * whole point of the two woodland types is that they do not share species: a
+ * plantation is pines and nothing else, and an oak wood with a bare tree and an
+ * autumn tree scattered through it in June is a wood in three seasons at once.
+ * The hedgerows keep using the full set, where that variety is exactly right.
+ */
+const BROADLEAF_MODELS = 3;
+const PINE = TREE_MODELS.indexOf('tree_pine');
 
 /**
  * What stands in a field, and which crop wants which.
@@ -806,26 +842,66 @@ export function App(): JSX.Element {
           const t = z * DISTRICT + x;
           if (height[t] <= 0) continue;
           if (roadClass[t] >= 0) continue;
+          const wood = isWood(crop[t]);
+          /*
+           * How many trees stand on this tile.
+           *
+           * Woodland is the only case that puts down more than one, and it has to:
+           * a wood is a *canopy*, and a canopy at one tree per tile is an orchard.
+           * Three with a fourth on most tiles closes it over at this scale, which
+           * is what makes a wood a dark mass with a hard edge rather than a patch
+           * of dark ground with trees standing about on it.
+           */
           const r = hash(x, z);
-          // The rough grazing is scrub; the boundaries are hedgerow; the middle
-          // of a worked field is nearly bare.
-          const chance = crop[t] === 6 ? 0.22 : boundary(t, x, z) ? 0.09 : 0.007;
-          if (r > chance) continue;
-          // One dominant species per block of eight tiles.
-          const local = hash(x >> 3, (z >> 3) + 4096);
-          const stray = hash(x + 7919, z + 104729);
-          const kind = stray < 0.22
-            ? Math.floor(hash(x + 31, z + 17) * TREE_MODELS.length)
-            : Math.floor(local * TREE_MODELS.length);
-          trees.push({
-            // Off the tile centre, or a hedgerow reads as a row of fenceposts.
-            x: x + 0.18 + hash(x + 1, z) * 0.64,
-            z: z + 0.18 + hash(x, z + 1) * 0.64,
-            model: Math.min(TREE_MODELS.length - 1, Math.max(0, kind)),
-            rot: hash(x + 3, z + 5),
-            // A stand of identical trees is a wallpaper. Half again either way.
-            scale: 0.78 + hash(x + 11, z + 13) * 0.55,
-          });
+          let many: number;
+          if (wood) {
+            many = 3 + (hash(x + 41, z + 43) < 0.6 ? 1 : 0);
+          } else {
+            // The rough grazing is scrub; the boundaries are hedgerow; the middle
+            // of a worked field is nearly bare.
+            const chance = crop[t] === 6 ? 0.22 : boundary(t, x, z) ? 0.09 : 0.007;
+            many = r > chance ? 0 : 1;
+          }
+          for (let k = 0; k < many && trees.length < SCATTER_MAX; k++) {
+            /*
+             * Which tree, and a wood is not a random mixture.
+             *
+             * A plantation is one species — that is the definition of a plantation
+             * and the reason it looks the way it does — so a conifer wood is pines
+             * with nothing else in it at all. A broadleaf wood is mixed, but mixed
+             * within a block, which is what the existing "one dominant species per
+             * eight tiles" already gives: a stand of oak running into a stand of
+             * ash reads as a real wood, where a per-tree lottery reads as noise.
+             */
+            const local = hash(x >> 3, (z >> 3) + 4096);
+            const stray = hash(x + 7919 + k * 131, z + 104729 + k * 977);
+            let kind: number;
+            if (crop[t] === Crop.Conifer) {
+              kind = PINE;
+            } else if (wood) {
+              kind = stray < 0.30
+                ? Math.floor(hash(x + 31 + k * 17, z + 17 + k * 29) * BROADLEAF_MODELS)
+                : Math.floor(local * BROADLEAF_MODELS);
+            } else {
+              kind = stray < 0.22
+                ? Math.floor(hash(x + 31, z + 17) * TREE_MODELS.length)
+                : Math.floor(local * TREE_MODELS.length);
+            }
+            trees.push({
+              // Off the tile centre, or a hedgerow reads as a row of fenceposts.
+              // Several to a tile need the whole tile, or a wood reads as clumps.
+              x: x + 0.12 + hash(x + 1 + k * 53, z + k * 61) * 0.76,
+              z: z + 0.12 + hash(x + k * 71, z + 1 + k * 83) * 0.76,
+              model: Math.min(TREE_MODELS.length - 1, Math.max(0, kind)),
+              rot: hash(x + 3 + k * 7, z + 5 + k * 11),
+              // A stand of identical trees is a wallpaper. Half again either way.
+              // Woodland runs taller and tighter: trees in a wood are drawn up by
+              // their neighbours, and the variation between them is smaller.
+              scale: wood
+                ? 0.92 + hash(x + 11 + k * 13, z + 13 + k * 17) * 0.42
+                : 0.78 + hash(x + 11, z + 13) * 0.55,
+            });
+          }
         }
       }
 
@@ -895,8 +971,16 @@ export function App(): JSX.Element {
           }
         }
       }
+      const crops = world.terrain.fields.crop;
       for (const [p2, b] of bounds) {
         if (b.x1 - b.x0 < 3 || b.z1 - b.z0 < 3) continue;
+        // Not a wood. Woodland is a parcel like any other so that it gets an id
+        // and a colour, which means it turns up here looking exactly like a large
+        // field — and a combine driving up and down inside a forest is the sort of
+        // thing that is funny once.
+        if (isWood(crops[b.z0 * DISTRICT + b.x0])
+          || isWood(crops[Math.round((b.z0 + b.z1) / 2) * DISTRICT
+            + Math.round((b.x0 + b.x1) / 2)])) continue;
         // The nearest road tile to the field's edge, searched outward from the
         // bounding box. Bounded, because a field with no road within six tiles is
         // one no tractor is getting to.
@@ -1245,7 +1329,9 @@ export function App(): JSX.Element {
         console.warn(`[scatter] no model for: ${kit.missing.join(', ')}`);
       }
       const ordered = scatterNames.map((n) => kit.models.get(n)).filter((m) => m !== undefined);
-      if (ordered.length === scatterNames.length) renderer.setScatterModels(ordered);
+      if (ordered.length === scatterNames.length) {
+        renderer.setScatterModels(ordered, SCATTER_BATCH);
+      }
     });
     void loadKit(placeNames).then((kit) => {
       if (kit.missing.length > 0) {

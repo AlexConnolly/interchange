@@ -38,7 +38,7 @@ import {
 import { Router, type RouteCosts } from './pathfinding.ts';
 import { TileRouter } from './tilerouter.ts';
 import {
-  Crop, GROWING, NEEDS_WORK, arableStage, grassStage, springSown,
+  Crop, GROWING, NEEDS_WORK, arableStage, grassStage, isWood, springSown,
 } from './fields.ts';
 import { Heap } from './heap.ts';
 import {
@@ -3238,6 +3238,9 @@ export class World {
       const p2 = fields.parcel[t];
       if (p2 < 0) continue;
       const base = this.cropBase[t] as Crop;
+      // A wood is not in the rotation. It is the same wood in February as it is
+      // in August, and running it through `grassStage` would have it cut for hay.
+      if (isWood(base)) continue;
       // A month either way, from the parcel id, so a valley does not turn gold
       // in one frame.
       const offset = ((p2 * 2654435761) >>> 0) % 3;
@@ -3308,6 +3311,10 @@ export class World {
     const fields = this.terrain.fields;
     if (!want || tile < 0 || tile >= fields.crop.length) return 'none';
     if (fields.parcel[tile] < 0) return 'none';
+    // Nobody drives a tractor through a wood. Belt and braces — the client also
+    // keeps woodland off the list of workable fields — but this is the answer to
+    // the question rather than a filter somebody has to remember to apply.
+    if (isWood(fields.crop[tile])) return 'none';
     const stage = want[tile] as Crop;
     if (fields.crop[tile] === stage || !NEEDS_WORK.has(stage)) {
       /*

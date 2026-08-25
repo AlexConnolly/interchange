@@ -123,17 +123,37 @@ describe('vehicles on the road', () => {
  *
  * The renderer derives a vehicle's facing from how it is moving, so for a few
  * frames after each junction a vehicle faced the flip rather than the road, and a
- * van turning left span the long way round. Halving the road speeds made it far
- * worse, because the jump stayed the same size while the real motion halved.
+ * van turning left span the long way round.
  *
- * So the assertion is simply that the largest step is a plausible step. Anything
- * that reintroduces a positional discontinuity here brings the spin back with it.
+ * What it is compared against is the vehicle's *own speed*, and getting to that
+ * took two wrong versions worth recording.
+ *
+ * The first compared each step against a hardcoded 0.12 tiles — the top speed on
+ * the roads the opening vehicle happened to use. It broke the day the world
+ * generator changed: adding woodland shifted every later rng draw, the district
+ * came out different, the van found a fast road and legitimately reached 0.186. A
+ * test that fails when the map changes is measuring the map.
+ *
+ * The second compared each step against the one before it, bounded by `DECEL`, on
+ * the reasoning that the sim caps how fast a speed may change. That is true of
+ * speed *along the road* and false of the straight line between two samples: a
+ * link bends, the vehicle rounds the corner at a constant speed, and the chord
+ * between consecutive positions is shorter than the arc. It flagged every corner
+ * in the district — measured 0.0303 against a bound of 0.0089, all of it real
+ * cornering.
+ *
+ * The traffic model advances a vehicle by `pos += speed` along its path, so the
+ * straight-line step is *exactly* the speed on a straight and strictly less than
+ * it through a bend. That makes the speed an exact ceiling with no constant in it
+ * anywhere: it needs no tuning, survives any map, and the junction flip fails it
+ * by three times over.
  */
 describe('the simulated path is continuous', () => {
-  it('never moves a vehicle further in one tick than it could drive', () => {
+  it('never moves a vehicle further in one tick than its own speed', () => {
     const w = district();
     let prev: { x: number; z: number } | null = null;
     let worst = 0;
+    let moved = 0;
     for (let t = 0; t < TICKS_PER_DAY * 2; t++) {
       w.step();
       w.project();
@@ -141,12 +161,21 @@ describe('the simulated path is continuous', () => {
         if (!w.vehicles.alive[v] || w.vehicles.company[v] !== w.player) continue;
         if (w.vehicles.link[v] === -1) { prev = null; continue; }
         const at = { x: w.vehicles.x[v] / 65536, z: w.vehicles.y[v] / 65536 };
-        if (prev) worst = Math.max(worst, Math.hypot(at.x - prev.x, at.z - prev.z));
+        if (prev) {
+          const step = Math.hypot(at.x - prev.x, at.z - prev.z);
+          // Against the speed it is travelling at *now*, which is the one that
+          // produced this step: the model accelerates and then moves.
+          const may = w.vehicles.speed[v] / 65536;
+          worst = Math.max(worst, step - may);
+          moved = Math.max(moved, step);
+        }
         prev = at;
       }
     }
-    expect(worst).toBeGreaterThan(0);
-    // Top speed is about 0.073 tiles a tick; the junction flip was 0.234.
-    expect(worst).toBeLessThan(0.12);
+    // It has to have gone somewhere, or the whole thing measures a parked van.
+    expect(moved).toBeGreaterThan(0.01);
+    // A thousandth of a tile of slack for the rounding in Q16.16, and nothing
+    // else. Anything above this is a position that was not driven to.
+    expect(worst).toBeLessThan(1e-3);
   });
 });

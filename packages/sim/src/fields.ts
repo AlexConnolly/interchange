@@ -55,9 +55,38 @@ export const Crop = {
   Stubble: 9,
   /** Cut and cleared, waiting for the plough. */
   Bare: 10,
+  /*
+   * Woodland, and it is a land use rather than a crop.
+   *
+   * The district had no woods at all: trees appeared along hedgerows and thinly
+   * over rough grazing, which is a countryside of *field boundaries* and nothing
+   * else. England is a tenth woodland, and a wood is the one landscape feature
+   * that reads at any zoom — a dark mass with a hard edge, against fields that
+   * are all pale and all flat. Leaving it out made every part of the map look
+   * like every other part.
+   *
+   * Two kinds, because the difference is one of the clearest things in a British
+   * landscape and it costs one enum value. Broadleaf is the old wood in the
+   * corner of a farm: irregular, mixed, mid-green. Conifer is the plantation —
+   * planted on ground nobody could farm, darker, bluer, and unmistakably square,
+   * which is exactly why people complain about them.
+   */
+  Wood: 11,
+  Conifer: 12,
 } as const;
 export type Crop = (typeof Crop)[keyof typeof Crop];
-export const CROP_COUNT = 11;
+export const CROP_COUNT = 13;
+
+/**
+ * Is this land under trees?
+ *
+ * Asked in four places — the seasons, the tractors, the hedges and the scatter —
+ * and every one of them wants "trees" rather than "which trees", so the question
+ * is worth having a name.
+ */
+export function isWood(c: number): boolean {
+  return c === Crop.Wood || c === Crop.Conifer;
+}
 
 /**
  * The arable year, in order, with the month each stage begins.
@@ -192,6 +221,11 @@ export function grassStage(month: number, offset: number, base: Crop): Crop {
  *  not, and getting that wrong is visible immediately. */
 const ARABLE: Crop[] = [Crop.Wheat, Crop.WheatRipe, Crop.Plough];
 const GRASS: Crop[] = [Crop.Pasture, Crop.PastureRich, Crop.Meadow];
+// One each, because a wood is not a rotation: unlike a field it is the same
+// thing every year, and the variety in it comes from the trees rather than from
+// the ground under them.
+const BROADLEAF: Crop[] = [Crop.Wood];
+const CONIFER: Crop[] = [Crop.Conifer];
 
 /** No parcel here — water, or too steep to be worth enclosing. */
 export const NO_PARCEL = -1;
@@ -303,12 +337,40 @@ export function generateFields(
     }
     if (tiles === 0 || land / tiles < 0.45) continue;
     const meanSlope = slope / Math.max(1, land);
-    // Flat ground gets arable, slopes get grass, and anything steeper than the
-    // threshold is left unenclosed.
-    const list = meanSlope > settings.maxSlope ? null
-      : meanSlope > settings.maxSlope * 0.55 ? GRASS
+    /*
+     * Flat ground gets arable, slopes get grass, and steep ground gets planted.
+     *
+     * The steep parcels used to be dropped and left as unenclosed rough, which
+     * is where the district's total absence of woodland came from — the one
+     * category of land that in England reliably *is* a wood was the one category
+     * being thrown away. Ground too steep to plough is not empty. It is grazed,
+     * or it is under trees, and which of the two it is is the difference between
+     * a bare hillside and a wooded one.
+     *
+     * One steep parcel in four, and the proportion is the whole of the tuning.
+     * Rather more than half the parcels in a district come out above `maxSlope`,
+     * so planting even two thirds of them put a third of the map under trees —
+     * which reads as Scandinavia. The point of an English wood is that it is a
+     * dark patch in a green quilt rather than the quilt itself, and the rest of
+     * the steep ground stays what it was: open hill.
+     */
+    let list: readonly Crop[] | null;
+    if (meanSlope > settings.maxSlope) {
+      if (!rng.chance(1, 4)) continue;
+      // The steepest goes to plantation, which is exactly how it happened: the
+      // Forestry Commission planted conifers on the ground nobody else wanted.
+      list = meanSlope > settings.maxSlope * 2.2 ? CONIFER : BROADLEAF;
+    } else if (meanSlope > settings.maxSlope * 0.55) {
+      // A hanging wood on the shoulder of a hill. One parcel in ten, which is
+      // enough that a wood turns up in the middle distance without the hillsides
+      // closing over.
+      list = rng.chance(1, 10) ? BROADLEAF : GRASS;
+    } else {
+      // And a spinney down on the flat, rarer still: on good land trees are what
+      // you keep rather than what you plant.
+      list = rng.chance(1, 24) ? BROADLEAF
         : rng.chance(1, 2) ? ARABLE : GRASS;
-    if (!list) continue;
+    }
     const c = list[rng.int(list.length)];
     const id = kept++;
     for (let y = b.y0; y < b.y1; y++) {
@@ -338,5 +400,18 @@ export function hedgeBetween(f: FieldMap, a: number, b: number): boolean {
   // A boundary needs a field on at least one side. The edge of the enclosed
   // land meets rough grazing, moor or water with no hedge, which is right:
   // nobody planted a hedgerow along a cliff.
-  return pa !== NO_PARCEL && pb !== NO_PARCEL;
+  if (pa === NO_PARCEL || pb === NO_PARCEL) return false;
+  /*
+   * And two woods that meet are one wood.
+   *
+   * Woodland is a parcel like any other so that it gets an id, a colour and a
+   * shape — but the subdivision that produced those parcels was dividing *land*,
+   * not planting, so a large wood arrives as three or four boxes side by side.
+   * Fencing between them would draw a hedgerow through the middle of a forest.
+   *
+   * The boundary between a wood and a field stays, because that one is real: it
+   * is the fence that keeps the stock out of the trees, and it is what gives a
+   * wood the hard edge that makes it read as a wood.
+   */
+  return !(isWood(f.crop[a]) && isWood(f.crop[b]));
 }
