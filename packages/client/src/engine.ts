@@ -169,10 +169,41 @@ export class Engine {
    * sixty hertz. The cost is paid once, where the player has just asked a
    * question and expects a moment of thought.
    */
+  /** Coarse amenity cells expanded to tiles, for the overlay. */
+  private liveAmenity: Uint8Array | null = null;
+
+  private expandAmenity(): void {
+    const w = this.world;
+    const size = w.config.size;
+    if (!this.liveAmenity || this.liveAmenity.length !== size * size) {
+      this.liveAmenity = new Uint8Array(size * size);
+    }
+    const out = this.liveAmenity;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) out[y * size + x] = w.amenity.at(x, y);
+    }
+  }
+
   private buildOverlayField(mode: OverlayMode): void {
     const src = this.buildSource();
     const w = this.world;
     const size = w.config.size;
+    if (mode === OverlayMode.Amenity) {
+      /*
+       * The live field, not the generated base.
+       *
+       * The overlay used to draw terrain.amenityBase, which is what the region
+       * was like before anybody arrived and never changes — so the one view in
+       * the game whose entire job is to show what industry has done to the
+       * place showed a picture in which industry had done nothing. The
+       * simulation keeps the real field on a coarse grid, so it is expanded
+       * here, once, when the player asks the question.
+       */
+      this.expandAmenity();
+    } else {
+      this.liveAmenity = null;
+    }
+
     if (mode === OverlayMode.Catchment) {
       // Population reachable within a commute, splatted from the towns over
       // the land. A tile-space approximation of the network catchment the
@@ -295,7 +326,7 @@ export class Engine {
         height: w.terrain.height,
         biome: w.terrain.biome,
         flags: w.terrain.flags,
-        amenity: w.terrain.amenityBase,
+        amenity: this.liveAmenity ?? w.terrain.amenityBase,
         wayClass: w.layers.map((l) => l.cls),
         wayDir: w.layers.map((l) => l.dir),
         wayAsset: w.layers.map((l) => l.asset),

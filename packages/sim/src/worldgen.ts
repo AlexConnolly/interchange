@@ -273,6 +273,9 @@ function buildPublicRoads(w: World): void {
   }
 
   generateSeaways(w);
+  // The field starts at whatever the terrain deserves, before anybody has
+  // done anything to it.
+  w.amenity.seed(t);
 }
 
 /**

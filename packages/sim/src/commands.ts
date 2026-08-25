@@ -56,6 +56,9 @@ export const Cmd = {
   // --- industry (Act III) ------------------------------------------------
   FoundIndustry: 60,
   DemolishSite: 61,
+  /** Pay to restore the ground around a tile. design.md 2.3: the late game
+   *  gets a redemption arc rather than only a ratchet. */
+  Remediate: 62,
 
   // --- meta --------------------------------------------------------------
   GrantCharter: 70,

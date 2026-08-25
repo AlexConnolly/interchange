@@ -27,6 +27,7 @@ import {
   Climate, EventTable, stepEvents, floodSeverity, strikePercent,
   runningCostPercent, ratePercent, FLOOD_LINE, EVENT_NAMES, EventKind, WEATHER_NAMES, Weather,
 } from './weather.ts';
+import { AmenityField, stepAmenity, REMEDIATION_PRICE, REMEDIATION_FROM_ERA } from './amenity.ts';
 import { RegulatorTable, stepRegulator, accessChargeFor, Intervention, INTERVENTION_NAMES } from './regulation.ts';
 import {
   AssetTable, Graph, NONE, NO_WAY, WayLayer, hashNetwork, rebuildGraph,
@@ -127,6 +128,9 @@ export class World {
    *  against each company. design.md 3.7. */
   readonly regulator = new RegulatorTable();
   /** The sky, and the things that go wrong under it. features.md 11 and 15. */
+  /** What the region is like to be in, and what industry has done to it.
+   *  design.md 2.3. */
+  readonly amenity: AmenityField;
   readonly climate = new Climate();
   readonly events = new EventTable();
   private lastEra = 0;
@@ -227,6 +231,8 @@ export class World {
       labourNeed: new Int32Array(n),
       fromEra: new Uint8Array(n),
       cargoFromEra: new Uint8Array(content.cargo.length),
+      amenityPenalty: new Int32Array(content.industries.length),
+      amenityRadius: new Int32Array(content.industries.length),
       // Era 3 is when transmission lines and treatment works first exist, so
       // it is the earliest era in which the requirement could be met.
       networkFromEra: 3,
@@ -258,6 +264,8 @@ export class World {
       this.recipes.waterNeed[i] = ind.waterNeed;
       this.recipes.labourNeed[i] = ind.labourNeed;
       this.recipes.fromEra[i] = ind.fromEra;
+      this.recipes.amenityPenalty[i] = ind.amenityPenalty;
+      this.recipes.amenityRadius[i] = ind.amenityRadius;
     });
 
     /*
@@ -286,6 +294,7 @@ export class World {
     this.rebuildTownBasket(1);
 
     this.routeCosts = { speedLimit: this.waySpeed, valueOfTime: content.balance.valueOfTime };
+    this.amenity = new AmenityField(this.config.size);
     this.router = new Router(MAX_COMPANIES, 100000);
   }
 
@@ -561,6 +570,7 @@ export class World {
     if (this.dayOfMonth === 0 && this.day > 0) this.companies.closeMonth();
     if (this.tick % TICKS_PER_YEAR === 0 && this.tick > 0) this.companies.closeYear();
     this.stepWeather();
+    if (this.dayOfMonth === 0) this.stepAmenityField();
     this.stepRegulation();
     this.checkCharters();
   }
@@ -1499,6 +1509,33 @@ export class World {
   }
 
   /**
+   * What the region is like to be in, once a month.
+   *
+   * Monthly rather than daily because the fastest thing in the field moves
+   * eighteen points a year, so a daily pass would spend real time computing a
+   * number that had not changed. The site copy at the end is what lets a
+   * resort read its own surroundings without every production cycle walking a
+   * grid.
+   */
+  private stepAmenityField(): void {
+    stepAmenity(this.amenity, this.sites, {
+      size: this.config.size,
+      penaltyOf: (def) => this.recipes.amenityPenalty[def],
+      radiusOf: (def) => this.recipes.amenityRadius[def],
+      trafficAt: (tile) => {
+        const link = this.layers[Mode.Road].link[tile];
+        if (link === NONE || link === undefined) return 0;
+        const cap = Math.max(1, this.graph.linkCellCount[link] * 4);
+        return Math.min(1, this.graph.linkFlowPrev[link] / cap);
+      },
+      yearFraction: DAYS_PER_MONTH / DAYS_PER_YEAR,
+    });
+    for (let s = 0; s < this.sites.count; s++) {
+      this.sites.amenity[s] = this.amenity.at(this.sites.x[s], this.sites.y[s]);
+    }
+  }
+
+  /**
    * The sky, once a day.
    *
    * Both halves are announced. A player whose lorries have slowed by a third
@@ -1768,6 +1805,9 @@ export class World {
       case Cmd.ListAsset:
         if (this.assets.owner[c.a] === c.issuer) this.assets.forSale[c.a] = c.b ? 1 : 0;
         break;
+      case Cmd.Remediate:
+        this.remediate(c.issuer, c.a, c.b);
+        break;
       case Cmd.BuildWay:
         // Tile list in `data`, because a route is the one payload that will
         // not fit in four integers. Still a few hundred bytes in the log.
@@ -1846,6 +1886,72 @@ export class World {
    * therefore charge — so this is also where the first asset a company owns
    * comes from, and where the rent line in the income statement starts.
    */
+  /**
+   * Pay to mend the ground. design.md 2.3.
+   *
+   * The design asks for a redemption arc rather than only a ratchet, and the
+   * shape of that is deliberately asymmetric: spoiling is instant and free —
+   * it is a side effect of a pit that is making you money — while mending is
+   * slow, expensive, and something you have to choose. Remediation buys credit
+   * that the monthly pass spends down over years; it does not repaint the
+   * valley the afternoon you pay for it.
+   *
+   * Radius is in amenity cells rather than tiles, because that is the grid the
+   * field is on and pretending otherwise would let a player pay for precision
+   * the model does not have.
+   */
+  remediate(company: number, tile: number, radiusCells: number): boolean {
+    if (this.era < REMEDIATION_FROM_ERA) {
+      this.onEvent?.('refused', 'Nobody restores land yet. That comes later in the century.');
+      return false;
+    }
+    if (this.companies.charter[company] < Charter.Land) {
+      this.onEvent?.('refused', 'Restoring land is a matter for a land charter.');
+      return false;
+    }
+    const size = this.config.size;
+    const x = tile % size;
+    const y = (tile / size) | 0;
+    const centre = this.amenity.cellOf(x, y);
+    const cols = this.amenity.cols;
+    const r = Math.max(0, Math.min(8, radiusCells));
+    const cx = centre % cols;
+    const cy = (centre / cols) | 0;
+
+    let deficit = 0;
+    const cells: number[] = [];
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= cols || ny >= this.amenity.rows) continue;
+        if (dx * dx + dy * dy > r * r) continue;
+        const c = ny * cols + nx;
+        const gap = this.amenity.potential[c] - this.amenity.current[c] - this.amenity.restored[c];
+        if (gap <= 0) continue;
+        deficit += gap;
+        cells.push(c);
+      }
+    }
+    if (deficit <= 0) {
+      this.onEvent?.('refused', 'There is nothing wrong with the ground there.');
+      return false;
+    }
+    const price = Math.round(deficit * REMEDIATION_PRICE);
+    if (this.companies.cash[company] < price) {
+      this.onEvent?.('refused', `Restoring that would cost ${Math.round(price / 100)}.`);
+      return false;
+    }
+    for (const c of cells) {
+      this.amenity.restored[c] = this.amenity.potential[c] - this.amenity.current[c];
+    }
+    this.companies.post(company, Line.Construction, price);
+    if (company === this.player) {
+      this.onEvent?.('remediation', 'Restoration is under way. It will take years, as these things do.');
+    }
+    return true;
+  }
+
   buildWay(company: number, mode: number, cls: number, path: ArrayLike<number>): boolean {
     const way = this.content.ways[cls];
     if (!way) return false;

@@ -59,6 +59,10 @@ export class SiteTable {
   readonly powered = new Uint8Array(MAX_SITES);
   readonly watered = new Uint8Array(MAX_SITES);
   readonly staffed = new Uint8Array(MAX_SITES);
+  /** What the surroundings are like, 0..100. Only tourism reads it, but every
+   *  site carries it so the inspector can show the player what their pit has
+   *  done to the valley. */
+  readonly amenity = new Uint8Array(MAX_SITES).fill(100);
   /** Lifetime tonnes shipped out, for reporting and for the balance sweep. */
   readonly shipped = new Float64Array(MAX_SITES);
   /**
@@ -220,6 +224,9 @@ export interface RecipeTables {
   powerNeed: Int32Array;
   waterNeed: Int32Array;
   labourNeed: Int32Array;
+  /** Amenity penalty a site emits, and how far it carries. design.md 2.3. */
+  amenityPenalty: Int32Array;
+  amenityRadius: Int32Array;
   fromEra: Uint8Array;
   /** Era in which each cargo starts existing; outputs before it are dropped. */
   cargoFromEra: Uint8Array;
@@ -290,7 +297,17 @@ export function stepSites(
     // player sees the slide before the closure.
     const health = state === SiteState.Struggling ? 55 : 100;
     const richness = r.kind[def] === IndustryKind.Extraction ? sites.richness[s] : 100;
-    const scale = (gate * health * richness) / 1000000;
+    /*
+     * And, for a resort, what the place is actually like.
+     *
+     * design.md 2.3 says tourism earns against local amenity, and this is the
+     * line that makes that true: open a bauxite pit above a lake valley and
+     * the resort down the shore stops filling its rooms. Nobody is told that
+     * industrialising has a cost — they read it in their own accounts, having
+     * built both.
+     */
+    const amenity = r.kind[def] === IndustryKind.Tourism ? sites.amenity[s] : 100;
+    const scale = (gate * health * richness * amenity) / 100000000;
 
     // Inputs first: a cycle is all-or-nothing so a half-fed steelworks does
     // not silently eat its coke.
