@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  createWorld, Facility, Mode, NO_WAY, TICKS_PER_DAY, SPEED_STEPS, type World,
+  createWorld, Mode, NO_WAY, TICKS_PER_DAY, SPEED_STEPS, facilitiesFor, type World,
 } from '@interchange/sim';
 import { loadContent } from '@interchange/data';
 import {
@@ -28,6 +28,12 @@ import './style.css';
 loadContent();
 
 const DISTRICT = 128;
+
+/** The keys that move the camera. WASD and the arrows, both. */
+const PAN_KEYS = new Set([
+  'w', 'a', 's', 'd',
+  'arrowup', 'arrowdown', 'arrowleft', 'arrowright',
+]);
 
 /** What is on screen over the map. Exactly one thing, or nothing. */
 type Panel =
@@ -299,14 +305,22 @@ export function App(): JSX.Element {
      * looking off the edge of the district, which is what a naive clamp of a
      * corner town produced.
      */
-    let best = 0;
-    for (let t = 1; t < world.towns.count; t++) {
-      if (world.towns.population[t] > world.towns.population[best]) best = t;
-    }
+    /*
+     * Where the game begins, decided by the world rather than by which town is
+     * biggest.
+     *
+     * `planOpening` finds the closest pair of places where one makes what the
+     * other wants, preferring the cargo the content nominates — which is milk,
+     * so it is the run from a farm to a dairy. That is the founding image of the
+     * whole game, so it is constructed rather than hoped for: picking the
+     * largest settlement and trusting the generator gave a valley of quarries
+     * and sawmills with no dairy anywhere in it.
+     */
+    const opening = world.planOpening();
     const inset = DISTRICT * 0.3;
     const clamp = (v: number): number => Math.max(inset, Math.min(DISTRICT - inset, v));
-    renderer.camX = clamp(world.towns.x[best] ?? DISTRICT / 2);
-    renderer.camZ = clamp(world.towns.y[best] ?? DISTRICT / 2);
+    renderer.camX = clamp(opening.x);
+    renderer.camZ = clamp(opening.y);
 
     // Where you begin: one small pocket, and nothing else visible.
     /*
@@ -325,29 +339,53 @@ export function App(): JSX.Element {
      * yard because there is no yard yet — step three gives it one.
      */
     {
-      const vanIndex = world.content.vehicles.findIndex((v) => v.id === 'rigid-box');
-      let nearest = 0;
-      let best = Infinity;
-      for (let i = 0; i < world.sites.count; i++) {
-        const dx = world.sites.x[i] - renderer.camX;
-        const dy = world.sites.y[i] - renderer.camZ;
-        const d = dx * dx + dy * dy;
-        if (d < best) { best = d; nearest = i; }
-      }
+      /*
+       * These places were working before you arrived.
+       *
+       * Without it every store in the district is empty on day one, so the
+       * contract board — which only offers what a place actually has spare —
+       * offers nothing, and the opening screen is a pretty valley with no game
+       * in it while you wait for a farm to fill a churn.
+       */
+      world.primeStock();
+
+      /*
+       * The van is chosen by the work, not the other way round.
+       *
+       * It was a Rigid 7.5t handed out regardless, and the opening was
+       * unplayable: on this seed the only offer in reach was aggregate out of a
+       * quarry, needing a tipper nobody owned and nobody could afford. One job,
+       * refused, on the first screen.
+       *
+       * `openingVehicle` takes the cargo of the pair `planOpening` chose and
+       * returns the cheapest thing that can carry it — so the district decides
+       * what the first job is and the van follows, and the two cannot disagree
+       * on any seed. For the milk run that is a two-tonne refrigerated van,
+       * which is many small trips rather than one big one: a round, not a
+       * haulage contract, which is the right texture for the first ten minutes.
+       */
+      const vanIndex = world.openingVehicle(opening.cargo);
       world.companies.cash[world.player] = world.content.balance.startingCash;
 
       /*
-       * The yard, then the truck in it.
+       * The yard, then the van in it.
        *
-       * A chiller from the start, because the opening job is a milk run and a
-       * yard that cannot take the only truck that can do the only job is not a
-       * constraint, it is a dead end. Everything else is bought.
+       * Its facilities are *derived from the vehicle*, not listed. A yard that
+       * cannot take the only lorry that can do the only job is not a constraint,
+       * it is a dead end — and hard-coding a chiller here only worked while the
+       * opening happened to be a milk run. Everything beyond what the first van
+       * needs is bought.
        */
-      const yard = world.foundYard(Math.round(renderer.camX), Math.round(renderer.camZ), 'Marchford Yard');
-      if (yard >= 0) world.yards.add(yard, Facility.Chiller);
-      const bought = vanIndex >= 0 ? world.buyVehicleAtYard(vanIndex) : { vehicle: -1 };
-      void bought;
-      void nearest;
+      const yard = world.foundYard(
+        Math.round(renderer.camX), Math.round(renderer.camZ), 'Marchford Yard',
+      );
+      if (yard >= 0 && vanIndex >= 0) {
+        const v = world.content.vehicles[vanIndex];
+        world.yards.add(yard, facilitiesFor({
+          handling: v.handling as readonly string[], cls: v.class,
+        }));
+      }
+      if (vanIndex >= 0) world.buyVehicleAtYard(vanIndex);
       // And work to do, straight away.
       world.offerWorkNow();
     }
@@ -420,14 +458,9 @@ export function App(): JSX.Element {
     };
     const move = (e: PointerEvent): void => {
       if (!dragging) return;
-      const perPixel = renderer.tilesAcross / (canvas.clientWidth || 1);
-      const dx = (e.clientX - lastX) * perPixel;
-      const dy = (e.clientY - lastY) * perPixel;
-      // The camera looks down a rotated axis, so screen movement has to be
-      // turned back into world movement or panning fights the player.
-      const a = (-32 * Math.PI) / 180;
-      renderer.camX -= dx * Math.cos(a) - dy * Math.sin(a) * 1.6;
-      renderer.camZ -= dx * Math.sin(a) + dy * Math.cos(a) * 1.6;
+      // Grab-and-pull, and the renderer owns the arithmetic because it is the
+      // thing that knows where the camera is pointing.
+      renderer.pan(e.clientX - lastX, e.clientY - lastY);
       lastX = e.clientX;
       lastY = e.clientY;
     };
@@ -469,6 +502,35 @@ export function App(): JSX.Element {
       renderer.tilesAcross = Math.max(14, Math.min(70, next));
       fit();
     };
+    /*
+     * WASD and the arrows, held rather than tapped.
+     *
+     * A key set is the right shape for this instead of a handler that moves the
+     * camera per keydown event: holding a key repeats at the operating system's
+     * rate, which is slow, uneven, and different on every machine. Recording
+     * what is *down* and moving in the frame loop gives smooth motion at a speed
+     * this code chooses.
+     *
+     * Speed scales with the zoom, so a keypress crosses the same fraction of the
+     * screen whether you are looking at a field or at the whole district.
+     */
+    const held = new Set<string>();
+    const keyDown = (e: KeyboardEvent): void => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (PAN_KEYS.has(k)) {
+        held.add(k);
+        // Or the arrows scroll the page behind the canvas.
+        e.preventDefault();
+      }
+    };
+    const keyUp = (e: KeyboardEvent): void => { held.delete(e.key.toLowerCase()); };
+    // Losing focus with a key down would leave the camera drifting for ever.
+    const blur = (): void => held.clear();
+    window.addEventListener('keydown', keyDown);
+    window.addEventListener('keyup', keyUp);
+    window.addEventListener('blur', blur);
+
     canvas.addEventListener('pointerdown', down);
     canvas.addEventListener('pointermove', move);
     canvas.addEventListener('pointerup', up);
@@ -484,6 +546,18 @@ export function App(): JSX.Element {
       raf = requestAnimationFrame(loop);
       const dt = Math.min(0.25, (now - last) / 1000);
       last = now;
+
+      if (held.size > 0) {
+        // Two thirds of a screen a second, which is brisk without overshooting.
+        const step = renderer.tilesAcross * 0.66 * dt;
+        let right = 0;
+        let up = 0;
+        if (held.has('a') || held.has('arrowleft')) right -= step;
+        if (held.has('d') || held.has('arrowright')) right += step;
+        if (held.has('w') || held.has('arrowup')) up += step;
+        if (held.has('s') || held.has('arrowdown')) up -= step;
+        if (right !== 0 || up !== 0) renderer.nudge(right, up);
+      }
       frames.push(dt);
       if (frames.length > 30) frames.shift();
 
@@ -603,6 +677,9 @@ export function App(): JSX.Element {
       canvas.removeEventListener('pointermove', move);
       canvas.removeEventListener('pointerup', up);
       canvas.removeEventListener('wheel', wheel);
+      window.removeEventListener('keydown', keyDown);
+      window.removeEventListener('keyup', keyUp);
+      window.removeEventListener('blur', blur);
       renderer.dispose();
     };
   }, []);

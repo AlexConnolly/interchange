@@ -419,3 +419,23 @@ html, body, #root, .app {
 .supply-icon { display: grid; place-items: center; padding-right: 6px; }
 .why.stopped { color: #c04040; font-weight: 600; }
 .have { color: #3f8a5a; font-weight: 700; }
+
+/* The body a job needs. A pill, not a caption - it is what decides whether the
+   offer is an offer, and it used to be nine grey pixels. */
+.needs {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  margin-left: 17px;
+  padding: 2px 8px 2px 5px;
+  border-radius: 999px;
+  background: rgba(74, 176, 208, 0.16);
+  color: #2c6f88;
+  font-size: 11px;
+  font-weight: 650;
+}
+.needs.cannot { background: rgba(208, 80, 80, 0.15); color: #a83c3c; }
+.needs b { font-weight: 650; opacity: 0.75; }
+.needs b::before { content: "\00b7 "; }
+.pay i { font-style: normal; font-weight: 500; opacity: 0.55; font-size: 11px; }

@@ -540,7 +540,7 @@ export const RATE_WEIGHT_BY_TIER: Record<string, number> = { passenger: 0.11 };
  * that the purchase is a decision. At 560 a 7.5-tonne load over twenty-six tiles
  * paid a hundred and seventeen pounds, which was about half of what that needs.
  */
-export const HAUL_BASE = 1180;
+export const HAUL_BASE = 4200;
 
 /**
  * How much further than the direct line a haul may be paid for.

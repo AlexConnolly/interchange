@@ -116,6 +116,15 @@ export interface OfferContext {
   buyerFor: (cargo: number, notSite: number) => number;
   /** Pence a load, given the cargo and the distance. */
   rate: (cargo: number, distance: number) => number;
+  /**
+   * Could anything the player owns carry this?
+   *
+   * The board's first duty is to contain a job the player can actually take.
+   * Without this the opening board was a quarry offering aggregate — which
+   * needs a tipper the player neither owned nor could afford — so the first
+   * thing the game did was show you one job and refuse to let you do it.
+   */
+  canCarry: (cargo: number) => boolean;
 }
 
 /**
@@ -135,36 +144,52 @@ export function offerContracts(
   }
   let made = 0;
 
-  for (let site = 0; site < ctx.siteCount && live + made < want; site++) {
-    const tile = ctx.siteTile(site);
-    // Only inside the influence area. The fog and the job board are the same
-    // mechanism seen twice: what you can see is what you can take.
-    if (!ctx.usable(tile)) continue;
-    if (board.hasOffer(site)) continue;
+  /*
+   * Two passes: work you can do, then everything else.
+   *
+   * The first pass only offers cargo something in your fleet can carry, so the
+   * board always leads with a job you can take. The second fills the remaining
+   * slots with anything, because a job you *cannot* do yet is not noise — it is
+   * the reason to buy a tipper, and seeing the aggregate work sitting there is
+   * how you learn that a tipper is a thing you might want.
+   *
+   * Order matters and only in one direction. Leading with work you can do is the
+   * difference between a game that starts and a game that shows you one offer
+   * and refuses it.
+   */
+  for (let pass = 0; pass < 2 && live + made < want; pass++) {
+    for (let site = 0; site < ctx.siteCount && live + made < want; site++) {
+      const tile = ctx.siteTile(site);
+      // Only inside the influence area. The fog and the job board are the same
+      // mechanism seen twice: what you can see is what you can take.
+      if (!ctx.usable(tile)) continue;
+      if (board.hasOffer(site)) continue;
 
-    const spare = ctx.surplus(site);
-    if (!spare || spare.tonnes <= 0) continue;
-    const buyer = ctx.buyerFor(spare.cargo, site);
-    if (buyer === NONE) continue;
-    if (!ctx.usable(ctx.siteTile(buyer))) continue;
+      const spare = ctx.surplus(site);
+      if (!spare || spare.tonnes <= 0) continue;
+      if (pass === 0 && !ctx.canCarry(spare.cargo)) continue;
+      const buyer = ctx.buyerFor(spare.cargo, site);
+      if (buyer === NONE) continue;
+      if (!ctx.usable(ctx.siteTile(buyer))) continue;
 
-    const dx = ctx.siteX(buyer) - ctx.siteX(site);
-    const dy = ctx.siteY(buyer) - ctx.siteY(site);
-    const distance = Math.round(Math.sqrt(dx * dx + dy * dy));
-    if (distance < 3) continue;
+      const dx = ctx.siteX(buyer) - ctx.siteX(site);
+      const dy = ctx.siteY(buyer) - ctx.siteY(site);
+      const distance = Math.round(Math.sqrt(dx * dx + dy * dy));
+      if (distance < 3) continue;
 
-    const id = board.alloc();
-    if (id === NONE) break;
-    board.state[id] = ContractState.Offered;
-    board.from[id] = site;
-    board.to[id] = buyer;
-    board.cargo[id] = spare.cargo;
-    board.distance[id] = distance;
-    board.pay[id] = ctx.rate(spare.cargo, distance);
-    board.service[id] = NONE;
-    board.delivered[id] = 0;
-    board.offeredTick[id] = ctx.tick;
-    made++;
+      const id = board.alloc();
+      if (id === NONE) break;
+      board.state[id] = ContractState.Offered;
+      board.from[id] = site;
+      board.to[id] = buyer;
+      board.cargo[id] = spare.cargo;
+      board.distance[id] = distance;
+      board.pay[id] = ctx.rate(spare.cargo, distance);
+      board.service[id] = NONE;
+      board.delivered[id] = 0;
+      board.offeredTick[id] = ctx.tick;
+      made++;
+    }
   }
   return made;
 }

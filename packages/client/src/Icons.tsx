@@ -220,6 +220,91 @@ const BY_ID: Record<string, () => JSX.Element> = {
   yard: Lorry,
 };
 
+/** A plain box. General haulage. */
+function BoxBody(): JSX.Element {
+  return (
+    <>
+      <rect x="3" y="7" width="14" height="9" rx="1" />
+      <path d="M17.4 9.6h2.2l2.4 2.6v3.8h-4.6Z" />
+      <circle cx="7" cy="18" r="1.9" />
+      <circle cx="17" cy="18" r="1.9" />
+    </>
+  );
+}
+
+/** A box with a snowflake. Refrigerated. */
+function ChilledBody(): JSX.Element {
+  return (
+    <>
+      <rect x="3" y="7" width="14" height="9" rx="1" />
+      <path d="M17.4 9.6h2.2l2.4 2.6v3.8h-4.6Z" />
+      <circle cx="7" cy="18" r="1.9" />
+      <circle cx="17" cy="18" r="1.9" />
+      <g fill="#fff" opacity="0.92">
+        <rect x="9.3" y="8.6" width="1.4" height="6" rx="0.6" />
+        <rect x="7" y="10.9" width="6" height="1.4" rx="0.6" />
+      </g>
+    </>
+  );
+}
+
+/** A cylinder on wheels. Liquid. */
+function TankerBody(): JSX.Element {
+  return (
+    <>
+      <rect x="2.6" y="8" width="15" height="7.4" rx="3.7" />
+      <path d="M17.8 9.8h2l2.2 2.6v3h-4.2Z" />
+      <circle cx="7" cy="18" r="1.9" />
+      <circle cx="16.6" cy="18" r="1.9" />
+    </>
+  );
+}
+
+/** A tipped skip. Bulk. */
+function TipperBody(): JSX.Element {
+  return (
+    <>
+      <path d="M4 14.6 6.6 6.4l11 3-1.6 5.2Z" />
+      <rect x="3" y="14.8" width="16.4" height="2.2" rx="0.9" />
+      <circle cx="7" cy="18.6" r="1.6" />
+      <circle cx="16" cy="18.6" r="1.6" />
+    </>
+  );
+}
+
+const BODY: Record<string, () => JSX.Element> = {
+  refrigerated: ChilledBody,
+  liquid: TankerBody,
+  bulk: TipperBody,
+  general: BoxBody,
+};
+
+/**
+ * The body a cargo needs, drawn.
+ *
+ * It had been a nine-pixel grey caption under the contract row, which is not
+ * "obvious what vehicle type is needed" by any reading. The requirement is the
+ * single most consequential thing on the row - it decides whether the job is
+ * takeable at all - so it gets a pictogram and a pill of its own.
+ */
+export function BodyIcon(
+  { handling, size = 18 }: { handling: string; size?: number },
+): JSX.Element {
+  const Glyph = BODY[handling] ?? BoxBody;
+  return (
+    <svg
+      className="icon"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <Glyph />
+    </svg>
+  );
+}
+
 export function Icon({ id, size = 20 }: { id: string; size?: number }): JSX.Element {
   const Glyph = BY_ID[id] ?? Work;
   return (

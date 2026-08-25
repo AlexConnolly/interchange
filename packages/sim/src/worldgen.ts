@@ -74,6 +74,53 @@ export function generateWorld(w: World): void {
     w.sites.richness[site] = d.richness;
   }
 
+  /*
+   * ---- farms -------------------------------------------------------------
+   *
+   * Farms are not a mineral deposit, and treating them as one was the single
+   * most damaging bug in the world generator.
+   *
+   * They were placed like collieries: on tiles carrying `Deposit.Farm`, which
+   * the terrain only puts where the biome happens to be Farmland. On a hilly
+   * seed that is nowhere, so the district came out with three quarries, a
+   * forestry and four sawmills and *no dairy chain at all* — while the renderer,
+   * which divides the entire map into field parcels with hedges round them,
+   * drew a farming valley. The simulation and the picture disagreed about what
+   * kind of place this was, and the picture was right.
+   *
+   * A district of fields has farms in it. So they are placed near the
+   * settlements, in a ring far enough out to be countryside and near enough to
+   * have a lane to them, cycling through the kinds so a valley gets a dairy, an
+   * arable and a livestock farm rather than three of one.
+   *
+   * This has to run *before* `producedNearby` below, because that is what makes
+   * a creamery eligible: the processing pass only places an industry whose input
+   * the district can actually supply, so without farms first there is no
+   * creamery, no mill and no abattoir either. One missing pass cost the game
+   * eight of its fourteen industries.
+   */
+  const farmDefs: number[] = [];
+  c.industries.forEach((ind, i) => {
+    if (ind.fromEra > 1 || ind.kind !== 'extraction') return;
+    if (ind.deposit !== Deposit.Farm) return;
+    farmDefs.push(i);
+  });
+  if (farmDefs.length > 0) {
+    let turn = 0;
+    for (let townId = 0; townId < w.towns.count; townId++) {
+      // A village has farms round it; a town has a few more.
+      const count = 2 + (w.towns.population[townId] > 900 ? 1 : 0);
+      for (let k = 0; k < count; k++) {
+        const spot = findSiteSpot(t, w.towns.x[townId], w.towns.y[townId], 5, 15, w);
+        if (!spot) continue;
+        const def = farmDefs[turn++ % farmDefs.length];
+        const site = w.sites.alloc(def, spot[0], spot[1], t.idx(spot[0], spot[1]), AUTHORITY);
+        // A farm's richness is its land, and this land is all much of a muchness.
+        if (site !== NONE) w.sites.richness[site] = 140 + w.rng.int(80);
+      }
+    }
+  }
+
   // ---- processing and terminal sites ------------------------------------
   // Placed near towns and chosen so that whatever the region actually digs up
   // has somewhere to go. A map with four collieries and no gasworks is a map
@@ -97,7 +144,15 @@ export function generateWorld(w: World): void {
   });
 
   for (let townId = 0; townId < w.towns.count; townId++) {
-    const count = 1 + (w.towns.population[townId] > 1200 ? 1 : 0) + (townId % 3 === 0 ? 1 : 0);
+    /*
+     * Two or three per settlement, not one.
+     *
+     * With farms now in the district there is far more that a processing site
+     * could usefully consume, and a district of a dozen places is what design.md
+     * asks for. One per town gave eight sites for fourteen industries, most of
+     * them duplicates of the same three.
+     */
+    const count = 2 + (w.towns.population[townId] > 900 ? 1 : 0) + (townId % 2 === 0 ? 1 : 0);
     for (let k = 0; k < count && consumers.length > 0; k++) {
       const def = consumers[(townId * 3 + k) % consumers.length];
       const spot = findSiteSpot(t, w.towns.x[townId], w.towns.y[townId], 4, 11, w);

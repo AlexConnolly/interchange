@@ -174,6 +174,16 @@ export type WayClass = z.infer<typeof WayClass>;
  */
 export const Balance = z.object({
   startingCash: z.number().int(),
+  /**
+   * The cargo the game opens on.
+   *
+   * Named in the content rather than found by the generator, because the
+   * founding image of this game is a milk run from a farm to a dairy and an
+   * image that important cannot be left to a seed. `planOpening` prefers a pair
+   * trading this and falls back to the nearest workable pair if the district has
+   * none, so an odd map still starts sensibly.
+   */
+  openingCargo: z.string(),
   /** Annual interest on debt, in basis points. */
   interestBps: z.number().int(),
   /** Credit limit as a multiple of trailing annual revenue, in percent. */

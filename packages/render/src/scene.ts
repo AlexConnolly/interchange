@@ -99,6 +99,7 @@ export class Renderer {
   private readonly camera: OrthographicCamera;
   private readonly material: MeshLambertMaterial;
   private readonly roadMaterial: MeshLambertMaterial;
+  private readonly routeMaterial: MeshBasicMaterial;
   /** Everything that emits: cat's eyes and lamps. Unlit, additive, and its
    *  opacity is how far into the night we are. */
   private readonly glow: MeshBasicMaterial;
@@ -190,6 +191,24 @@ export class Renderer {
      * game, which is why the emitters had to be separated from the lit
      * geometry rather than given an emissive term inside it.
      */
+    /*
+     * The route overlay, and it is unlit on purpose.
+     *
+     * A route line is interface, not scenery. Drawn with the lit material it
+     * dimmed at dusk, went blue at night and — once the snow term arrived —
+     * turned white in January along with the fields it was drawn on top of, so
+     * the one thing on screen whose entire job is to be legible became the least
+     * legible thing on it. Unlit means the two run colours are exactly the two
+     * colours the palette authored, at every hour of every season.
+     */
+    this.routeMaterial = new MeshBasicMaterial({
+      vertexColors: true,
+      side: DoubleSide,
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+    });
+
     this.glow = new MeshBasicMaterial({
       vertexColors: true,
       side: DoubleSide,
@@ -404,7 +423,11 @@ export class Renderer {
    */
   private setSeason(snow: number): void {
     SNOW_UNIFORM.value = snow;
-    this.fill.intensity *= 1 + snow * 0.35;
+    // A gentle lift, not a wash. Snow is a big reflector so the shaded side of
+    // everything is brighter and bluer in winter — but overdoing it flattens the
+    // contrast that was showing the relief in the first place, which at 0.35 it
+    // did.
+    this.fill.intensity *= 1 + snow * 0.12;
   }
 
   /** How far into the night, 0..1. Read by the glow pass. */
@@ -762,7 +785,7 @@ export class Renderer {
         );
       }
     }
-    this.routeMesh = toMesh(m, this.material);
+    this.routeMesh = toMesh(m, this.routeMaterial);
     this.routeMesh.castShadow = false;
     this.routeMesh.receiveShadow = false;
     this.scene.add(this.routeMesh);
@@ -795,6 +818,61 @@ export class Renderer {
   }
 
   private readonly tmpVec = new Vector3();
+
+  /**
+   * Drag the map, in screen pixels.
+   *
+   * Grab-and-pull: the tile under the pointer stays under the pointer. That is
+   * the only correct answer — every map anybody has ever used works this way,
+   * and the first version had the sign the other way round, so dragging pushed
+   * the world away instead of pulling it along.
+   *
+   * The maths is worth doing properly rather than fudging, because the camera is
+   * pitched and the two screen axes are not equivalent. For an orthographic
+   * camera a ground displacement `v` appears on screen as `(v·R, v·U)`, where R
+   * and U are the camera's right and up basis vectors. R is horizontal for a
+   * camera with no roll, so it lies in the ground plane already; U does not —
+   * only `sin(elevation)` of it does. Solving for `v` given the wanted screen
+   * movement gives a vertical scale of `1 / sin(el)`, which at 38 degrees is
+   * 1.62.
+   *
+   * The previous code had a hard-coded 1.6 in it with no explanation. It was
+   * very nearly right, and nobody could have known why.
+   */
+  pan(dxPixels: number, dyPixels: number): void {
+    const w = Math.max(1, this.renderer.domElement.clientWidth);
+    const perPixel = this.tilesAcross / w;
+    this.camera.updateMatrixWorld();
+    const m = this.camera.matrixWorld.elements;
+    const rx = m[0];
+    const rz = m[2];
+    const ux = m[4];
+    const uz = m[6];
+    const ul = Math.hypot(ux, uz);
+    if (ul < 1e-4) return;
+    const a = dxPixels * perPixel;
+    const b = (-dyPixels * perPixel) / ul;
+    // The world moves by a*R + b*ground(U); the camera moves against it.
+    this.camX -= a * rx + b * (ux / ul);
+    this.camZ -= a * rz + b * (uz / ul);
+  }
+
+  /**
+   * Nudge the camera along the screen axes, in tiles. For the keyboard.
+   *
+   * Screen axes rather than world axes, because a player pressing W means "up
+   * the screen" and not "north" — the district is drawn at a 32-degree azimuth
+   * and nobody is tracking that in their head.
+   */
+  nudge(right: number, up: number): void {
+    this.camera.updateMatrixWorld();
+    const m = this.camera.matrixWorld.elements;
+    const ux = m[4];
+    const uz = m[6];
+    const ul = Math.hypot(ux, uz) || 1;
+    this.camX += m[0] * right + (ux / ul) * up;
+    this.camZ += m[2] * right + (uz / ul) * up;
+  }
 
   /** Which tile the pointer is over, by intersecting the ground plane. */
   pick(screenX: number, screenY: number, src: RenderSource): number {
@@ -914,7 +992,13 @@ ${vs}`.replace(
 	// magnitude makes it agnostic to winding, which is the same compromise
 	// the double-sided material already makes.
 	float upness = smoothstep( 0.30, 0.82, abs( objectNormal.y ) );
-	vColor = mix( vColor, uSnowColour, clamp( uSnow * uSnowTake * snowTake * upness, 0.0, 1.0 ) );`,
+	// Capped at 0.9, and the cap matters more than the colour. Mixing all the
+	// way to one flat white erased every fold in the ground and every crop row
+	// with it: a field in January became a blank sheet, and a district of blank
+	// sheets has no relief at all. Leaving a tenth of the summer colour showing
+	// keeps the striping and the parcel boundaries faintly legible under the
+	// snow, which is both what snow looks like and what makes the shadows read.
+	vColor = mix( vColor, uSnowColour, clamp( uSnow * uSnowTake * snowTake * upness, 0.0, 0.9 ) );`,
     );
   };
   return mat;

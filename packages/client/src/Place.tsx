@@ -25,7 +25,7 @@ import { useState, type JSX } from 'react';
 import { type World, ContractState } from '@interchange/sim';
 import { content } from '@interchange/data';
 import { money, bodyFor } from './Markers.tsx';
-import { Icon } from './Icons.tsx';
+import { BodyIcon, Icon } from './Icons.tsx';
 
 const C = content();
 
@@ -114,7 +114,7 @@ export function Place({
                       <span className="job-line">
                         <span className="swatch" style={{ background: cargo.colour }} />
                         <span className="grow">{cargo.name} → {to.name}</span>
-                        <span className="pay">{money(board.pay[id])}</span>
+                        <span className="pay">{money(board.pay[id])}<i>/t</i></span>
                       </span>
                       <Drivers
                         world={world}
@@ -132,6 +132,7 @@ export function Place({
                     </div>
                   );
                 }
+                const can = world.fleetCanCarry(board.cargo[id]);
                 return (
                   <button
                     key={id}
@@ -146,9 +147,13 @@ export function Place({
                     <span className="job-line">
                       <span className="swatch" style={{ background: cargo.colour }} />
                       <span className="grow">{cargo.name} → {to.name}</span>
-                      <span className="pay">{money(board.pay[id])}</span>
+                      <span className="pay">{money(board.pay[id])}<i>/t</i></span>
                     </span>
-                    <span className="job-sub">{bodyFor(cargo.handling)}</span>
+                    <span className={`needs ${can ? '' : 'cannot'}`}>
+                      <BodyIcon handling={cargo.handling} />
+                      {bodyFor(cargo.handling)}
+                      {!can && <b>you have none</b>}
+                    </span>
                   </button>
                 );
               })}
@@ -191,9 +196,12 @@ export function Place({
                     <span className="grow">
                       {C.cargo[b.cargo].name} → {C.industries[world.sites.def[b.site]].name}
                     </span>
-                    <span className="pay">{money(b.pay)}</span>
+                    <span className="pay">{money(b.pay)}<i>/t</i></span>
                   </span>
-                  <span className="job-sub">{bodyFor(C.cargo[b.cargo].handling)}</span>
+                  <span className={`needs ${world.fleetCanCarry(b.cargo) ? '' : 'cannot'}`}>
+                    <BodyIcon handling={C.cargo[b.cargo].handling} />
+                    {bodyFor(C.cargo[b.cargo].handling)}
+                  </span>
                 </button>
               ))}
             </div>

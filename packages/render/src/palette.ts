@@ -159,7 +159,7 @@ export const SEMANTIC = {
  * where the rest of the year is pale roads on green.
  */
 export const SNOW = {
-  lit: hex('#eef2f7'),
+  lit: hex('#e7edf4'),
   wet: hex('#3f454d'),
 };
 

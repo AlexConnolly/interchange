@@ -1,5 +1,5 @@
 {
-  "startingCash": 4000000,
+  "startingCash": 1150000,
   "interestBps": 620,
   "creditLimitPct": 180,
   "contractSlots": 6,
@@ -14,5 +14,6 @@
   "declineDays": 45,
   "graceDays": 60,
   "townGrowthPerDay": 4,
-  "regulatorSharePct": 58
+  "regulatorSharePct": 58,
+  "openingCargo": "milk"
 }

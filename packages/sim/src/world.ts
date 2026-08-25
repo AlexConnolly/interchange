@@ -1377,6 +1377,179 @@ export class World {
   }
 
   /**
+   * Where the game begins.
+   *
+   * Not "the biggest town", which is what it was, and which made the whole
+   * opening a matter of worldgen luck: on seed 1985 the largest settlement had a
+   * quarry, a livestock farm, a sawmill and a concrete plant around it and no
+   * dairy anywhere in sight. So the first thing the game offered was aggregate
+   * out of a quarry, needing a tipper nobody could afford, and there was no
+   * second offer because nothing else within reach had anything spare.
+   *
+   * The founding image of this game is a milk run from a farm to a dairy — it is
+   * in the first line of design.md and it is what the whole ladder is built on
+   * top of. An image that important cannot be left to a seed.
+   *
+   * So the opening is *constructed*: find the closest pair of places where one
+   * makes something the other wants, prefer a pair whose cargo the cheapest
+   * vehicle in the game can carry, and start the player between them. Everything
+   * else about the opening — where the camera looks, where the influence is
+   * seeded, where the yard goes — follows from that one pair.
+   */
+  planOpening(): { x: number; y: number; from: number; to: number; cargo: number } {
+    let bestFrom = NONE;
+    let bestTo = NONE;
+    let bestCargo = NONE;
+    let bestScore = Infinity;
+
+    for (let a = 0; a < this.sites.count; a++) {
+      const ta = this.siteAccessTile[a];
+      if (ta === NONE) continue;
+      const outs = this.recipes.outputs[this.sites.def[a]];
+      // Only somewhere with nothing to buy in first. A place that needs
+      // supplying cannot be the start of a chain, and the start of the chain is
+      // where the player has to begin.
+      if (this.recipes.inputs[this.sites.def[a]].length > 0) continue;
+
+      for (let i = 0; i < outs.length; i += 2) {
+        const cargo = outs[i];
+        const handling = this.content.cargo[cargo]?.handling;
+        if (handling === undefined) continue;
+        /*
+         * Weighted, not filtered. A pair whose cargo the small van can carry is
+         * strongly preferred, but a district with no such pair should still get
+         * a sensible opening rather than none — the alternative is a hard
+         * failure on an unlucky seed, which is the same fragility one layer
+         * further down.
+         */
+        const easy = this.content.vehicles.some(
+          (v) => v.cost <= this.cheapestVehicleCost * 1.8
+            && (v.handling as readonly string[]).includes(handling),
+        );
+        // And the content gets to name the one it wants. See balance.json.
+        const wanted = this.content.cargo[cargo]?.id === this.content.balance.openingCargo;
+        for (let b = 0; b < this.sites.count; b++) {
+          if (b === a) continue;
+          const tb = this.siteAccessTile[b];
+          if (tb === NONE) continue;
+          const ins = this.recipes.inputs[this.sites.def[b]];
+          let wants = false;
+          for (let k = 0; k < ins.length; k += 2) if (ins[k] === cargo) { wants = true; break; }
+          if (!wants) continue;
+          const dx = this.sites.x[b] - this.sites.x[a];
+          const dy = this.sites.y[b] - this.sites.y[a];
+          const d = Math.sqrt(dx * dx + dy * dy);
+          // Not on top of each other: the opening job has to be a drive.
+          if (d < 5) continue;
+          const score = d * (easy ? 1 : 4) * (wanted ? 0.2 : 1);
+          if (score < bestScore) {
+            bestScore = score;
+            bestFrom = a;
+            bestTo = b;
+            bestCargo = cargo;
+          }
+        }
+      }
+    }
+
+    if (bestFrom === NONE) {
+      // No chain anywhere. Fall back to the largest settlement.
+      let big = 0;
+      for (let t = 1; t < this.towns.count; t++) {
+        if (this.towns.population[t] > this.towns.population[big]) big = t;
+      }
+      return {
+        x: this.towns.x[big] ?? this.config.size / 2,
+        y: this.towns.y[big] ?? this.config.size / 2,
+        from: NONE,
+        to: NONE,
+        cargo: NONE,
+      };
+    }
+
+    /*
+     * The yard goes nearer the producer than the customer.
+     *
+     * A third of the way along rather than halfway, because the empty run out to
+     * the pickup is the part that earns nothing — so a haulier setting up to run
+     * one farm's milk puts the yard by the farm. It also means the very first
+     * route the player is shown has a short empty leg and a long loaded one,
+     * which is the shape they should be learning to want.
+     */
+    return {
+      x: this.sites.x[bestFrom] + (this.sites.x[bestTo] - this.sites.x[bestFrom]) * 0.34,
+      y: this.sites.y[bestFrom] + (this.sites.y[bestTo] - this.sites.y[bestFrom]) * 0.34,
+      from: bestFrom,
+      to: bestTo,
+      cargo: bestCargo,
+    };
+  }
+
+  /**
+   * The vehicle to start with, given the opening job.
+   *
+   * Derived from the pair rather than named, and that is the whole fix. The
+   * opening was a Rigid 7.5t handed out regardless of what work existed, so on a
+   * district whose nearest job was aggregate the player owned a box lorry, was
+   * offered a tipper job, and could afford neither the tipper nor to wait. Choose
+   * the work first and the vehicle follows it, and the two cannot disagree on
+   * any seed.
+   *
+   * The cheapest suitable one, because the opening should be the smallest
+   * possible version of the game: one small van, a few tonnes at a time, many
+   * short runs. That texture — a round rather than a haulage contract — is what
+   * the first ten minutes should feel like.
+   */
+  openingVehicle(cargo: number): number {
+    const handling = this.content.cargo[cargo]?.handling;
+    let best = NONE;
+    let cheapest = Infinity;
+    for (let i = 0; i < this.content.vehicles.length; i++) {
+      const v = this.content.vehicles[i];
+      if (handling !== undefined
+        && !(v.handling as readonly string[]).includes(handling)) continue;
+      if (v.cost < cheapest) { cheapest = v.cost; best = i; }
+    }
+    return best;
+  }
+
+  /**
+   * Put something in the sheds of every place that needs nothing.
+   *
+   * A district where every store is empty on day one is a district that offers
+   * no work for the first week, because the board only offers what a place
+   * actually has spare — so the opening screen was a pretty valley with nothing
+   * to do in it while the player waited for a farm to fill a churn.
+   *
+   * Only places with no inputs, and that distinction is the game's: a farm has
+   * been milking cows since before you arrived, and a creamery that has never
+   * been supplied has nothing in it and should not pretend otherwise. Empty
+   * shelves at the next rung up are the whole reason to climb.
+   */
+  primeStock(fill = 0.45): void {
+    for (let s = 0; s < this.sites.count; s++) {
+      const def = this.sites.def[s];
+      if (this.recipes.inputs[def].length > 0) continue;
+      const outs = this.recipes.outputs[def];
+      for (let i = 0; i < outs.length; i += 2) {
+        const cargo = outs[i];
+        const room = this.sites.roomFor(s, cargo);
+        if (room > 0) this.sites.addStock(s, cargo, Math.floor(room * fill));
+      }
+    }
+  }
+
+  /** The cheapest vehicle in the catalogue, for judging what counts as easy. */
+  private get cheapestVehicleCost(): number {
+    if (this.cheapestCache === 0) {
+      this.cheapestCache = Math.min(...this.content.vehicles.map((v) => v.cost));
+    }
+    return this.cheapestCache;
+  }
+
+  private cheapestCache = 0;
+
+  /**
    * How deep the snow is, 0..1. The renderer paints it and the traffic obeys
    * it, so there is exactly one source for both.
    *
@@ -2689,6 +2862,24 @@ export class World {
         if (ins[i] === cargo) { takes = true; break; }
       }
       if (!takes) continue;
+      /*
+       * Only somewhere you can see, and this was a real bug.
+       *
+       * Without the influence test this returned whichever buyer in the whole
+       * district had the most room — which was routinely one under fog — and the
+       * contract board, which requires both ends to be visible, then threw the
+       * whole pairing away and moved on. So a forestry with ninety tonnes of
+       * timber and a sawmill twenty tiles down the lane produced no offer at
+       * all, because a *different* sawmill on the far side of the map had a
+       * slightly emptier shed.
+       *
+       * The rule was already written down — a contract must be inside your
+       * influence — it just was not applied at the point that chooses. Choosing
+       * from the wrong set and filtering afterwards is not the same thing as
+       * choosing from the right set.
+       */
+      const tile = this.siteAccessTile[s];
+      if (tile === NONE || !this.influence.usable(tile)) continue;
       const spare = this.sites.capacity[s * cargoCount + cargo] - this.sites.stockOf(s, cargo);
       if (spare > room) {
         room = spare;
@@ -2709,6 +2900,25 @@ export class World {
     this.stepContractBoard();
   }
 
+  /**
+   * Can anything in the player's fleet carry this cargo?
+   *
+   * Asked of the *fleet* and not of the catalogue, because the point is what you
+   * can do today. A cargo nothing you own can lift is work for later, and the
+   * board is told to lead with the other kind.
+   */
+  fleetCanCarry(cargo: number): boolean {
+    const handling = this.content.cargo[cargo]?.handling;
+    if (handling === undefined) return false;
+    for (let v = 0; v < this.vehicles.count; v++) {
+      if (!this.vehicles.alive[v]) continue;
+      if (this.vehicles.company[v] !== this.player) continue;
+      const def = this.content.vehicles[this.vehicles.type[v]];
+      if (def && (def.handling as readonly string[]).includes(handling)) return true;
+    }
+    return false;
+  }
+
   private stepContractBoard(): void {
     offerContracts(this.contractBoard, {
       tick: this.tick,
@@ -2721,6 +2931,7 @@ export class World {
       buyerFor: (cargo, not) => this.buyerFor(cargo, not),
       rate: (cargo, distance) =>
         haulageRate(this.cargoPrice[cargo], distance, this.cargoRateWeight[cargo]),
+      canCarry: (cargo) => this.fleetCanCarry(cargo),
     }, 5);
   }
 
