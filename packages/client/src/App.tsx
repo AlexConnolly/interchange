@@ -207,6 +207,9 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
   const [hoverTile, setHoverTile] = useState(-1);
   const [showSaves, setShowSaves] = useState(false);
   const [showReports, setShowReports] = useState(false);
+  /** features.md 19: photo mode. Everything the interface draws goes away and
+   *  the world stays, which is the whole feature. */
+  const [photo, setPhoto] = useState(false);
   const [hover, setHover] = useState<{ text: string; x: number; y: number } | null>(null);
   const lastEventTick = useRef(0);
   // Build state lives in a ref: the drag handlers are installed once and the
@@ -330,10 +333,20 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
 
   const era = useMemo(() => C.eras.find((e) => e.n === w.era) ?? C.eras[0], [w.era]);
 
+  // The world view owns the keyboard for camera control, so it announces this
+  // rather than knowing what the interface does about it.
+  useEffect(() => {
+    const toggle = (): void => setPhoto((v) => !v);
+    window.addEventListener('interchange:photo', toggle);
+    return () => window.removeEventListener('interchange:photo', toggle);
+  }, []);
+
   return (
-    <div className="app">
+    <div className={`app${photo ? ' photo' : ''}`}>
       <WorldView engine={engine} onPick={onPick} onHover={onHover}
         onDragStart={onDragStart} onDragMove={onDragMove} onDragEnd={onDragEnd} />
+
+      {photo && <PhotoBar engine={engine} onLeave={() => setPhoto(false)} />}
 
       <div className="hud">
         <div className="topbar">
@@ -443,6 +456,7 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
           <RailButton label="Labour catchment" icon="☗" on={overlay === OverlayMode.Catchment} onClick={() => engine.setOverlay(overlay === OverlayMode.Catchment ? OverlayMode.None : OverlayMode.Catchment)} />
           <RailButton label="Power grid" icon="⚡" on={overlay === OverlayMode.Power} onClick={() => engine.setOverlay(overlay === OverlayMode.Power ? OverlayMode.None : OverlayMode.Power)} />
           <RailButton label="Water network" icon="≋" on={overlay === OverlayMode.Water} onClick={() => engine.setOverlay(overlay === OverlayMode.Water ? OverlayMode.None : OverlayMode.Water)} />
+          <RailButton label="Photo mode — hide the interface" icon="▣" on={photo} onClick={() => setPhoto(true)} />
         </div>
 
         {leftWindow === 'services' && <Services engine={engine} active={activeService} setActive={setActiveService} onFocus={focus} />}
@@ -535,6 +549,46 @@ function lineBetween(a: number, b: number, size: number): Int32Array {
     out[i] = Math.round(ay + (by - ay) * t) * size + Math.round(ax + (bx - ax) * t);
   }
   return out;
+}
+
+/**
+ * Photo mode. features.md 19.
+ *
+ * The whole feature is subtraction: everything the interface draws goes away
+ * and the world stays. That is worth building because this is a game whose
+ * world is the thing worth looking at — the art direction is a whole document
+ * about silhouette, era language and how a region reads from above — and every
+ * screenshot anybody takes of it otherwise has a ledger across a third of it.
+ *
+ * The bar below is the one exception, and it can be hidden too: the shot stays
+ * clean while the way out is still findable. A mode you cannot leave is a bug,
+ * and a mode with a permanent button in the corner is not photo mode.
+ */
+function PhotoBar({ engine, onLeave }: { engine: Engine; onLeave: () => void }): JSX.Element {
+  const w = engine.world;
+  const [hidden, setHidden] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+      if (e.key === 'Escape') onLeave();
+      if (e.key === 'h' || e.key === 'H') setHidden((v) => !v);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onLeave]);
+
+  if (hidden) return <></>;
+  return (
+    <div className="photobar">
+      <span className="stamp">{w.dateString()}</span>
+      <span className="dim">{C.eras.find((e) => e.n === w.era)?.name}</span>
+      <span style={{ flex: 1 }} />
+      <span className="dim">Q/E turn &middot; +/&minus; zoom &middot; H hides this &middot; Esc leaves</span>
+      <button className="btn tiny" onClick={onLeave}>Leave</button>
+    </div>
+  );
 }
 
 function RailButton({ label, icon, on, onClick }: { label: string; icon: string; on: boolean; onClick: () => void }): JSX.Element {

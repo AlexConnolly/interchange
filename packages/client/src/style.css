@@ -463,3 +463,43 @@ table.data tr.click:hover { background: rgba(232, 230, 223, 0.055); cursor: poin
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(232, 230, 223, 0.16); }
 ::-webkit-scrollbar-thumb:hover { background: rgba(232, 230, 223, 0.26); }
+
+/*
+ * Photo mode. features.md 19.
+ *
+ * Subtraction rather than a separate view: the world is already being drawn
+ * correctly, so the mode is one class that takes the interface away. Doing it
+ * any other way would mean a second render path that could drift from the
+ * first, and the whole point is a shot of what the game actually looks like.
+ */
+/*
+ * Everything the HUD draws, not a list of the pieces I remembered.
+ *
+ * The first version named the panels one by one and missed the event log, so
+ * "a heavy dray has broken down" sat in the middle of an otherwise clean shot.
+ * Hiding the container and letting the photo bar out again cannot miss
+ * anything, including whatever gets added next.
+ */
+.app.photo .hud { display: none; }
+
+.photobar {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  background: rgba(13, 16, 23, 0.55);
+  backdrop-filter: blur(6px);
+  border-radius: 3px;
+  font-size: 12px;
+  /* Almost invisible until wanted, so it is not in the picture. */
+  opacity: 0.28;
+  transition: opacity 140ms ease;
+}
+.photobar:hover { opacity: 1; }
+.photobar .stamp { font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }

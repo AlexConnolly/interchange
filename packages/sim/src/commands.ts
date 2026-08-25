@@ -59,6 +59,8 @@ export const Cmd = {
   /** Pay to restore the ground around a tile. design.md 2.3: the late game
    *  gets a redemption arc rather than only a ratchet. */
   Remediate: 62,
+  /** Make more region. features.md 13: the one thing that edits the map. */
+  Reclaim: 63,
 
   // --- meta --------------------------------------------------------------
   GrantCharter: 70,

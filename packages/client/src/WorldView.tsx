@@ -225,6 +225,12 @@ export function WorldView({ engine, onPick, onHover, onDragStart, onDragMove, on
         case 'o': case 'O':
           engine.setOverlay(rr.overlay === OverlayMode.Ownership ? OverlayMode.None : OverlayMode.Ownership);
           break;
+        // Photo mode. Handled by dispatching rather than by threading state
+        // down here, because the camera keys belong to the view and the
+        // interface's visibility does not.
+        case 'p': case 'P':
+          window.dispatchEvent(new CustomEvent('interchange:photo'));
+          break;
         default: break;
       }
     };

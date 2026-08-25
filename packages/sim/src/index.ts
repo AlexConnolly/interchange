@@ -47,3 +47,4 @@ export * from './regulation.ts';
 export * from './weather.ts';
 export * from './amenity.ts';
 export * from './publicworks.ts';
+export * from './reclamation.ts';

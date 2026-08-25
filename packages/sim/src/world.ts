@@ -28,6 +28,7 @@ import {
   runningCostPercent, ratePercent, FLOOD_LINE, EVENT_NAMES, EventKind, WEATHER_NAMES, Weather,
 } from './weather.ts';
 import { AmenityField, stepAmenity, REMEDIATION_PRICE, REMEDIATION_FROM_ERA } from './amenity.ts';
+import { planReclamation, reclaim, type ReclaimPlan } from './reclamation.ts';
 import { SchemeTable, stepPublicWorks, SchemeState } from './publicworks.ts';
 import { RegulatorTable, stepRegulator, accessChargeFor, Intervention, INTERVENTION_NAMES } from './regulation.ts';
 import {
@@ -2219,6 +2220,9 @@ export class World {
       case Cmd.ListAsset:
         if (this.assets.owner[c.a] === c.issuer) this.assets.forSale[c.a] = c.b ? 1 : 0;
         break;
+      case Cmd.Reclaim:
+        if (Array.isArray(c.data)) this.reclaimLand(c.issuer, c.data);
+        break;
       case Cmd.Remediate:
         this.remediate(c.issuer, c.a, c.b);
         break;
@@ -2305,6 +2309,46 @@ export class World {
    * therefore charge — so this is also where the first asset a company owns
    * comes from, and where the rent line in the income statement starts.
    */
+  /** What a reclamation would cost, without committing it. */
+  planReclaim(tiles: readonly number[]): ReclaimPlan {
+    return planReclamation(this.terrain, tiles, this.era);
+  }
+
+  /**
+   * Make more region. features.md 13.
+   *
+   * The only command in the game that edits the map, which is why it is
+   * hedged about so carefully in reclamation.ts. Everything downstream has to
+   * be told: the graph, because there is somewhere new to lay a road; the
+   * renderer, because the coastline moved; and the amenity field, because a
+   * polder is flat drained ground and scores like it.
+   */
+  reclaimLand(company: number, tiles: readonly number[]): boolean {
+    if (this.companies.charter[company] < Charter.Land) {
+      this.onEvent?.('refused', 'Remaking the coastline is a matter for a land charter.');
+      return false;
+    }
+    const plan = this.planReclaim(tiles);
+    if (!plan.ok) {
+      this.onEvent?.('refused', plan.problem);
+      return false;
+    }
+    if (this.companies.cash[company] < plan.cost) {
+      this.onEvent?.('refused', `That scheme costs ${Math.round(plan.cost / 100)}.`);
+      return false;
+    }
+    const changed = reclaim(this.terrain, plan);
+    if (changed.length === 0) return false;
+    this.companies.post(company, Line.Construction, plan.cost);
+    this.amenity.seed(this.terrain);
+    this.geometryVersion = -1;
+    this.rebuild();
+    if (company === this.player) {
+      this.onEvent?.('reclamation', `${changed.length} tiles won from the sea.`);
+    }
+    return true;
+  }
+
   /**
    * Pay to mend the ground. design.md 2.3.
    *
