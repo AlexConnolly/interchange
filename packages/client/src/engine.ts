@@ -111,11 +111,36 @@ export class Engine {
   attach(canvas: HTMLCanvasElement): void {
     this.renderer = new Renderer(canvas);
     const t = this.world.terrain;
-    // Start looking at the largest town: it is where the player's first
-    // decision is, and an empty corner of moorland is a poor first impression.
-    if (this.world.towns.count > 0) {
-      this.renderer.camState.x = this.world.towns.x[0];
-      this.renderer.camState.z = this.world.towns.y[0];
+    /*
+     * Start looking at the largest town with work around it.
+     *
+     * This said "the largest town" and took towns[0], which is merely the
+     * first one the generator placed — often a small one on the coast, so the
+     * game opened on half a screen of empty sea. The player's first decision
+     * is a route between somewhere that makes something and somewhere that
+     * wants it, so the opening shot should have both in it: population for the
+     * demand, and the industries within a cart ride for the supply.
+     */
+    let best = -1;
+    let bestScore = -1;
+    for (let i = 0; i < this.world.towns.count; i++) {
+      const tx = this.world.towns.x[i];
+      const ty = this.world.towns.y[i];
+      let nearby = 0;
+      for (let s = 0; s < this.world.sites.count; s++) {
+        const dx = this.world.sites.x[s] - tx;
+        const dy = this.world.sites.y[s] - ty;
+        if (dx * dx + dy * dy < 60 * 60) nearby++;
+      }
+      const score = this.world.towns.population[i] + nearby * 220;
+      if (score > bestScore) {
+        bestScore = score;
+        best = i;
+      }
+    }
+    if (best >= 0) {
+      this.renderer.camState.x = this.world.towns.x[best];
+      this.renderer.camState.z = this.world.towns.y[best];
     } else {
       this.renderer.camState.x = t.size / 2;
       this.renderer.camState.z = t.size / 2;

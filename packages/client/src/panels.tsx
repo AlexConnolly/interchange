@@ -13,6 +13,7 @@ import { useMemo, useState } from 'react';
 import {
   CHARTER_NAMES, Cmd, ContractState, LINE_IS_INCOME, LINE_NAMES, Line,
   STATE_NAMES, StopAction, TICKS_PER_DAY, MAX_STOPS, NONE, VState,
+  CHARTER_REQUIREMENTS,
 } from '@interchange/sim';
 import { content } from '@interchange/data';
 import { money, num, pct, shortMoney, signClass, tonnes, days } from './format.ts';
@@ -598,18 +599,18 @@ export function CharterPanel({ engine }: { engine: Engine }): JSX.Element {
   const goals: { label: string; have: number; need: number }[] =
     have === 0
       ? [
-          { label: 'Contracts delivered', have: w.companies.delivered[p], need: 6 },
-          { label: 'Revenue this year', have: revenue, need: 900000 },
-          { label: 'Cash in hand', have: w.companies.cash[p], need: 400000 },
+          { label: 'Contracts delivered', have: w.companies.delivered[p], need: CHARTER_REQUIREMENTS.construction.contracts },
+          { label: 'Revenue this year', have: revenue, need: CHARTER_REQUIREMENTS.construction.revenue },
+          { label: 'Cash in hand', have: w.companies.cash[p], need: CHARTER_REQUIREMENTS.construction.cash },
         ]
       : have === 1
         ? [
-            { label: 'Revenue this year', have: revenue, need: 4000000 },
-            { label: 'Infrastructure owned', have: w.ownedAssets(p), need: 4 },
+            { label: 'Revenue this year', have: revenue, need: CHARTER_REQUIREMENTS.extraction.revenue },
+            { label: 'Infrastructure owned', have: w.ownedAssets(p), need: CHARTER_REQUIREMENTS.extraction.assets },
           ]
         : [
-            { label: 'Revenue this year', have: revenue, need: 14000000 },
-            { label: 'Industries owned', have: w.ownedSites(p), need: 3 },
+            { label: 'Revenue this year', have: revenue, need: CHARTER_REQUIREMENTS.land.revenue },
+            { label: 'Industries owned', have: w.ownedSites(p), need: CHARTER_REQUIREMENTS.land.sites },
           ];
 
   return (

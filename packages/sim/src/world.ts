@@ -18,7 +18,7 @@ import {
 import { Cmd, CommandQueue, type Command } from './commands.ts';
 import {
   CompanyTable, ContractState, ContractTable, Charter, Line, LINE_COUNT,
-  ServiceTable, StopAction, MAX_STOPS, hashEconomy, haulageRate, HAUL_ALLOWANCE, RATE_WEIGHT_BY_TIER, makeContract, stepFinance,
+  ServiceTable, StopAction, MAX_STOPS, hashEconomy, haulageRate, HAUL_ALLOWANCE, RATE_WEIGHT_BY_TIER, CHARTER_REQUIREMENTS, makeContract, stepFinance,
 } from './economy.ts';
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
 import { Hasher } from './hash.ts';
@@ -1460,13 +1460,16 @@ export class World {
        * that is actually doing well reaches: a good operator gets there, a
        * mediocre one does not, which is the only thing a gate is for.
        */
+      const req = CHARTER_REQUIREMENTS;
       let earned = false;
       if (have === Charter.Carrier) {
-        earned = delivered >= 2 && revenue >= 250000 && cash >= 300000;
+        earned = delivered >= req.construction.contracts
+          && revenue >= req.construction.revenue
+          && cash >= req.construction.cash;
       } else if (have === Charter.Construction) {
-        earned = revenue >= 900000 && this.ownedAssets(c) >= 3;
+        earned = revenue >= req.extraction.revenue && this.ownedAssets(c) >= req.extraction.assets;
       } else if (have === Charter.Extraction) {
-        earned = revenue >= 2500000 && this.ownedSites(c) >= 2;
+        earned = revenue >= req.land.revenue && this.ownedSites(c) >= req.land.sites;
       }
       if (earned) {
         this.companies.charter[c] = have + 1;

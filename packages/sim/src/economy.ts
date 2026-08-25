@@ -163,6 +163,29 @@ export class CompanyTable {
   }
 }
 
+/**
+ * What each charter asks for, in one place.
+ *
+ * The simulation checked these and the charter panel drew them, from two
+ * separate copies of the numbers. They drifted the moment the thresholds were
+ * calibrated against the sweep, so the game awarded a charter at two contracts
+ * while the panel told the player they needed six — the worst kind of bug,
+ * because everything works and the interface lies about it.
+ *
+ * The figures themselves are measured rather than guessed. Across ten
+ * forty-year runs they sit near the upper quartile of what a company that is
+ * actually trading well reaches, so a good operator earns a charter and a
+ * mediocre one does not.
+ */
+export const CHARTER_REQUIREMENTS = {
+  /** Carrier -> Construction: you may lay your own way. */
+  construction: { contracts: 2, revenue: 250000, cash: 300000 },
+  /** Construction -> Extraction: you may found industry. */
+  extraction: { revenue: 900000, assets: 3 },
+  /** Extraction -> Land: you may deal in land itself. */
+  land: { revenue: 2500000, sites: 2 },
+} as const;
+
 export const ContractState = {
   Offered: 0,
   Active: 1,
