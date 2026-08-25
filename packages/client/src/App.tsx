@@ -353,6 +353,25 @@ export function App(): JSX.Element {
   const [options, setOptions] = useState<Options>(loadOptions);
   const [paused, setPaused] = useState(false);
   const [, pauseLeaving] = useLeaving(paused, paused, 140);
+
+  /*
+   * The book, opened and shut.
+   *
+   * Driven from the state rather than from the buttons, because far too many
+   * things open a panel: a dock button, a marker on the map, a row in a list, a
+   * yard, the cog. Watching the one thing they all change is one effect instead
+   * of a rule every one of them has to remember.
+   *
+   * `claimPress` rather than `oneShot`, so the page turn that the press itself
+   * queued is replaced rather than layered under this.
+   */
+  const wasShowing = useRef(false);
+  const showing = panelOpen || paused;
+  useEffect(() => {
+    if (showing === wasShowing.current) return;
+    wasShowing.current = showing;
+    sound.claimPress(showing ? 'open' : 'close', showing ? 0.5 : 0.45);
+  }, [showing]);
   /**
    * The frame loop reads both of these through refs.
    *
@@ -1626,7 +1645,7 @@ export function App(): JSX.Element {
       void sound.start();
       const el = (e.target as HTMLElement | null)?.closest?.('button');
       if (el && !el.hasAttribute('data-quiet') && !el.hasAttribute('disabled')) {
-        sound.oneShot(el.classList.contains('primary') ? 'confirm' : 'click', 0.5);
+        sound.press(el.classList.contains('primary') ? 'confirm' : 'click', 0.5);
       }
     };
     window.addEventListener('pointerdown', wake);

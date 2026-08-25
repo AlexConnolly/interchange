@@ -59,8 +59,23 @@ export const MANIFEST = {
   wind: 'wind.mp3',
   /** Rain, steady, looped. */
   rain: 'rain.mp3',
-  /** A soft click for pressing something in the interface. */
+  /**
+   * The interface, and it is paper rather than electronics.
+   *
+   * "The UI sound for clicking is a horrible beep. I was more thinking like a
+   * book opening/closing sound" — and a beep was wrong for a reason worth
+   * writing down: this is 1985, the player is a haulier with a ledger and a
+   * clipboard, and there is not a single thing in the district that could make
+   * that noise. A page turn is what the game's own furniture sounds like.
+   *
+   * Three, not one, because opening a panel and pressing a row in it are not the
+   * same gesture. The book opens, the book shuts, and everything else is a page.
+   */
   click: 'ui-click.mp3',
+  /** A panel opening: a book being opened. */
+  open: 'ui-open.mp3',
+  /** And shutting it again. */
+  close: 'ui-close.mp3',
   /** A slightly warmer one for a purchase going through. */
   confirm: 'ui-confirm.mp3',
   /**
@@ -522,6 +537,41 @@ export class Sound {
   }
 
   private hornGap = 14000;
+
+  /**
+   * A press on something in the interface, held for a moment.
+   *
+   * Held because the button does not know what it did. Pressing a dock button, a
+   * marker on the map or a row in a list may or may not open a panel, and if it
+   * does then the book opening is the sound of that press — not a page turn
+   * *and* a book, one on top of the other, which is what playing both gives you.
+   *
+   * So the press is queued, and a panel opening or closing in the same beat
+   * claims it. Twenty-four milliseconds is far below the hundred or so where a
+   * delay starts to be heard as lag, and React has committed by then.
+   */
+  press(name: SoundName, volume = 1): void {
+    this.pressName = name;
+    this.pressVolume = volume;
+    window.clearTimeout(this.pressTimer);
+    this.pressTimer = window.setTimeout(() => {
+      if (this.pressName !== null) this.oneShot(this.pressName, this.pressVolume);
+      this.pressName = null;
+    }, 24);
+  }
+
+  /** Take over a queued press: this is what that click actually did. */
+  claimPress(name: SoundName, volume = 1): void {
+    this.pressName = null;
+    window.clearTimeout(this.pressTimer);
+    this.oneShot(name, volume);
+  }
+
+  private pressTimer = 0;
+
+  private pressName: SoundName | null = null;
+
+  private pressVolume = 1;
 
   /** A one-shot, positional if given a place and flat if not. */
   oneShot(name: SoundName, volume = 1, x?: number, z?: number): void {
