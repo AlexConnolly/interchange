@@ -22,6 +22,7 @@ import {
 } from '@interchange/render';
 import { Alerts, Earnings, Markers, Mine, money } from './Markers.tsx';
 import { Ambient, areaDemand } from './ambient.ts';
+import { eveningFor, litness, type Evening } from './evening.ts';
 import { Fleet, Yard } from './Fleet.tsx';
 import { Planning } from './Planning.tsx';
 import { Dock } from './Dock.tsx';
@@ -332,6 +333,7 @@ export function App(): JSX.Element {
       pz: new Float32Array(320),
       pModel: new Uint8Array(320),
       pRot: new Float32Array(320),
+      pLamp: new Float32Array(320 * 3),
       scatterCount: 0,
       sx: new Float32Array(1400),
       sz: new Float32Array(1400),
@@ -365,8 +367,18 @@ export function App(): JSX.Element {
     const YARD_MODEL = world.content.industries.length;
     const VILLAGE_FIRST = YARD_MODEL + 1;
 
-    interface Placed { x: number; z: number; model: number; rot: number; tile: number }
+    interface Placed {
+      x: number; z: number; model: number; rot: number; tile: number; evening: Evening;
+    }
     const placed: Placed[] = [];
+    /*
+     * The world seed, so two districts light up differently.
+     *
+     * Reading it back off the world rather than keeping the literal, because the
+     * seed is the world's property and a copy of it here would be one more thing
+     * to keep in step.
+     */
+    const seed = world.config.seed;
 
     // One building per business, at its access tile — the tile the road reaches,
     // so a farm sits on its own lane rather than in the middle of a field.
@@ -380,6 +392,7 @@ export function App(): JSX.Element {
         // A quarter turn either way, keyed off the tile so it never changes.
         rot: ((tile * 2654435761) % 4) / 4,
         tile,
+        evening: eveningFor((tile % DISTRICT) + 0.5, Math.floor(tile / DISTRICT) + 0.5, seed),
       });
     }
 
@@ -426,7 +439,14 @@ export function App(): JSX.Element {
           model = VILLAGE_FIRST + Math.floor(rand() * 3);
           if (rand() > 0.88) model = VILLAGE_FIRST + 4;
         }
-        placed.push({ x: x + 0.5, z: z + 0.5, model, rot: Math.floor(rand() * 4) / 4, tile });
+        placed.push({
+          x: x + 0.5,
+          z: z + 0.5,
+          model,
+          rot: Math.floor(rand() * 4) / 4,
+          tile,
+          evening: eveningFor(x + 0.5, z + 0.5, seed),
+        });
       }
     }
 
@@ -1053,6 +1073,19 @@ export function App(): JSX.Element {
       }
       if (ran > 0) world.project();
 
+      /*
+       * The clock, before anything that reads it.
+       *
+       * This used to be set after the vehicles and the buildings were packed,
+       * which was harmless while nothing depended on it — and stopped being
+       * harmless the moment the buildings needed to know the hour to decide
+       * whether their lights were on. A frame's worth of lag on a lighting
+       * decision is invisible; the habit of computing a value after its readers
+       * is not.
+       */
+      src.dayFraction = ((world.tick + TICKS_PER_DAY * dayOffset) % TICKS_PER_DAY)
+        / TICKS_PER_DAY;
+
       // Vehicles, straight out of the traffic table.
       let n = 0;
       for (let i = 0; i < world.vehicles.count && n < src.vx.length; i++) {
@@ -1093,6 +1126,13 @@ export function App(): JSX.Element {
         src.pz[pn] = q.z;
         src.pModel[pn] = q.model;
         src.pRot[pn] = q.rot;
+        // What its windows are burning, if anything. Zero is off, and off
+        // multiplies the emissive window *and* the pool of light it throws to
+        // nothing in one go.
+        const lit = litness(q.evening, src.dayFraction);
+        src.pLamp[pn * 3] = q.evening.colour[0] * lit;
+        src.pLamp[pn * 3 + 1] = q.evening.colour[1] * lit;
+        src.pLamp[pn * 3 + 2] = q.evening.colour[2] * lit;
         pn++;
       }
       /*
@@ -1122,6 +1162,10 @@ export function App(): JSX.Element {
         src.pz[pn] = Math.floor(tile / DISTRICT) + 0.5;
         src.pModel[pn] = world.sites.def[i];
         src.pRot[pn] = 0;
+        // A depot runs at night. That is what a depot is for.
+        src.pLamp[pn * 3] = 1;
+        src.pLamp[pn * 3 + 1] = 0.80;
+        src.pLamp[pn * 3 + 2] = 0.50;
         pn++;
       }
       for (let y = 0; y < world.yards.count && pn < src.px.length; y++) {
@@ -1130,6 +1174,12 @@ export function App(): JSX.Element {
         src.pz[pn] = world.yards.y[y] + 0.5;
         src.pModel[pn] = YARD_MODEL;
         src.pRot[pn] = 0;
+        // A yard of yours is lit all night: somebody is always on shift, and it
+        // is also the one building on the map you need to be able to find in the
+        // dark.
+        src.pLamp[pn * 3] = 1;
+        src.pLamp[pn * 3 + 1] = 0.78;
+        src.pLamp[pn * 3 + 2] = 0.46;
         pn++;
       }
       if (pn !== src.placeCount) renderer.placeRevision++;
@@ -1174,7 +1224,7 @@ export function App(): JSX.Element {
        * dark, which is a poor first frame for a game whose whole argument is how
        * it looks in the sun.
        */
-      src.dayFraction = ((world.tick + TICKS_PER_DAY * dayOffset) % TICKS_PER_DAY) / TICKS_PER_DAY;
+
       // One number, read by the renderer to paint the season and by the traffic
       // to decide who can move. There is deliberately not a second one.
       src.snow = world.snow;

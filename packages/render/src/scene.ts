@@ -29,9 +29,9 @@
 
 import {
   AdditiveBlending, BackSide, Color, DirectionalLight, DoubleSide, Group,
-  InstancedMesh, MeshBasicMaterial, MeshLambertMaterial, Object3D, OrthographicCamera,
-  HemisphereLight, PCFSoftShadowMap, PointLight, Scene as ThreeScene, Vector3,
-  WebGLRenderer,
+  InstancedBufferAttribute, InstancedMesh, MeshBasicMaterial, MeshLambertMaterial,
+  Object3D, OrthographicCamera, HemisphereLight, PCFSoftShadowMap, PointLight,
+  Scene as ThreeScene, Vector3, WebGLRenderer,
 } from 'three';
 import { buildGround, toMesh, HEIGHT_TO_WORLD, type GroundSource } from './ground.ts';
 import { Mesh } from './geometry.ts';
@@ -98,6 +98,21 @@ export interface RenderSource extends GroundSource, RoadSource {
   pModel: Uint8Array;
   /** Heading in turns, so a farmyard is not axis-aligned with its neighbour. */
   pRot: Float32Array;
+  /**
+   * What colour each building's windows are burning, as RGB triples.
+   *
+   * Black is off, and off is a real state: every house picks its own hour to
+   * light up and its own hour to go to bed, and one in ten never bothers. All of
+   * it is decided from the building's position and the world seed, so the same
+   * village lights up the same way every time you play it — which is the whole
+   * point. A village where the pattern of lit windows changed every evening
+   * would read as flickering rather than as people.
+   *
+   * A triple rather than a brightness, because the same hash that picks the hour
+   * also warms or cools the bulb a little, and no two windows in a street are
+   * the same colour.
+   */
+  pLamp: Float32Array;
   /** 0..1 through the day, for the sun. */
   dayFraction: number;
   /** Which day it is, so the weather is the same on the same day. */
@@ -948,7 +963,8 @@ export class Renderer {
    * having. A tree without a shadow is a sticker.
    */
   setScatterModels(models: Model[], capacity = 700): void {
-    for (const b of this.scatterBatches) {
+    for (const b of [...this.scatterBatches, ...this.scatterLamps]) {
+      if (!b) continue;
       this.scatter.remove(b);
       b.dispose();
     }
@@ -962,7 +978,33 @@ export class Renderer {
       this.scatter.add(mesh);
       return mesh;
     });
+    /*
+     * And the lamps, which this dropped — the third time this exact omission has
+     * cost something.
+     *
+     * A street lamp's lit head and the pool it throws are both painted with the
+     * reserved lamp slot, so they arrive in `model.lamps`; this took only
+     * `model.body`, so the district gained lamp *posts* and no light from any of
+     * them. I had already fixed the same thing on the fleet and then on the
+     * buildings, and still wrote it a third time.
+     *
+     * The reason it keeps happening is that a model with its lamps thrown away
+     * looks entirely correct in daylight, so nothing complains until it is dark.
+     */
+    this.scatterLamps = models.map((model) => {
+      if (!model.lamps) return null;
+      const mesh = new InstancedMesh(model.lamps, this.glow, capacity);
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.frustumCulled = false;
+      mesh.count = 0;
+      mesh.visible = false;
+      this.scatter.add(mesh);
+      return mesh;
+    });
   }
+
+  private scatterLamps: (InstancedMesh | null)[] = [];
 
   private updateScatter(src: RenderSource): void {
     if (this.scatterBatches.length === 0) return;
@@ -982,7 +1024,9 @@ export class Renderer {
       const k = src.sScale[i];
       this.tmp.scale.set(k, k, k);
       this.tmp.updateMatrix();
-      batch.setMatrixAt(counts[mi]++, this.tmp.matrix);
+      const at = counts[mi]++;
+      batch.setMatrixAt(at, this.tmp.matrix);
+      this.scatterLamps[mi]?.setMatrixAt(at, this.tmp.matrix);
     }
     // Everything else in this file uses an unscaled `tmp`, so put it back or a
     // building drawn after a tree comes out tree-sized.
@@ -993,6 +1037,12 @@ export class Renderer {
       batch.count = counts[mi];
       batch.visible = counts[mi] > 0;
       batch.instanceMatrix.needsUpdate = true;
+      const lamp = this.scatterLamps[mi];
+      if (lamp) {
+        lamp.count = counts[mi];
+        lamp.visible = counts[mi] > 0;
+        lamp.instanceMatrix.needsUpdate = true;
+      }
     }
   }
 
@@ -1005,12 +1055,15 @@ export class Renderer {
 
   private updatePlaces(src: RenderSource): void {
     if (this.placeBatches.length === 0) return;
-    // Rebuilt only when the list changes, which it does when influence grows or
-    // a chunk streams in — not sixty times a second for a static village.
-    const key = `${src.placeCount}:${this.placeRevision}`;
-    if (key === this.placeKey) return;
-    this.placeKey = key;
-
+    /*
+     * Laid out every frame now, and the cache that used to guard this had to go.
+     *
+     * It keyed on the number of buildings, which was right while a building was
+     * a fixed thing — but a window that comes on at its own hour changes what has
+     * to be written without changing what is in the list, and a cache cannot see
+     * that. Forty buildings and a matrix compose each is nothing; the caching was
+     * premature and it was about to be wrong.
+     */
     const counts = new Int32Array(this.placeBatches.length);
     for (let i = 0; i < src.placeCount; i++) {
       const mi = src.pModel[i] % this.placeBatches.length;
@@ -1041,7 +1094,24 @@ export class Renderer {
       this.tmp.updateMatrix();
       const at = counts[mi]++;
       batch.setMatrixAt(at, this.tmp.matrix);
-      this.placeLamps[mi]?.setMatrixAt(at, this.tmp.matrix);
+      const lamp = this.placeLamps[mi];
+      if (lamp) {
+        lamp.setMatrixAt(at, this.tmp.matrix);
+        // Per-instance colour, which is how one house can be lit and the one
+        // beside it dark out of the same geometry. Black multiplies the emissive
+        // window and its pool of light to nothing at once, so "off" costs
+        // nothing and needs no second batch.
+        if (!lamp.instanceColor) {
+          lamp.instanceColor = new InstancedBufferAttribute(
+            new Float32Array(lamp.instanceMatrix.count * 3), 3,
+          );
+        }
+        const c = lamp.instanceColor.array as Float32Array;
+        c[at * 3] = src.pLamp[i * 3];
+        c[at * 3 + 1] = src.pLamp[i * 3 + 1];
+        c[at * 3 + 2] = src.pLamp[i * 3 + 2];
+        lamp.instanceColor.needsUpdate = true;
+      }
     }
     for (let mi = 0; mi < this.placeBatches.length; mi++) {
       const batch = this.placeBatches[mi];
@@ -1185,6 +1255,26 @@ export class Renderer {
       const n = this.counts[slot]++;
       batch.setMatrixAt(n, this.tmp.matrix);
       this.lamps[mi][li]?.setMatrixAt(n, this.tmp.matrix);
+      /*
+       * A few per cent of colour variation per vehicle, from its own id.
+       *
+       * Four liveries over thirty vehicles reads as a fleet of clones. A little
+       * jitter — paint, dirt, age — and the same road stops looking stamped.
+       * Applied to the whole instance rather than only the bodywork, which is
+       * the compromise `instanceColor` forces; at six per cent nobody can see
+       * that the tyres varied too.
+       */
+      if (!batch.instanceColor) {
+        batch.instanceColor = new InstancedBufferAttribute(
+          new Float32Array(batch.instanceMatrix.count * 3), 3,
+        );
+      }
+      const jc = batch.instanceColor.array as Float32Array;
+      const seed = (id * 2654435761) >>> 0;
+      jc[n * 3] = 0.94 + ((seed >>> 5) & 63) / 63 * 0.12;
+      jc[n * 3 + 1] = 0.94 + ((seed >>> 13) & 63) / 63 * 0.12;
+      jc[n * 3 + 2] = 0.94 + ((seed >>> 21) & 63) / 63 * 0.12;
+      batch.instanceColor.needsUpdate = true;
     }
 
     // Anything not seen this frame is gone: retired, sold, or wandered out of
