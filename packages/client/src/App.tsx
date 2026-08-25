@@ -61,7 +61,11 @@ const TREE_MODELS = [
 const PROP_MODELS = [
   'prop_bale_round', 'prop_bale_wrapped', 'prop_bale_stack',
   'prop_stook', 'prop_sheep', 'prop_cattle', 'prop_muck', 'prop_trough',
+  'prop_lamp_post',
 ];
+
+/** Index of the lamp post within `PROP_MODELS`. It is placed by its own rule. */
+const PROP_LAMP = 8;
 
 /** Crop indices, matching `Crop` in the sim's fields.ts. */
 const CROP_PASTURE = 0;
@@ -334,6 +338,9 @@ export function App(): JSX.Element {
       sModel: new Uint8Array(1400),
       sRot: new Float32Array(1400),
       sScale: new Float32Array(1400),
+      lampCount: 0,
+      lx: new Float32Array(400),
+      lz: new Float32Array(400),
       dayFraction: 0.62,
       snow: 0,
       dayNumber: 0,
@@ -446,6 +453,15 @@ export function App(): JSX.Element {
      */
     interface Scattered { x: number; z: number; model: number; rot: number; scale: number }
     const trees: Scattered[] = [];
+    /*
+     * Where the street lamps are, kept separately as well as scattered.
+     *
+     * The scatter layer draws them; the renderer's pool of real lights needs to
+     * know where they are, and a street lamp is the *most* worth a real light of
+     * anything in the district — it is the main source on a road at night, and
+     * unlike a window it has nothing else near it to borrow light from.
+     */
+    const lampPosts: { x: number; z: number }[] = [];
     {
       const parcel = world.terrain.fields.parcel;
       const crop = world.terrain.fields.crop;
@@ -507,6 +523,55 @@ export function App(): JSX.Element {
        * ten-tile field reads as a field with bales in it; thirty reads as a
        * warehouse.
        */
+      /*
+       * Street lamps, and *where* is the whole design.
+       *
+       * In 1985 England a village street and a trunk road are lit and a country
+       * lane is not — so lighting every road would flatten the one distinction
+       * that makes a district read as a district. Two rules: within reach of a
+       * settlement, or on the best class of road. A farm track is never lit, and
+       * the dark stretch between two villages is the point of the lit ones.
+       *
+       * Every third tile, alternating sides, and each one turned so its arm
+       * overhangs the carriageway — the model knows it leans along +X and
+       * nothing else has to.
+       */
+      for (let z = 1; z < DISTRICT - 1 && trees.length < 1400; z++) {
+        for (let x = 1; x < DISTRICT - 1 && trees.length < 1400; x++) {
+          const t = z * DISTRICT + x;
+          if (roadClass[t] < 0) continue;
+          const trunk = roadClass[t] === RoadClass.Spine;
+          let near = false;
+          for (let tw = 0; tw < world.towns.count; tw++) {
+            const dx = world.towns.x[tw] - x;
+            const dz = world.towns.y[tw] - z;
+            if (dx * dx + dz * dz < 100) { near = true; break; }
+          }
+          if (!near && !trunk) continue;
+          // Every third tile along whichever way the road runs, so the spacing
+          // is even and does not double up at a junction.
+          const alongX = roadClass[t - 1] >= 0 || roadClass[t + 1] >= 0;
+          const step = alongX ? x : z;
+          if (step % 3 !== 0) continue;
+          // Alternating sides, which is what a real street does and what stops a
+          // long straight reading as a fence.
+          const side = ((step / 3) | 0) % 2 === 0 ? 1 : -1;
+          const offX = alongX ? 0 : side * 0.42;
+          const offZ = alongX ? side * 0.42 : 0;
+          // Turn the arm to overhang the road: it points along +X unrotated, so
+          // the rotation is the direction from the post back to the centreline.
+          const rot = Math.atan2(-offZ, -offX) / (Math.PI * 2);
+          lampPosts.push({ x: x + 0.5 + offX, z: z + 0.5 + offZ });
+          trees.push({
+            x: x + 0.5 + offX,
+            z: z + 0.5 + offZ,
+            model: TREE_MODELS.length + PROP_LAMP,
+            rot: ((rot % 1) + 1) % 1,
+            scale: 1,
+          });
+        }
+      }
+
       for (let z = 1; z < DISTRICT - 1 && trees.length < 1400; z++) {
         for (let x = 1; x < DISTRICT - 1 && trees.length < 1400; x++) {
           const t = z * DISTRICT + x;
@@ -1086,6 +1151,19 @@ export function App(): JSX.Element {
         sn++;
       }
       src.scatterCount = sn;
+
+      // And the street lamps, for the real-light pool. Filtered by influence
+      // like everything else: a lit road you cannot reach is not lit.
+      let ln = 0;
+      for (const q of lampPosts) {
+        if (ln >= src.lx.length) break;
+        const tile = Math.round(q.z) * DISTRICT + Math.round(q.x);
+        if (!world.influence.usable(tile)) continue;
+        src.lx[ln] = q.x;
+        src.lz[ln] = q.z;
+        ln++;
+      }
+      src.lampCount = ln;
       /*
        * Open in the late afternoon, which is the light in the target frame.
        *

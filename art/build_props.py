@@ -150,7 +150,77 @@ def trough():
     return made
 
 
+# Sodium. Not a stylistic choice — a 1985 English street lamp is low-pressure
+# sodium, which is the most saturated orange any lamp has ever been, and the
+# reason a photograph of a town at night in that decade is unmistakable. Getting
+# it wrong (a modern white LED) would date the district by forty years in one
+# colour.
+SODIUM = (1.0, 0.50, 0.09, 1.0)
+SODIUM_DIM = (0.30, 0.13, 0.02, 1.0)
+POST = (0.286, 0.298, 0.318, 1)
+
+
+def lamp_post():
+    """A street lamp, with the light it throws.
+
+    The head overhangs **+X**, and the pool of light on the ground goes the same
+    way, so the client places one by pointing +X at the road. That is the whole
+    interface: a lamp knows which way it leans and nothing else needs to.
+
+    Tall — about half the height of a cottage. A street lamp that scaled honestly
+    against a symbolic tile would be a pin, and the thing that makes a lit road
+    read as a lit road from above is the *spacing of the pools*, which needs the
+    lamp high enough to throw one.
+    """
+    made = []
+    h = 0.44
+    made.append(_paint(lib.box('lp_post', (0.017, 0.017, h), loc=(0, 0, h / 2)),
+                       POST, 'lamppost', rough=0.6))
+    # The arm, and a slight droop at the end of it. A straight bracket reads as
+    # a flagpole; a bent one reads as a street lamp even at four pixels.
+    made.append(_paint(lib.box('lp_arm', (0.105, 0.013, 0.011),
+                               loc=(0.046, 0, h - 0.006)), POST, 'lamppost'))
+    lit = lib.material(lib.LAMP + '_na', SODIUM, emissive=3.2, rough=0.3)
+    halo = lib.material(lib.LAMP + '_nah', SODIUM_DIM, emissive=1.0, rough=0.4)
+    # Bigger than the fitting would be, on the same argument as the vehicle
+    # lamps: at playing zoom a truthfully sized lantern is two pixels, and a
+    # lamp post whose lamp you cannot see is a dark stick.
+    lamp = lib.box('lp_head', (0.075, 0.052, 0.030), loc=(0.098, 0, h - 0.020))
+    lamp.data.materials.append(lit)
+    made.append(lamp)
+    glow = lib.box('lp_halo', (0.165, 0.125, 0.098), loc=(0.098, 0, h - 0.022))
+    glow.data.materials.append(halo)
+    made.append(glow)
+
+    # And the pool it throws, centred under the head and reaching across the
+    # road. Same overlapping-strip trick as the windows and the headlamps.
+    steps = 5
+    reach = 0.48
+    for i in range(steps):
+        f = i / steps
+        g = (i + 1) / steps
+        bright = (1 - g) ** 2.2
+        mat = lib.material(lib.LAMP + '_np%d' % i,
+                           # Dimmer and narrower than the first go: with a real
+                           # sodium light also on the nearest posts, a wide drawn
+                           # pool on top of it turned the whole village into one
+                           # yellow blob rather than a row of pools.
+                           (0.21 * bright, 0.10 * bright, 0.018 * bright, 1.0),
+                           emissive=1.0, rough=0.6)
+        # A ring rather than a cone: a lamp lights the ground all round its foot,
+        # brightest under the head. Two strips a step, one each side.
+        for sx in (-1, 1):
+            mid = 0.098 + sx * reach * (f + g) / 2
+            span = reach * (g - f) * 1.34
+            o = lib.box('lp_pool%d%d' % (i, sx), (span, 0.30 * (1.1 - 0.5 * g), 0.004),
+                        loc=(mid, 0, 0.006))
+            o.data.materials.append(mat)
+            made.append(o)
+    return made
+
+
 BUILDS = [
+    ('prop_lamp_post', lamp_post),
     ('prop_bale_round', bale_round),
     ('prop_bale_wrapped', bale_wrapped),
     ('prop_bale_stack', bale_stack),
@@ -171,7 +241,10 @@ def main():
         lib.export(name, [], report)
     # The tree budget, for the tree reason: drawn hundreds of times, so this is
     # the cost that actually multiplies.
-    lib.summarise(report, budget=140)
+    # 180. The lamp post is the one thing here that carries its own pool of
+    # light, which is ten boxes of it — and a lit road is most of what a village
+    # at night looks like from above.
+    lib.summarise(report, budget=180)
 
 
 if __name__ == '__main__':

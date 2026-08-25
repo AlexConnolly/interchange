@@ -118,6 +118,17 @@ export interface RenderSource extends GroundSource, RoadSource {
   sModel: Uint8Array;
   sRot: Float32Array;
   sScale: Float32Array;
+  /**
+   * Street lamps, for the pool of real lights.
+   *
+   * Separate from the scatter that draws them because these are the strongest
+   * claim on a real light in the whole district: a street lamp is the main source
+   * on a road at night and has nothing near it to borrow from, where a window at
+   * least sits on a building that catches the moon.
+   */
+  lampCount: number;
+  lx: Float32Array;
+  lz: Float32Array;
 }
 
 interface Chunk {
@@ -640,7 +651,17 @@ export class Renderer {
       const dz = src.pz[i] - this.camZ;
       const d = dx * dx + dz * dz;
       if (d > 900) continue;
-      cand.push({ x: src.px[i], z: src.pz[i], d, warm: true });
+      cand.push({ x: src.px[i], z: src.pz[i], d, warm: true, sodium: false });
+    }
+    for (let i = 0; i < src.lampCount; i++) {
+      const dx = src.lx[i] - this.camX;
+      const dz = src.lz[i] - this.camZ;
+      const d = dx * dx + dz * dz;
+      if (d > 900) continue;
+      // Weighted closer than it is, so a street lamp beats a window at the same
+      // distance for a place in the pool. It is the brighter thing in life and
+      // the one whose absence is most obvious.
+      cand.push({ x: src.lx[i], z: src.lz[i], d: d * 0.45, warm: true, sodium: true });
     }
     for (let i = 0; i < src.vehicleCount; i++) {
       // Only yours. Ambient traffic already carries a drawn beam, and a real
@@ -650,21 +671,46 @@ export class Renderer {
       const dz = src.vz[i] - this.camZ;
       const d = dx * dx + dz * dz;
       if (d > 400) continue;
-      cand.push({ x: src.vx[i], z: src.vz[i], d, warm: false });
+      cand.push({ x: src.vx[i], z: src.vz[i], d, warm: false, sodium: false });
     }
 
-    const want = Math.min(this.lampPool.length, cand.length);
-    for (let k = 0; k < want; k++) {
-      let best = k;
-      for (let j = k + 1; j < cand.length; j++) {
-        if (cand[j].d < cand[best].d) best = j;
+    /*
+     * Spread them out, and this is the difference between lighting and a blob.
+     *
+     * Taking simply the eight nearest put all eight on one village — the street
+     * lamps along fifty yards of the same lane — and eight point lights summing
+     * over one patch of grass is a floodlight, not a lit street. Refusing a
+     * candidate within a tile and a half of one already chosen makes the pool
+     * cover the *area* rather than pile onto the closest corner of it, so what
+     * you see is a row of separate pools down a road.
+     *
+     * Greedy nearest-first with a separation test, which is one more comparison
+     * per candidate and needs no clustering pass.
+     */
+    const APART = 1.5 * 1.5;
+    let filled = 0;
+    for (let k = 0; k < cand.length && filled < this.lampPool.length; k++) {
+      let best = -1;
+      for (let j = k; j < cand.length; j++) {
+        if (best < 0 || cand[j].d < cand[best].d) best = j;
       }
+      if (best < 0) break;
       const tmp = cand[k];
       cand[k] = cand[best];
       cand[best] = tmp;
 
       const c = cand[k];
-      const light = this.lampPool[k];
+      let crowded = false;
+      for (let q = 0; q < filled; q++) {
+        const l = this.lampPool[q];
+        const dx = l.position.x - c.x;
+        const dz = l.position.z - c.z;
+        if (dx * dx + dz * dz < APART) { crowded = true; break; }
+      }
+      if (crowded) continue;
+
+      const light = this.lampPool[filled];
+      filled++;
       // A little above the ground: a window is at head height, and a light at
       // ground level lights the grass and not the wall behind it.
       light.position.set(c.x, this.groundTop(src, c.x, c.z) + 0.34, c.z);
@@ -678,7 +724,16 @@ export class Renderer {
        * green grass is the one combination that reads as a fault rather than as
        * warmth.
        */
-      if (c.warm) {
+      if (c.sodium) {
+        // Low-pressure sodium, which is the most saturated orange any lamp has
+        // ever been and the reason a photograph of an English town at night in
+        // 1985 is unmistakable. Higher and wider than a window, because it is
+        // eight metres up and pointed at the road.
+        light.color.setRGB(1, 0.62, 0.24);
+        light.intensity = this.night * 0.85;
+        light.distance = 2.9;
+        light.position.y += 0.16;
+      } else if (c.warm) {
         light.color.setRGB(1, 0.82, 0.60);
         light.intensity = this.night * 0.95;
         light.distance = 2.6;
@@ -689,12 +744,13 @@ export class Renderer {
       }
       light.visible = true;
     }
-    for (let k = want; k < this.lampPool.length; k++) {
+    for (let k = filled; k < this.lampPool.length; k++) {
       this.lampPool[k].visible = false;
     }
   }
 
-  private readonly lampCandidates: { x: number; z: number; d: number; warm: boolean }[] = [];
+  private readonly lampCandidates:
+  { x: number; z: number; d: number; warm: boolean; sodium: boolean }[] = [];
 
   /** Stream the chunks around the camera, building what has come into view. */
   private streamChunks(src: RenderSource): void {
