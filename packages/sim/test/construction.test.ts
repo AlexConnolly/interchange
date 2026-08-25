@@ -33,6 +33,18 @@ function straightRun(w: ReturnType<typeof builderWorld>, length: number): number
       for (let i = 0; i < length; i++) {
         const tile = y * size + (x + i);
         if (w.terrain.height[tile] <= 0) { ok = false; break; }
+        /*
+         * Flat, not merely dry.
+         *
+         * The classes now have real gradient limits that differ between them - a
+         * dual carriageway will not climb what a farm track will - so a run that
+         * is only "above sea level" refuses the wider classes and the test read
+         * that as the palette being broken. It was the gradient rule working.
+         */
+        if (i > 0 && Math.abs(w.terrain.height[tile] - w.terrain.height[tile - 1]) > 14) {
+          ok = false;
+          break;
+        }
         tiles.push(tile);
       }
       if (ok) return tiles;
@@ -51,14 +63,17 @@ describe('the construction palette', () => {
       // thing the palette is right to leave out.
       if (way.buildCost === 0) continue;
       const w = builderWorld();
-      // Push the calendar to the era that opens this class.
-      const era = C.eras.find((e) => e.n === way.era);
-      if (era) {
-        // The calendar is derived from the tick, so the only honest way to
-        // reach an era is to get there.
-        const target = (era.from + 1 - 1860) * TICKS_PER_YEAR;
-        while (w.tick < target) w.step();
-      }
+      /*
+       * No stepping to an era, because there is only one and the game starts in
+       * it (decisions.md D7).
+       *
+       * This used to walk the clock to `(era.from + 1 - 1860) * TICKS_PER_YEAR`,
+       * which was a few thousand ticks when the game began in 1860 with a
+       * 11,520-tick year. It is twenty-nine million now that it begins in 1985
+       * with a 230,400-tick year, and the test took a hundred and fifteen
+       * seconds. An arithmetic expression with a hard-coded epoch in it is a
+       * test that expires.
+       */
       const mode = MODE_NAMES.indexOf(way.mode as never);
       expect(mode).toBeGreaterThanOrEqual(0);
 
@@ -70,23 +85,25 @@ describe('the construction palette', () => {
     }
 
     expect(refused).toEqual([]);
-    expect(built.length).toBeGreaterThan(8);
+    /*
+     * Four, and the number is the assertion.
+     *
+     * This asked for more than eight, which was right when there were sixteen
+     * way classes across five modes and eight eras. There are four now — farm
+     * track, lane, road, dual carriageway — and a test that expects a big
+     * content set is a test that fights a content cut.
+     */
+    expect(built.length).toBe(C.ways.filter((x) => x.buildCost > 0).length);
   });
 
-  it('will not lay a class the era has not opened', () => {
-    const w = builderWorld();
-    /*
-     * Measured against the world's own era rather than a hard-coded one.
-     *
-     * This asked for a class from era five or later, which was safely in the
-     * future when the game began in 1860 and is the present now that it begins
-     * in 1985. A gate test that names an era is a test that expires.
-     */
-    const late = C.ways.findIndex((x) => x.era > w.era && x.buildCost > 0);
-    expect(late).toBeGreaterThanOrEqual(0);
-    const mode = MODE_NAMES.indexOf(C.ways[late].mode as never);
-    expect(w.buildWay(w.player, mode, late, straightRun(w, 5))).toBe(false);
-  });
+  /*
+   * The era-gate test went with the eras (decisions.md D7).
+   *
+   * It asked for a class the current era had not opened, which was a safe thing
+   * to ask for across eight eras and is impossible across one: there is nothing
+   * beyond the only era there is. The charter gate below covers the case that
+   * still exists - being refused because of who you are rather than when it is.
+   */
 
   it('will not lay anything at all without a construction charter', () => {
     const w = createWorld({ seed: 8100, size: 256, townCount: 8, companyCount: 2 });
@@ -109,43 +126,12 @@ describe('the construction palette', () => {
   });
 });
 
-describe('canals and locks', () => {
-  it('climbs a hill in chambers rather than refusing to be built', () => {
-    const w = builderWorld();
-    const canal = C.ways.findIndex((x) => x.id === 'canal');
-    // A run that actually goes somewhere uphill, so the gradient is real.
-    const size = w.terrain.size;
-    let run: number[] = [];
-    for (let y = 10; y < size - 10 && run.length === 0; y += 5) {
-      for (let x = 10; x < size - 24; x += 5) {
-        const tiles: number[] = [];
-        let ok = true;
-        let rise = 0;
-        for (let i = 0; i < 12; i++) {
-          const tile = y * size + (x + i);
-          if (w.terrain.height[tile] <= 0) { ok = false; break; }
-          if (i > 0) rise += Math.abs(w.terrain.height[tile] - w.terrain.height[tile - 1]);
-          tiles.push(tile);
-        }
-        if (ok && rise > 40) { run = tiles; break; }
-      }
-    }
-    expect(run.length).toBe(12);
-
-    const plan = w.planWay(Mode.Water, canal, run);
-    expect(plan.ok).toBe(true);
-    expect(plan.locks).toBeGreaterThan(0);
-    // A flight of locks is not free, and the estimate has to say so.
-    const flat = C.ways[canal].buildCost * run.length;
-    expect(plan.totalCost).toBeGreaterThan(flat);
-  });
-
-  it('does not put locks on a railway', () => {
-    const w = builderWorld();
-    const rail = C.ways.findIndex((x) => x.id === 'rail-light');
-    const plan = w.planWay(Mode.Rail, rail, straightRun(w, 10));
-    expect(plan.locks).toBe(0);
-  });
-});
+/*
+ * The canal tests went with canals (cut.md). They pinned locks lifting a route
+ * over a hill in chambers rather than refusing to be built, and locks not being
+ * put on a railway - both good behaviour, and both about a mode that is not in
+ * the game: canal freight was finished by 1985, so this is a content cut rather
+ * than a deferral.
+ */
 
 void NONE;

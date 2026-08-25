@@ -45,7 +45,7 @@
     "wear": 16,
     "publicCharge": 11,
     "maxGradient": 64,
-    "minRadius": 140,
+    "minRadius": 0,
     "bridgeCostPct": 600,
     "tunnelCostPct": 1200,
     "colour": "#a49a90"
@@ -62,7 +62,7 @@
     "wear": 11,
     "publicCharge": 18,
     "maxGradient": 44,
-    "minRadius": 320,
+    "minRadius": 0,
     "bridgeCostPct": 760,
     "tunnelCostPct": 1500,
     "colour": "#b0a7a0"

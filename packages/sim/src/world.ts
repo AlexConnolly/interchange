@@ -18,8 +18,8 @@ import {
 } from './constants.ts';
 import { Cmd, CommandQueue, type Command } from './commands.ts';
 import {
-  CompanyTable, ContractState, ContractTable, Charter, Line, LINE_COUNT,
-  ServiceTable, StopAction, MAX_STOPS, ENTRANT_NAMES, hashEconomy, haulageRate, HAUL_ALLOWANCE, RATE_WEIGHT_BY_TIER, CHARTER_REQUIREMENTS, makeContract, stepFinance,
+  CompanyTable, Charter, Line, LINE_COUNT,
+  ServiceTable, StopAction, MAX_STOPS, ENTRANT_NAMES, hashEconomy, haulageRate, HAUL_ALLOWANCE, RATE_WEIGHT_BY_TIER, CHARTER_REQUIREMENTS, stepFinance,
 } from './economy.ts';
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
 import { Hasher } from './hash.ts';
@@ -77,7 +77,6 @@ export class World {
   readonly sites: SiteTable;
   readonly towns: TownTable;
   readonly companies = new CompanyTable();
-  readonly contracts = new ContractTable();
   readonly services = new ServiceTable();
   /** Tonnes moved per cargo, per company, for the balance sweep. */
   movedByCargo: Float64Array;
@@ -628,10 +627,8 @@ export class World {
     stepTowns(
       this.towns, this.townDemandPerThousand, this.townProducePerThousand, b.townGrowthPerDay,
     );
-    this.stepContracts();
     stepFinance(this.companies, b, (c) => this.declareBankrupt(c));
 
-    if (this.day % b.contractIntervalDays === 0) this.offerContract();
     if (this.dayOfMonth === 0 && this.day > 0) this.companies.closeMonth();
     this.syncCargoRibbons();
     if (this.dayOfMonth === 0) this.stepAmenityField();
@@ -1149,57 +1146,8 @@ export class World {
     if (!isTown) this.sites.shipped[target] += tonnes;
     if (this.vehicles.load[vehicle] <= 0) this.vehicles.haulDistance[vehicle] = 0;
 
-    // Credit any contract this delivery satisfies.
-    for (let k = 0; k < this.contracts.count; k++) {
-      if (this.contracts.state[k] !== ContractState.Active) continue;
-      if (this.contracts.holder[k] !== company) continue;
-      if (this.contracts.cargo[k] !== cargo) continue;
-      if ((this.contracts.toIsTown[k] === 1) !== isTown) continue;
-      if (this.contracts.toSite[k] !== target) continue;
-      this.contracts.delivered[k] += tonnes;
-      if (this.contracts.delivered[k] >= this.contracts.volume[k]) {
-        this.contracts.state[k] = ContractState.Complete;
-        const bonus = this.contracts.value(k);
-        this.companies.post(company, Line.ContractBonus, bonus);
-        this.companies.delivered[company]++;
-      }
-      break;
-    }
   }
 
-  // ------------------------------------------------------------ contracts
-
-  private offerContract(): void {
-    const b = this.content.balance;
-    let offered = 0;
-    for (let k = 0; k < this.contracts.count; k++) {
-      if (this.contracts.state[k] === ContractState.Offered) offered++;
-    }
-    if (offered >= b.contractSlots) return;
-    const seed = this.pickContractSeed();
-    if (!seed) return;
-    makeContract(this.contracts, seed, this.tick, this.rng, b, this.eraHaulier());
-  }
-
-  /**
-   * The road vehicle a contract is written against: the biggest one on sale
-   * this era. Contracts are quoted in its loads and its speed, so what the
-   * board asks for stays a few weeks of work from 1860 to 2100.
-   */
-  private eraHaulier(): { capacity: number; tilesPerDay: number } {
-    let capacity = 3;
-    let speed = 2949;
-    const era = this.era;
-    for (let i = 0; i < this.content.vehicles.length; i++) {
-      const v = this.content.vehicles[i];
-      if (v.mode !== 'road' || v.era > era || v.obsoleteYear < this.year) continue;
-      if (v.capacity > capacity) {
-        capacity = v.capacity;
-        speed = v.speed;
-      }
-    }
-    return { capacity, tilesPerDay: (speed / 65536) * TICKS_PER_DAY };
-  }
 
   /**
    * Choose an origin that has stock piling up and a destination that wants it.
@@ -1271,54 +1219,6 @@ export class World {
     return this.rng.chance(1, 4) && tiles < ceiling * 2.2;
   }
 
-  /**
-   * Award and expire. design.md §4.4: awarded on price weighted by reliability
-   * history, so being cheap and late stops working.
-   */
-  private stepContracts(): void {
-    const b = this.content.balance;
-    for (let k = 0; k < this.contracts.count; k++) {
-      const state = this.contracts.state[k];
-      if (state === ContractState.Offered && this.tick >= this.contracts.offeredUntil[k]) {
-        let bestCompany = NONE;
-        let bestScore = -Infinity;
-        for (let c = 0; c < this.companies.count; c++) {
-          const bid = this.contracts.bids[k * MAX_COMPANIES + c];
-          if (bid <= 0) continue;
-          // Lower price is better; higher reliability is better. The weight is
-          // data so the sweep can find the point where reputation stops
-          // mattering and the board becomes a pure price auction.
-          const price = -bid;
-          const rel = this.companies.reliability(c);
-          const score = price * (100 - b.reliabilityWeight) + rel * b.reliabilityWeight * 20;
-          if (score > bestScore) {
-            bestScore = score;
-            bestCompany = c;
-          }
-        }
-        if (bestCompany === NONE) {
-          this.contracts.release(k);
-        } else {
-          this.contracts.state[k] = ContractState.Active;
-          this.contracts.holder[k] = bestCompany;
-          this.contracts.rate[k] = this.contracts.bids[k * MAX_COMPANIES + bestCompany];
-        }
-        continue;
-      }
-      if (state === ContractState.Active && this.tick >= this.contracts.deadline[k]) {
-        this.contracts.state[k] = ContractState.Failed;
-        const holder = this.contracts.holder[k];
-        if (holder !== NONE) {
-          // Partial delivery reduces the penalty; abandoning entirely does not.
-          const shortfall = 1 - this.contracts.delivered[k] / Math.max(1, this.contracts.volume[k]);
-          this.companies.post(holder, Line.Penalties, Math.round(this.contracts.penalty[k] * shortfall));
-          this.companies.missed[holder]++;
-        }
-        this.contracts.release(k);
-      }
-      if (state === ContractState.Complete) this.contracts.release(k);
-    }
-  }
 
 
 
@@ -1791,12 +1691,6 @@ export class World {
   private declareBankrupt(company: number): void {
     if (this.companies.bankrupt[company]) return;
     this.companies.bankrupt[company] = 1;
-    // Outstanding contracts go with it. Leaving them active means an
-    // administrator racking up deadline penalties on a company that no longer
-    // has a single vehicle.
-    for (let k = 0; k < this.contracts.count; k++) {
-      if (this.contracts.holder[k] === company) this.contracts.release(k);
-    }
     for (let a = 0; a < this.assets.count; a++) {
       if (this.assets.owner[a] === company) this.assets.forSale[a] = 1;
     }
@@ -1863,19 +1757,6 @@ export class World {
         if (this.vehicles.company[c.a] === c.issuer) {
           this.vehicles.service[c.a] = NONE;
           this.vehicles.state[c.a] = VState.Idle;
-        }
-        break;
-      case Cmd.BidContract:
-        if (c.a < this.contracts.count && this.contracts.state[c.a] === ContractState.Offered) {
-          this.contracts.bids[c.a * MAX_COMPANIES + c.issuer] = Math.max(1, c.b);
-        }
-        break;
-      case Cmd.DropContract:
-        if (this.contracts.holder[c.a] === c.issuer) {
-          this.contracts.state[c.a] = ContractState.Failed;
-          this.companies.post(c.issuer, Line.Penalties, this.contracts.penalty[c.a]);
-          this.companies.missed[c.issuer]++;
-          this.contracts.release(c.a);
         }
         break;
       case Cmd.SetCharge:
@@ -2331,7 +2212,7 @@ export class World {
     h.array(this.rng.getState());
     hashNetwork(h, this.graph, this.assets);
     hashSites(h, this.sites, this.towns);
-    hashEconomy(h, this.companies, this.contracts, this.services);
+    hashEconomy(h, this.companies, this.services);
     h.int(this.vehicles.count);
     for (let i = 0; i < this.vehicles.count; i++) {
       if (!this.vehicles.alive[i]) {

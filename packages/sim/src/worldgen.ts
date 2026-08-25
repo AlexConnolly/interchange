@@ -176,6 +176,69 @@ export function generateWorld(w: World): void {
       },
       settlements, sites,
     );
+
+    /*
+     * Count the tiles, because the graph builder skips a layer that says it has
+     * none.
+     *
+     * `tileCount` is a cached total that `layWay` used to maintain as it went.
+     * Writing `cls` directly left it at zero, and `rebuildGraph` takes a zero
+     * as "nothing on this layer" and skips it entirely — so three hundred and
+     * twenty-one road tiles produced no graph at all. A cached count that only
+     * one code path maintains is a trap, and this is the second thing in this
+     * file to fall into it after the direction bits.
+     */
+    let laid = 0;
+    for (let i = 0; i < w.config.size * w.config.size; i++) {
+      if (layer.cls[i] !== 255) laid++;
+    }
+    layer.tileCount = laid;
+
+    /*
+     * Wire the direction bits.
+     *
+     * The graph traces a link by walking `dir` from tile to tile, so a layer
+     * with classes but no directions has no links, no nodes, and therefore no
+     * network at all — which is exactly what a probe showed: 321 road tiles and
+     * zero graph nodes. The old `layWay` set these as it went; the new
+     * generator decides *where* the road is and this decides what is joined to
+     * what, which is a cleaner split but only if both halves happen.
+     */
+    for (let y = 0; y < w.config.size; y++) {
+      for (let x = 0; x < w.config.size; x++) {
+        const tile = y * w.config.size + x;
+        if (layer.cls[tile] === 255) continue;
+        let bits = 0;
+        for (let d = 0; d < 4; d++) {
+          const nx = x + DIR_DX[d];
+          const ny = y + DIR_DY[d];
+          if (nx < 0 || ny < 0 || nx >= w.config.size || ny >= w.config.size) continue;
+          if (layer.cls[ny * w.config.size + nx] !== 255) bits |= DIR_BIT[d];
+        }
+        layer.dir[tile] = bits;
+      }
+    }
+
+    /*
+     * Attach every site and settlement to the road at its own tile.
+     *
+     * The old road builder did this as a side effect of connecting each place
+     * up, and losing it was invisible until a probe showed *no site connected
+     * to anything* — no access tile, no graph node, no possible delivery. The
+     * whole game rests on this line, so it is now explicit rather than a
+     * consequence of something else.
+     *
+     * `rebuild()` turns an access tile into a terminal and therefore into a
+     * graph node, which is what makes a place somewhere a vehicle can stop.
+     */
+    for (let i = 0; i < w.sites.count; i++) {
+      const tile = w.sites.y[i] * w.config.size + w.sites.x[i];
+      if (layer.cls[tile] !== 255) w.siteAccessTile[i] = tile;
+    }
+    for (let i = 0; i < w.towns.count; i++) {
+      const tile = w.towns.y[i] * w.config.size + w.towns.x[i];
+      if (layer.cls[tile] !== 255) w.townAccessTile[i] = tile;
+    }
   }
 
   w.rebuild();

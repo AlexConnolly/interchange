@@ -112,12 +112,15 @@ export function App(): JSX.Element {
     // Where you begin: one small pocket, and nothing else visible.
     influence.rebuild([{ x: renderer.camX, y: renderer.camZ, strength: 2.4 }]);
     /*
-     * Open a little wider than the reference framing, so the edge of the
-     * influence area is on screen from the first second. The point of the
-     * mechanic is the boundary; opening inside it with the fade off-frame would
-     * hide the one thing it is for.
+     * A little wider than the reference framing.
+     *
+     * The reference is 26 tiles, which is the framing a lorry is readable at and
+     * the one the game is played at. Opening slightly wider puts the edge of the
+     * influence area on screen from the first second, because the boundary is
+     * the point of the mechanic — but not so wide that the roads become threads,
+     * which 2.4x did.
      */
-    renderer.tilesAcross = TILES_ACROSS_DEFAULT * 2.4;
+    renderer.tilesAcross = TILES_ACROSS_DEFAULT * 1.4;
 
     const fit = (): void => {
       const w = canvas.clientWidth || window.innerWidth;

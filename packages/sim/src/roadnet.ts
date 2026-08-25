@@ -159,15 +159,86 @@ function route(
   return path.reverse();
 }
 
-/** Write a route into the way layer at a tier's class. */
+/**
+ * Write a route into the way layer, respecting the hierarchy.
+ *
+ * Two rules, and the second is the interesting one.
+ *
+ * **Never downgrade.** A track joining a lane must not turn the lane into a
+ * track for one tile, which is how a hierarchy gets quietly erased.
+ *
+ * **Never skip a tier.** A farm track joins a lane and a dual carriageway comes
+ * off a road — a track does not open straight onto a trunk road, and nowhere in
+ * England does one. So where a route of one tier meets a tier more than one step
+ * above it, the tiles between are promoted to the tier in between: the track
+ * becomes a short length of lane where it approaches the road.
+ *
+ * That last rule is worth the code because it is most of what makes a network
+ * look like it was built by people rather than by a search. A pattern of
+ * track-to-lane-to-road reads as a place that grew; a track opening onto a
+ * highway reads as a graph.
+ */
 function lay(ctx: RoadNetContext, path: number[], tier: Tier): void {
   const cls = ctx.classOf(tier);
+  const written: number[] = [];
   for (const t of path) {
-    // Never downgrade: a track joining a lane must not turn the lane into a
-    // track for one tile, which is exactly how a hierarchy gets erased.
     if (ctx.cls[t] !== NO_WAY && ctx.cls[t] <= cls) continue;
     ctx.cls[t] = cls;
+    written.push(t);
   }
+}
+
+/** How many tiles of the intermediate class to put in where a tier steps up. */
+const TRANSITION = 3;
+
+/**
+ * Never let a tier meet one two or more steps above it.
+ *
+ * A farm track joins a lane and a dual carriageway comes off a road. A track
+ * does not open straight onto a trunk road, and this is most of what makes a
+ * network look like it was built by people rather than by a search: a pattern of
+ * track-to-lane-to-road reads as a place that grew, and a track opening onto a
+ * highway reads as a graph.
+ *
+ * Done as a repair pass over the whole map rather than inside `lay`, because the
+ * offending join is usually between a tile written now and a tile written three
+ * calls ago — a fix that only looks at what it just wrote leaves a dozen of
+ * them, which is exactly what the first attempt did.
+ *
+ * Iterated, because promoting a tile can create a new illegal join one step
+ * further along. It settles in two or three passes; the cap is a backstop.
+ */
+function smoothTiers(ctx: RoadNetContext): number {
+  const s = ctx.size;
+  const n = s * s;
+  let fixed = 0;
+  for (let pass = 0; pass < 6; pass++) {
+    let changed = 0;
+    for (let y = 0; y < s; y++) {
+      for (let x = 0; x < s; x++) {
+        const t = y * s + x;
+        const c = ctx.cls[t];
+        if (c === NO_WAY) continue;
+        let bestNeighbour = c;
+        for (let d = 0; d < 4; d++) {
+          const nx = x + DX[d];
+          const ny = y + DY[d];
+          if (nx < 0 || ny < 0 || nx >= s || ny >= s) continue;
+          const nc = ctx.cls[ny * s + nx];
+          if (nc !== NO_WAY && nc < bestNeighbour) bestNeighbour = nc;
+        }
+        // Class index runs worst to best, so a smaller index is a better road.
+        if (c - bestNeighbour >= 2) {
+          ctx.cls[t] = bestNeighbour + 1;
+          changed++;
+        }
+      }
+    }
+    fixed += changed;
+    if (changed === 0) break;
+  }
+  void n;
+  return fixed;
 }
 
 /**
@@ -241,5 +312,6 @@ export function generateRoads(
     refresh();
   }
 
+  smoothTiers(ctx);
   return tally;
 }

@@ -102,6 +102,18 @@ Nothing becomes worthless because time passed.
 
 ---
 
+### One thing the way classes do *not* have
+
+**Minimum curve radius is zero on every road class.** It is a railway concept:
+a train has a fixed wheelbase and cannot take a tight bend, and a lorry can.
+Carrying it over from the old rail content quietly refused every attempt to lay
+a road or a dual carriageway, on perfectly flat ground, because a six-tile
+straight run could not satisfy a radius of three hundred and twenty.
+
+Gradient is the constraint that matters and it does the job: a farm track climbs
+what a dual carriageway will not, which is the whole reason a big earner cannot
+get everywhere.
+
 ## Yards
 
 Four you can own, and their positions are the whole of the second act.

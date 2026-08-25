@@ -102,7 +102,7 @@ export function loadGame(
  */
 export function snapshot(w: World): ArrayBuffer {
   const parts: (ArrayBufferView | number[])[] = [];
-  const header: number[] = [w.tick, w.graph.version, w.assets.count, w.vehicles.count, w.sites.count, w.towns.count, w.companies.count, w.contracts.count, w.services.count];
+  const header: number[] = [w.tick, w.graph.version, w.assets.count, w.vehicles.count, w.sites.count, w.towns.count, w.companies.count, w.services.count];
   parts.push(new Int32Array(header));
   parts.push(w.rng.getState());
 

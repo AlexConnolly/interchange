@@ -24,7 +24,7 @@
  */
 
 import { Mesh } from './geometry.ts';
-import { ROAD, shade, type RGB } from './palette.ts';
+import { ROAD, type RGB } from './palette.ts';
 import { HEIGHT_TO_WORLD } from './ground.ts';
 
 /**
@@ -100,45 +100,116 @@ export function buildRoads(
   const s = src.size;
   const m = new Mesh((x1 - x0) * (y1 - y0) * 40);
 
-  for (let y = y0; y < y1; y++) {
+  /*
+   * Paved, not segmented.
+   *
+   * The first version drew a hub in the middle of each tile and an arm out to
+   * each connected edge. Even with the arms ramping to meet at the shared edge
+   * that reads as "drawn in segments rather than perfectly paved", because it
+   * *is* segments: every tile contributes its own quads, so every tile boundary
+   * is a seam where two surfaces meet at slightly different angles and the light
+   * catches the join.
+   *
+   * The fix is to stop thinking per tile. A road tile's surface is one quad
+   * spanning the whole tile — corner to corner, at the four corner heights — so
+   * neighbouring tiles share their corner heights exactly and the surface is
+   * continuous by construction. The width comes from insetting the quad on the
+   * axes the road does *not* run along, so a straight run is a ribbon and a
+   * junction is the full tile.
+   *
+   * It is also fewer triangles: two per tile for the surface instead of ten.
+   */
+  const cornerY = (x: number, z: number): number => {
+    // Mean of the up-to-four road tiles meeting at this corner, so two
+    // neighbours agree on the height of the edge they share.
+    let sum = 0;
+    let hits = 0;
+    for (let dz = -1; dz <= 0; dz++) {
+      for (let dx = -1; dx <= 0; dx++) {
+        const tx = x + dx;
+        const tz = z + dz;
+        if (tx < 0 || tz < 0 || tx >= s || tz >= s) continue;
+        const t = tz * s + tx;
+        if (src.roadClass[t] < 0) continue;
+        sum += surfaceY(src, t);
+        hits++;
+      }
+    }
+    if (hits > 0) return sum / hits;
+    // No road at this corner: sit on the ground.
+    const tx = Math.max(0, Math.min(s - 1, x));
+    const tz = Math.max(0, Math.min(s - 1, z));
+    return HEIGHT_TO_WORLD(src.height[tz * s + tx]) + 0.02;
+  };
+
+  for (let z = y0; z < y1; z++) {
     for (let x = x0; x < x1; x++) {
-      const tile = y * s + x;
+      const tile = z * s + x;
       const cls = src.roadClass[tile];
       if (cls < 0) continue;
       const st = STYLE[cls] ?? STYLE[1];
       const inf = src.influence(tile);
-      const yy = surfaceY(src, tile);
-      const cx = x + 0.5;
-      const cz = y + 0.5;
 
-      // The verge goes down first and wider, so the surface sits inside it.
-      flat(m, cx, yy - 0.006, cz, st.verge, st.verge, faded(ROAD.verge, inf));
-      flat(m, cx, yy, cz, st.half, st.half, faded(st.surface, inf));
+      // Which way the road runs through this tile.
+      let west = x > 0 && src.roadClass[tile - 1] >= 0;
+      let east = x + 1 < s && src.roadClass[tile + 1] >= 0;
+      let north = z > 0 && src.roadClass[tile - s] >= 0;
+      let south = z + 1 < s && src.roadClass[tile + s] >= 0;
+      const ends = (west ? 1 : 0) + (east ? 1 : 0) + (north ? 1 : 0) + (south ? 1 : 0);
+      // A dead end still needs a stub, or a farm track stops a tile short of
+      // the farm.
+      if (ends === 0) { west = true; east = true; }
 
-      for (let d = 0; d < 4; d++) {
-        const nx = x + DX[d];
-        const nz = y + DZ[d];
-        if (nx < 0 || nz < 0 || nx >= s || nz >= s) continue;
-        const n = nz * s + nx;
-        if (src.roadClass[n] < 0) continue;
-        // The shared edge, at the mean of the two surfaces.
-        const edgeY = (yy + surfaceY(src, n)) / 2;
-        arm(m, cx, cz, d, st.verge, yy - 0.006, edgeY - 0.006, faded(ROAD.verge, inf));
-        arm(m, cx, cz, d, st.half, yy, edgeY, faded(st.surface, inf));
+      /*
+       * The inset. A tile the road runs east-west is full width across X and
+       * narrow in Z; a junction is full width both ways. That single rule gives
+       * ribbons along runs and proper squares at crossings, with no special
+       * cases for corners — a corner is simply a tile that is open on one of
+       * each axis.
+       */
+      const openX = west || east;
+      const openZ = north || south;
+      const nx0 = west ? 0 : 0.5 - st.half;
+      const nx1 = east ? 1 : 0.5 + st.half;
+      const nz0 = north ? 0 : 0.5 - st.half;
+      const nz1 = south ? 1 : 0.5 + st.half;
+      // Narrow the axis the road does not run along.
+      const sx0 = openX ? nx0 : 0.5 - st.half;
+      const sx1 = openX ? nx1 : 0.5 + st.half;
+      const sz0 = openZ ? nz0 : 0.5 - st.half;
+      const sz1 = openZ ? nz1 : 0.5 + st.half;
 
-        // Furniture only where you can see it, for the same reason as the
-        // hedges: a white dash in fog is a white dash.
-        if (st.worn && inf > 0.18) {
-          for (const off of [-st.half * 0.5, st.half * 0.5]) {
-            armOffset(m, cx, cz, d, st.half * 0.30, off,
-                      yy + 0.003, edgeY + 0.003, faded(ROAD.worn, inf));
+      // Verge first and wider, so the surface sits inside it.
+      const v = st.verge - st.half;
+      quadAt(m, cornerY, x, z,
+             sx0 - v, sz0 - v, sx1 + v, sz1 + v, -0.008, faded(ROAD.verge, inf));
+      quadAt(m, cornerY, x, z, sx0, sz0, sx1, sz1, 0, faded(st.surface, inf));
+
+      if (st.worn && inf > 0.18) {
+        // Two wheel tracks along whichever way the road runs.
+        const w2 = st.half * 0.30;
+        if (openX) {
+          for (const off of [-st.half * 0.48, st.half * 0.48]) {
+            quadAt(m, cornerY, x, z, sx0, 0.5 + off - w2, sx1, 0.5 + off + w2,
+                   0.004, faded(ROAD.worn, inf));
+          }
+        } else {
+          for (const off of [-st.half * 0.48, st.half * 0.48]) {
+            quadAt(m, cornerY, x, z, 0.5 + off - w2, sz0, 0.5 + off + w2, sz1,
+                   0.004, faded(ROAD.worn, inf));
           }
         }
-        if (st.lined && inf > 0.18) {
-          // Dashed: one dash per tile, which at forty pixels a tile is the
-          // right rhythm and costs two triangles.
-          armOffset(m, cx, cz, d, 0.035, 0,
-                    yy + 0.005, edgeY + 0.005, faded(ROAD.line, inf), 0.42);
+      }
+      if (st.lined && inf > 0.18 && ends === 2 && (openX !== openZ)) {
+        // A dash down the middle of a straight run only. A junction with lining
+        // through it looks like a mistake.
+        const d = 0.03;
+        if (openX) {
+          quadAt(m, cornerY, x, z, 0.28, 0.5 - d, 0.72, 0.5 + d,
+                 0.006, faded(ROAD.line, inf));
+        } else {
+          quadAt(m, cornerY, x, z, 0.5 - d, 0.28, 0.5 + d, 0.72,
+                 0.006, faded(ROAD.line, inf));
         }
       }
     }
@@ -146,38 +217,34 @@ export function buildRoads(
   return m;
 }
 
-function flat(m: Mesh, cx: number, y: number, cz: number, hx: number, hz: number, c: RGB): void {
-  m.quad(cx - hx, y, cz - hz, cx + hx, y, cz - hz,
-         cx + hx, y, cz + hz, cx - hx, y, cz + hz, c);
+/**
+ * One quad within a tile, with its corners taken from the shared corner
+ * heights so it lines up exactly with its neighbours.
+ */
+function quadAt(
+  m: Mesh, cornerY: (x: number, z: number) => number,
+  tx: number, tz: number,
+  u0: number, v0: number, u1: number, v1: number, lift: number, c: RGB,
+): void {
+  // Bilinear over the tile's four corner heights, so a quad that does not reach
+  // the tile edge still sits on the same surface as one that does.
+  const h00 = cornerY(tx, tz);
+  const h10 = cornerY(tx + 1, tz);
+  const h01 = cornerY(tx, tz + 1);
+  const h11 = cornerY(tx + 1, tz + 1);
+  const at = (u: number, v: number): number => {
+    const a = h00 * (1 - u) + h10 * u;
+    const b = h01 * (1 - u) + h11 * u;
+    return a * (1 - v) + b * v + lift;
+  };
+  m.quad(
+    tx + u0, at(u0, v0), tz + v0,
+    tx + u1, at(u1, v0), tz + v0,
+    tx + u1, at(u1, v1), tz + v1,
+    tx + u0, at(u0, v1), tz + v1,
+    c,
+  );
 }
 
-/** One arm, from the hub out to the shared edge, sloping to meet it. */
-function arm(
-  m: Mesh, cx: number, cz: number, d: number, half: number,
-  inner: number, outer: number, c: RGB,
-): void {
-  armOffset(m, cx, cz, d, half, 0, inner, outer, c);
-}
 
-function armOffset(
-  m: Mesh, cx: number, cz: number, d: number, half: number, side: number,
-  inner: number, outer: number, c: RGB, shorten = 1.0,
-): void {
-  const ox = DX[d] * 0.5 * shorten;
-  const oz = DZ[d] * 0.5 * shorten;
-  // Perpendicular, for the lateral offset of a wheel track.
-  const px = -DZ[d] * side;
-  const pz = DX[d] * side;
-  const ax = cx + px;
-  const az = cz + pz;
-  const bx = ax + ox;
-  const bz = az + oz;
-  const lit = shade(c, 1.0);
-  if (DX[d] !== 0) {
-    m.quad(ax, inner, az - half, bx, outer, bz - half,
-           bx, outer, bz + half, ax, inner, az + half, lit);
-  } else {
-    m.quad(ax - half, inner, az, ax + half, inner, az,
-           bx + half, outer, bz, bx - half, outer, bz, lit);
-  }
-}
+

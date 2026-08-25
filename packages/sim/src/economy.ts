@@ -289,65 +289,6 @@ export const ENTRANT_NAMES = [
   'The Fell Line',
   'Duncastle Freight',
 ];
-
-export const ContractState = {
-  Offered: 0,
-  Active: 1,
-  Complete: 2,
-  Failed: 3,
-  Expired: 4,
-} as const;
-export type ContractState = (typeof ContractState)[keyof typeof ContractState];
-
-/**
- * Generated haulage contracts. design.md §4.4: cargo, origin, destination,
- * rate, volume, deadline, penalty. You bid, rivals bid, and the award is on
- * price weighted by reliability history — so being cheap and late is a
- * strategy that stops working.
- */
-export class ContractTable {
-  count = 0;
-  readonly state = new Uint8Array(MAX_CONTRACTS);
-  readonly cargo = new Uint8Array(MAX_CONTRACTS);
-  readonly fromSite = new Int32Array(MAX_CONTRACTS);
-  readonly toSite = new Int32Array(MAX_CONTRACTS);
-  /** Destination is a town when this is set; `toSite` indexes towns then. */
-  readonly toIsTown = new Uint8Array(MAX_CONTRACTS);
-  readonly fromIsTown = new Uint8Array(MAX_CONTRACTS);
-  readonly volume = new Int32Array(MAX_CONTRACTS);
-  readonly delivered = new Int32Array(MAX_CONTRACTS);
-  /** Pence per tonne. */
-  readonly rate = new Int32Array(MAX_CONTRACTS);
-  readonly deadline = new Int32Array(MAX_CONTRACTS);
-  readonly offeredUntil = new Int32Array(MAX_CONTRACTS);
-  readonly penalty = new Float64Array(MAX_CONTRACTS);
-  readonly holder = new Int16Array(MAX_CONTRACTS).fill(NONE);
-  /** Bids: pence per tonne offered, per company. 0 means no bid. */
-  readonly bids = new Int32Array(MAX_CONTRACTS * MAX_COMPANIES);
-
-  private free: number[] = [];
-
-  alloc(): number {
-    if (this.free.length === 0 && this.count >= MAX_CONTRACTS) return NONE;
-    const id = this.free.length > 0 ? this.free.pop()! : this.count++;
-    this.state[id] = ContractState.Offered;
-    this.delivered[id] = 0;
-    this.holder[id] = NONE;
-    for (let c = 0; c < MAX_COMPANIES; c++) this.bids[id * MAX_COMPANIES + c] = 0;
-    return id;
-  }
-
-  release(id: number): void {
-    this.state[id] = ContractState.Expired;
-    this.free.push(id);
-  }
-
-  value(id: number): number {
-    return this.volume[id] * this.rate[id];
-  }
-}
-
-/** What a vehicle does at a stop. */
 export const StopAction = {
   Load: 0,
   Unload: 1,
@@ -539,73 +480,6 @@ export interface ContractSeed {
   distanceTiles: number;
   basePrice: number;
 }
-
-export function makeContract(
-  contracts: ContractTable,
-  seed: ContractSeed,
-  tick: number,
-  rng: Rng,
-  balance: { latePenaltyPct: number; contractIntervalDays: number },
-  haulier: { capacity: number; tilesPerDay: number },
-): number {
-  const id = contracts.alloc();
-  contracts.cargo[id] = seed.cargo;
-  contracts.fromSite[id] = seed.fromSite;
-  contracts.fromIsTown[id] = seed.fromIsTown ? 1 : 0;
-  contracts.toSite[id] = seed.toSite;
-  contracts.toIsTown[id] = seed.toIsTown ? 1 : 0;
-
-  /*
-   * Sized in lorry-loads, not in tonnes.
-   *
-   * A flat forty-to-two-hundred tonnes is a fortnight's work for a modern
-   * artic and rather more than three years for a horse dray, so in 1860 every
-   * contract on the board was one no carrier in the region could finish. The
-   * sweep showed it plainly: contracts offered and taken throughout a
-   * thirty-year run, and not one ever completed, which in turn meant nobody
-   * ever reached the six deliveries a construction charter asks for and Act II
-   * was unreachable by construction.
-   *
-   * Quoting it in loads of whatever the era actually drives keeps a contract
-   * the same shape of commitment in every era — a few weeks of one vehicle's
-   * work — while the tonnage on the page grows through the century by itself.
-   */
-  const loads = 4 + rng.int(7);
-  const volume = Math.max(1, Math.round(haulier.capacity * loads));
-  contracts.volume[id] = volume;
-
-  // Struck against the same carriage curve the spot market pays, plus a
-  // premium for committing to a deadline. If the two drifted apart, one of
-  // them would simply be the correct answer forever.
-  contracts.rate[id] = Math.max(1, Math.round(haulageRate(seed.basePrice, seed.distanceTiles) * 0.55));
-
-  // Deadline: the time a single period-appropriate vehicle needs at the speed
-  // that era actually travels, plus half again. Computed from the same figures
-  // the volume is, so the two cannot drift apart into a contract that is a
-  // fortnight's work with a week to do it in.
-  const roundTripDays = (seed.distanceTiles * 2 * ROAD_WANDER) / Math.max(0.1, haulier.tilesPerDay);
-  const days = Math.max(20, Math.round(loads * roundTripDays * 1.5) + 20 + rng.int(20));
-  contracts.deadline[id] = tick + days * TICKS_PER_DAY;
-  contracts.offeredUntil[id] = tick + balance.contractIntervalDays * TICKS_PER_DAY * 2;
-  contracts.penalty[id] = Math.round((volume * contracts.rate[id] * balance.latePenaltyPct) / 100);
-  return id;
-}
-
-/**
- * What one tonne of a cargo earns over one haul, in pence.
- *
- * Two terms, deliberately. A flat carriage rate that grows with distance, and
- * a small share of what the cargo is worth. Making the whole payment a
- * multiple of the cargo's value — the obvious first move — means a lorry of
- * luxury goods earns thirty times a lorry of coal for the same work, so bulk
- * becomes dead content and the only correct game is a shuttle of the most
- * expensive thing on the map. Real freight is priced mostly by weight and
- * distance, and it turns out that is also the version that plays.
- *
- * The distance term is steep and capped. Carriage costing more than the coal
- * it carried is not an exaggeration for 1860 — it is why railways changed
- * everything, and Act I should feel it.
- */
 export function haulageRate(
   basePrice: number, distanceTiles: number, weight = 1, era = 1,
 ): number {
@@ -686,16 +560,13 @@ export const ROAD_WANDER = 2.0;
  */
 export const VALUE_SHARE = 0.18;
 
-export function hashEconomy(h: Hasher, co: CompanyTable, contracts: ContractTable, services: ServiceTable): void {
-  h.int(co.count).int(contracts.count).int(services.count);
+export function hashEconomy(h: Hasher, co: CompanyTable, services: ServiceTable): void {
+  h.int(co.count).int(services.count);
   for (let c = 0; c < co.count; c++) {
     h.big(Math.round(co.cash[c])).big(Math.round(co.debt[c]));
     h.int(co.charter[c]).int(co.bankrupt[c]).int(co.delivered[c]).int(co.missed[c]);
     for (let l = 0; l < LINE_COUNT; l++) h.big(Math.round(co.ledger[c * LINE_COUNT + l]));
   }
-  h.array(contracts.state, contracts.count);
-  h.array(contracts.delivered, contracts.count);
-  h.array(contracts.holder, contracts.count);
   h.array(services.vehicles, services.count);
 }
 
