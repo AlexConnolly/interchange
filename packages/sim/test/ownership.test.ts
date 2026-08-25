@@ -71,7 +71,7 @@ function regionWithTraffic(seed = 1860) {
 }
 
 describe('the ownership spine', () => {
-  it('records who is driving on somebody else\'s road', () => {
+  it('records who is driving on another company road', () => {
     const { busiest, busiestPasses } = regionWithTraffic();
     // If nothing is driving anywhere, every test below is vacuous.
     expect(busiest).not.toBe(NONE);
@@ -93,15 +93,13 @@ describe('the ownership spine', () => {
 
     const base1 = 1 * LINE_COUNT;
     const base2 = 2 * LINE_COUNT;
-    const paidBefore = w.companies.ledgerYear[base1 + Line.AccessPaid];
-    const earnedBefore = w.companies.ledgerYear[base2 + Line.AccessCharged];
+    const paidBefore = w.companies.ledgerTotal[base1 + Line.AccessPaid];
+    const earnedBefore = w.companies.ledgerTotal[base2 + Line.AccessCharged];
 
-    // Short of a full year: closeYear fires exactly on the boundary and zeroes
-    // the annual ledger, so measuring across one would measure nothing.
-    for (let i = 0; i < TICKS_PER_YEAR - 300; i++) w.step();
+    for (let i = 0; i < TICKS_PER_YEAR; i++) w.step();
 
-    const paid = w.companies.ledgerYear[base1 + Line.AccessPaid] - paidBefore;
-    const earned = w.companies.ledgerYear[base2 + Line.AccessCharged] - earnedBefore;
+    const paid = w.companies.ledgerTotal[base1 + Line.AccessPaid] - paidBefore;
+    const earned = w.companies.ledgerTotal[base2 + Line.AccessCharged] - earnedBefore;
 
     /*
      * The whole design in two assertions: the haulier's costs went up, the
@@ -114,22 +112,44 @@ describe('the ownership spine', () => {
   });
 
   it('never charges an owner for using their own road', () => {
+    /*
+     * Stated as an invariant rather than as an absolute, and the difference
+     * matters. The first version asserted the owner paid *nothing at all*,
+     * which was true of the region that seed happened to generate and stopped
+     * being true the moment the terrain generator changed: the route now
+     * crosses somebody else's way as well, and a toll paid to a third party is
+     * not this rule being broken.
+     *
+     * What the rule actually says is that the charge on your own asset does
+     * not apply to you. So run the same year twice with the same fleet on the
+     * same roads, once with the toll at nothing and once with it at the
+     * maximum, and the owner's bill must be identical.
+     */
+    const run = (charge: number): number => {
+      const { w, busiest } = regionWithTraffic();
+      expect(busiest).not.toBe(NONE);
+      w.companies.charter[1] = Charter.Construction;
+      w.companies.cash[1] = 90_000_000;
+      expect(w.buyAsset(busiest, 1)).toBe(true);
+      w.setCharge(busiest, charge, 1);
+      const base = 1 * LINE_COUNT;
+      const before = w.companies.ledgerTotal[base + Line.AccessPaid];
+      for (let i = 0; i < TICKS_PER_YEAR; i++) w.step();
+      return w.companies.ledgerTotal[base + Line.AccessPaid] - before;
+    };
+    expect(run(200)).toBe(run(0));
+  });
+
+  it('does not count an owner using their own way as foreign traffic', () => {
     const { w, busiest } = regionWithTraffic();
     expect(busiest).not.toBe(NONE);
     w.companies.charter[1] = Charter.Construction;
     w.companies.cash[1] = 90_000_000;
     expect(w.buyAsset(busiest, 1)).toBe(true);
-    w.setCharge(busiest, 60, 1);
-
-    const base = 1 * LINE_COUNT;
-    const before = w.companies.ledgerYear[base + Line.AccessPaid];
     const foreignBefore = w.assets.foreignPasses[busiest];
-    for (let i = 0; i < TICKS_PER_YEAR - 300; i++) w.step();
-
-    // Its own lorries are the only traffic, so it pays itself nothing and the
-    // foreign counter does not move — which is exactly why buying the road you
-    // are already on is a saving rather than a business.
-    expect(w.companies.ledgerYear[base + Line.AccessPaid] - before).toBe(0);
+    // Every lorry on it belongs to the owner, so the foreign counter — which
+    // is what a toll is levied on — must not move at all.
+    for (let i = 0; i < TICKS_PER_YEAR; i++) w.step();
     expect(w.assets.foreignPasses[busiest]).toBe(foreignBefore);
   });
 });

@@ -69,6 +69,8 @@ export const Cmd = {
   Remediate: 62,
   /** Make more region. features.md 13: the one thing that edits the map. */
   Reclaim: 63,
+  /** Rebuild a works to current practice. features.md 4. */
+  Modernise: 64,
 
   // --- meta --------------------------------------------------------------
   GrantCharter: 70,

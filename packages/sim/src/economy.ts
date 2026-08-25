@@ -10,7 +10,7 @@
  * the rent line is guaranteed to be zero and looks pointless.
  */
 
-import { MAX_COMPANIES, MAX_CONTRACTS, MAX_ROUTES, TICKS_PER_DAY, TICKS_PER_YEAR, AUTHORITY } from './constants.ts';
+import { MAX_COMPANIES, MAX_CONTRACTS, MAX_ROUTES, TICKS_PER_DAY, TICKS_PER_YEAR, AUTHORITY, MONTHS_PER_YEAR } from './constants.ts';
 import { NONE } from './network.ts';
 import type { Hasher } from './hash.ts';
 import type { Rng } from './rng.ts';
@@ -90,8 +90,40 @@ export class CompanyTable {
 
   /** ledger[company * LINE_COUNT + line], current month. */
   readonly ledger = new Float64Array(MAX_COMPANIES * LINE_COUNT);
-  /** Rolling twelve-month totals, for valuation and the credit limit. */
+  /**
+   * Rolling twelve-month totals, for valuation, the credit limit, and every
+   * judgement the AI makes about whether a company is trading.
+   *
+   * *Rolling* is load-bearing and was, for a long time, a lie: this was a
+   * calendar-year accumulator that `closeYear` emptied every first of January.
+   * Everything reading it therefore saw a company that had traded superbly for
+   * twelve months as having earned nothing at all, for as long as it took the
+   * new year to fill up again — and the closer to the boundary, the wronger.
+   *
+   * That single mistake produced three separate bugs that each looked like
+   * something else. The balance harness reported a rent share of exactly zero
+   * for the whole project, because it sampled on the boundary tick. And, far
+   * worse, the AI's retrenchment rule asks "is this company's income covering
+   * its running costs?" — so on the first day of every year the answer was no,
+   * for everybody, and every company carrying a loan began selling its fleet.
+   * A region that was trading happily in 1914 had no vehicles left in it at
+   * all by 1916, and stayed empty for the following two centuries.
+   *
+   * So it is now genuinely rolling: the last twelve completed months out of
+   * `history`, plus whatever the current month has accumulated. It never
+   * resets, and there is no year boundary anywhere in it to fall off.
+   */
   readonly ledgerYear = new Float64Array(MAX_COMPANIES * LINE_COUNT);
+  /**
+   * Lifetime totals, which nothing ever resets.
+   *
+   * The rolling window above answers "how is this company doing?", and it is
+   * the wrong instrument for "how much did this company pay between these two
+   * moments" — subtract one reading of a rolling sum from another and the
+   * months that fell out of the back are in the answer. Measurement wants a
+   * quantity that only goes up.
+   */
+  readonly ledgerTotal = new Float64Array(MAX_COMPANIES * LINE_COUNT);
   /** history[company][month * LINE_COUNT + line]. */
   readonly history: Float64Array;
   historyMonths = 0;
@@ -135,6 +167,7 @@ export class CompanyTable {
     for (let l = 0; l < LINE_COUNT; l++) {
       this.ledger[base + l] = 0;
       this.ledgerYear[base + l] = 0;
+      this.ledgerTotal[base + l] = 0;
     }
   }
 
@@ -142,6 +175,7 @@ export class CompanyTable {
     const i = company * LINE_COUNT + line;
     this.ledger[i] += amount;
     this.ledgerYear[i] += amount;
+    this.ledgerTotal[i] += amount;
     this.cash[company] += LINE_IS_INCOME[line] ? amount : -amount;
   }
 
@@ -191,11 +225,17 @@ export class CompanyTable {
         this.history[base + (HISTORY_MONTHS - 1) * LINE_COUNT + l] = this.ledger[c * LINE_COUNT + l];
         this.ledger[c * LINE_COUNT + l] = 0;
       }
+      // And recut the twelve-month window from the months that are now in it.
+      // Doing this here rather than on a year boundary is the whole point: the
+      // window moves by a month every month and is never empty.
+      for (let l = 0; l < LINE_COUNT; l++) this.ledgerYear[c * LINE_COUNT + l] = 0;
+      const months = Math.min(MONTHS_PER_YEAR, this.historyMonths);
+      for (let m = HISTORY_MONTHS - months; m < HISTORY_MONTHS; m++) {
+        for (let l = 0; l < LINE_COUNT; l++) {
+          this.ledgerYear[c * LINE_COUNT + l] += this.history[base + m * LINE_COUNT + l];
+        }
+      }
     }
-  }
-
-  closeYear(): void {
-    this.ledgerYear.fill(0);
   }
 }
 

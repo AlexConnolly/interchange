@@ -12,6 +12,7 @@
 
 import { FX_ONE, fx, fxMul, fxDiv, fxHypot, fxSqrt, type Fx } from './fixed.ts';
 import { fbm, ridged, warpedFbm, hash3 } from './noise.ts';
+import { erode } from './erosion.ts';
 import { Rng } from './rng.ts';
 
 /** One height unit is half a metre. Sea level is zero. */
@@ -230,7 +231,9 @@ export function generateTerrain(cfg: WorldConfig): Terrain {
   const rng = new Rng(cfg.seed ^ 0x5eed);
 
   // ---- 1. elevation ------------------------------------------------------
-  const PEAK = 4200; // half-metre units, so a top ridge is around 1000 m
+  // Raised to leave room for the erosion pass below, which takes a fifth off
+  // the high ground on its way to carving valleys into it.
+  const PEAK = 5100; // half-metre units, so a top ridge is around 1000 m after erosion
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const f = landField(x, y, size, cfg.seed);
@@ -238,6 +241,16 @@ export function generateTerrain(cfg: WorldConfig): Terrain {
       t.height[i] = f <= 0 ? -6 : Math.min(32000, Math.trunc((f * PEAK) / FX_ONE));
     }
   }
+  /*
+   * And then weather it. erosion.ts has the reasoning; the short version is
+   * that noise makes a lump and water makes a landscape, and the valleys this
+   * cuts are also where any sensible person would put a railway.
+   *
+   * Before the rivers, deliberately: the river carver looks for the lowest
+   * path across the region, and after erosion there is a drainage network for
+   * it to find instead of whichever way the noise happened to sag.
+   */
+  erode(t.height, size);
   deepenOffshore(t);
 
   // ---- 2. rivers ---------------------------------------------------------

@@ -107,16 +107,7 @@ function runOne(seed: number): RunResult {
     }
   };
 
-  /*
-   * Stop a little short of the year boundary.
-   *
-   * closeYear fires exactly on it and zeroes the annual ledger, so a run of a
-   * whole number of years ends on the tick that wipes every figure this sweep
-   * then reads. Rent share, revenue and the income mix all reported zero for
-   * the entire project because of it — the numbers were right and the reading
-   * was taken a moment too late.
-   */
-  const ticks = TICKS_PER_YEAR * YEARS - 400;
+  const ticks = TICKS_PER_YEAR * YEARS;
   for (let i = 0; i < ticks; i++) {
     w.step();
     if ((i & 8191) === 0) checkReachable();

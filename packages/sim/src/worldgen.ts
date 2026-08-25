@@ -113,6 +113,9 @@ export function generateWorld(w: World): void {
     // Whether it digs its output out of the ground or makes it from something
     // somebody has to bring. Cached here so the hot paths need not ask.
     w.sites.extraction[s] = ind.kind === 'extraction' ? 1 : 0;
+    // Everything the region starts with was built before the game begins, and
+    // is therefore already a little old in 1860 rather than brand new.
+    w.sites.built[s] = 1860 - 10;
     for (const [id, amount] of Object.entries(ind.recipe.inputs)) {
       const ci = c.cargoIndex.get(id);
       if (ci !== undefined) w.sites.capacity[s * cargoCount + ci] = amount * 30;

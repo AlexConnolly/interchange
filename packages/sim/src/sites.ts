@@ -66,6 +66,18 @@ export class SiteTable {
   /** Set from the recipe kind at alloc, so the hot paths do not have to reach
    *  into the content to ask. */
   readonly extraction = new Uint8Array(MAX_SITES);
+  /*
+   * The year the works was built or last rebuilt.
+   *
+   * features.md 4 asks for industry ageing and modernisation, and the point of
+   * it is that a region cannot be finished. A works laid down in 1870 is still
+   * a works in 1970 and it is not a *competitive* works, so somewhere along
+   * the way its output falls away and either somebody spends money on it or
+   * the trade moves to whoever did.
+   */
+  readonly built = new Int32Array(MAX_SITES);
+  /** How modern it is, 0..100, recomputed from its age and its era. */
+  readonly modernity = new Uint8Array(MAX_SITES).fill(100);
   /** Lifetime tonnes shipped out, for reporting and for the balance sweep. */
   readonly shipped = new Float64Array(MAX_SITES);
   /**
@@ -174,6 +186,12 @@ export class TownTable {
   names: string[] = [];
   /** Rolling 0..100 measure of how well the town is served. Drives growth. */
   readonly served = new Uint8Array(MAX_TOWNS);
+  /** How good the passenger service here is, 0..100. transit.ts. */
+  readonly transitQuality = new Uint8Array(MAX_TOWNS);
+  /** How long this town's circumstances have argued for a different character,
+   *  and which one they are arguing for. towncharacter.ts. */
+  readonly characterDrift = new Int32Array(MAX_TOWNS);
+  readonly characterToward = new Uint8Array(MAX_TOWNS);
   /** Jobs within a commute, filled by the labour catchment pass. */
   readonly labourSupplied = new Int32Array(MAX_TOWNS);
   readonly labourDemand = new Int32Array(MAX_TOWNS);
@@ -317,7 +335,10 @@ export function stepSites(
      * built both.
      */
     const amenity = r.kind[def] === IndustryKind.Tourism ? sites.amenity[s] : 100;
-    const scale = (gate * health * richness * amenity) / 100000000;
+    // And how old the plant is. An 1870 works still standing in 1970 does not
+    // make what a 1970 works makes.
+    const modern = Math.max(MIN_MODERNITY, sites.modernity[s]);
+    const scale = (gate * health * richness * amenity * modern) / 10000000000;
 
     // Inputs first: a cycle is all-or-nothing so a half-fed steelworks does
     // not silently eat its coke.
@@ -444,6 +465,30 @@ export function stepSiteDecay(
  */
 export const LOCAL_SUPPLY_POP = 760;
 
+/** Years before a works is noticeably behind the times. */
+export const MODERN_LIFE_YEARS = 45;
+
+/** However old it gets, a works never falls below this share of its output —
+ *  it is obsolete, not derelict, and derelict is what decay is for. */
+export const MIN_MODERNITY = 42;
+
+/**
+ * Age every works by a year.
+ *
+ * Separate from decay, which is about being unserved: a works nobody collects
+ * from is failing at its job, and a works built in 1870 is doing its job
+ * perfectly well by 1870 standards. They deserve different curves and
+ * different remedies — one wants a lorry, the other wants capital.
+ */
+export function ageSites(sites: SiteTable, year: number): void {
+  for (let s = 0; s < sites.count; s++) {
+    if (sites.state[s] === SiteState.Dead) continue;
+    const age = Math.max(0, year - sites.built[s]);
+    const wear = Math.min(100 - MIN_MODERNITY, Math.round((age / MODERN_LIFE_YEARS) * (100 - MIN_MODERNITY)));
+    sites.modernity[s] = 100 - wear;
+  }
+}
+
 export function stepTowns(
   towns: TownTable,
   demandPerThousand: Float64Array,
@@ -453,10 +498,18 @@ export function stepTowns(
    *  the whole of it: nobody takes a holiday in a wet February, and a model
    *  that ignores that is not modelling tourism. */
   seasonal: { cargo: number; multiplier: number },
+  /** Which cargo is people, and how much of their travel the car has taken. */
+  transit: { cargo: number; shareLost: (town: number) => number },
+  /** What this town's character does to its appetite for each cargo.
+   *  towncharacter.ts, and it applies to what a town sends as well as what it
+   *  wants — a dormitory's extra passengers are commuters leaving it. */
+  character: { appetite: (town: number, cargo: number) => number },
 ): void {
   const cargoCount = towns.cargoCount;
+  const passengerCargo = transit.cargo;
   for (let t = 0; t < towns.count; t++) {
     const pop = towns.population[t];
+    const carAway = transit.shareLost(t);
 
     /*
      * Towns make people, post and holidays.
@@ -472,7 +525,15 @@ export function stepTowns(
     for (let c = 0; c < cargoCount; c++) {
       const per = producePerThousand[c];
       if (per === 0) continue;
-      const made = (per * pop) / 1000;
+      /*
+       * People choose. features.md 2: they will not take a slow miserable
+       * route — they stay home, or from era four they drive. So a town does
+       * not produce passengers for whoever happens to turn up; it produces
+       * the ones a service is good enough to win.
+       */
+      const made = ((per * pop) / 1000)
+        * (c === passengerCargo ? 1 - carAway : 1)
+        * character.appetite(t, c);
       const i = t * cargoCount + c;
       // People will wait for a bus, but not indefinitely: a few days of
       // departures and then they walk, and the town notices.
@@ -492,7 +553,9 @@ export function stepTowns(
       // Fractional on purpose. Rounding each cargo up to a whole tonne a day
       // put a floor under a small town's basket that was larger than the
       // basket, so every town wanted a dozen tonnes a day whatever its size.
-      const need = ((per * pop) / 1000) * (c === seasonal.cargo ? seasonal.multiplier : 1);
+      const need = ((per * pop) / 1000)
+        * (c === seasonal.cargo ? seasonal.multiplier : 1)
+        * character.appetite(t, c);
       const i = t * cargoCount + c;
       towns.demand[i] = Math.max(1, Math.ceil(need));
       wanted += need;
@@ -556,6 +619,12 @@ export function hashSites(h: Hasher, sites: SiteTable, towns: TownTable): void {
   h.array(sites.stock, sites.count * sites.cargoCount);
   h.array(towns.population, towns.count);
   h.array(towns.served, towns.count);
+  // Character is a slow variable that changes what a town wants, so a client
+  // that disagreed about it would diverge on trade a decade later rather than
+  // on the tick it went wrong. It goes in the hash for the same reason
+  // population does.
+  h.array(towns.character, towns.count);
+  h.array(towns.characterDrift, towns.count);
   h.array(towns.stock, towns.count * towns.cargoCount);
 }
 

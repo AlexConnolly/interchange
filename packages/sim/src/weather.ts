@@ -46,9 +46,18 @@ const HIGH_GROUND_SNOW_SPEED = 34;
 
 export const EventKind = {
   Flood: 0, Strike: 1, FuelPrice: 2, Boom: 3,
+  /*
+   * A dry summer. features.md 5 lists drought with the utility events, and it
+   * belongs there rather than with the weather: what a drought does is empty
+   * the reservoirs, and every industry that needs water runs at what the
+   * reservoirs can give it. The transport game feels it second-hand, through
+   * a region that has stopped producing — which is the right shape for a
+   * utility event and a different shape from a flood, which stops the roads.
+   */
+  Drought: 4,
 } as const;
 export type EventKind = (typeof EventKind)[keyof typeof EventKind];
-export const EVENT_NAMES = ['Flood', 'Strike', 'Fuel price', 'Boom'];
+export const EVENT_NAMES = ['Flood', 'Strike', 'Fuel price', 'Boom', 'Drought'];
 
 export const MAX_EVENTS = 16;
 
@@ -224,6 +233,14 @@ export function stepEvents(
         : 'Fuel and fodder are cheap. Running costs are down across the region.',
     );
     if (id >= 0) opened.push(id);
+  } else if (roll < 88 && (season === Season.Summer || season === Season.Spring)) {
+    // Dry weather runs long: a drought is a season, not a storm.
+    const days = 60 + rng.int(150);
+    const id = events.open(
+      EventKind.Drought, ctx.tick, days, -1, 30 + rng.int(55),
+      'The reservoirs are low. Anything that needs water is running short.',
+    );
+    if (id >= 0) opened.push(id);
   } else if (ctx.liveCargo.length > 0) {
     const cargo = ctx.liveCargo[rng.int(ctx.liveCargo.length)];
     const days = 60 + rng.int(180);
@@ -259,6 +276,16 @@ export function strikePercent(events: EventTable, company: number): number {
   for (let i = 0; i < events.count; i++) {
     if (events.active[i] && events.kind[i] === EventKind.Strike && events.subject[i] === company) {
       return Math.max(10, 100 - events.severity[i]);
+    }
+  }
+  return 100;
+}
+
+/** How much of the region's water supply is available, as a percentage. */
+export function waterAvailable(events: EventTable): number {
+  for (let i = 0; i < events.count; i++) {
+    if (events.active[i] && events.kind[i] === EventKind.Drought) {
+      return Math.max(20, 100 - events.severity[i]);
     }
   }
   return 100;

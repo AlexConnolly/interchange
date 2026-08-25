@@ -13,7 +13,7 @@ import {
   ACCEL, AUTHORITY, CELLS_PER_TILE, Control, DIR_BIT, DIR_DX, DIR_DY,
   DIR_OPPOSITE, FLOW_WINDOW, HASH_INTERVAL, MAX_COMPANIES, MAX_VEHICLES,
   MAX_NODES, MODE_COUNT, MODE_NAMES, Mode, PATH_LATENCY_TICKS, SPEED_STEPS, START_YEAR,
-  TICKS_PER_DAY, TICKS_PER_YEAR, DAYS_PER_MONTH, DAYS_PER_YEAR, ECONOMY_SCALE, LOAD_PATIENCE_DAYS, LOAD_PATIENCE_SHARE, CONTAINER_ERA, CONTAINER_TRANSFER_GAIN, PUBLIC_STANDARD,
+  TICKS_PER_DAY, TICKS_PER_YEAR, DAYS_PER_MONTH, DAYS_PER_YEAR, ECONOMY_SCALE, ECOMMERCE_ERA, ECOMMERCE_SHIFT, LOAD_PATIENCE_DAYS, LOAD_PATIENCE_SHARE, CONTAINER_ERA, CONTAINER_TRANSFER_GAIN, PUBLIC_STANDARD, INDUSTRY_SIGHT, CHARACTER_COUNT, ENTRANT_CAPITAL,
   ACCESS_SCALE, STALLED_DAYS,
 } from './constants.ts';
 import { Cmd, CommandQueue, type Command } from './commands.ts';
@@ -27,9 +27,12 @@ import { generateAirCorridors } from './seaair.ts';
 import {
   Climate, EventTable, stepEvents, floodSeverity, strikePercent,
   runningCostPercent, ratePercent, FLOOD_LINE, EVENT_NAMES, EventKind, WEATHER_NAMES, Weather,
+  waterAvailable,
 } from './weather.ts';
 import { AmenityField, stepAmenity, REMEDIATION_PRICE, REMEDIATION_FROM_ERA } from './amenity.ts';
 import { planReclamation, reclaim, type ReclaimPlan } from './reclamation.ts';
+import { scoreTransit, carShare } from './transit.ts';
+import { stepCharacter, characterAppetite } from './towncharacter.ts';
 import {
   AgreementTable, agreedCharge, stepAgreements, propose, accept, decline, withdraw,
 } from './agreements.ts';
@@ -42,7 +45,7 @@ import { Router, type RouteCosts } from './pathfinding.ts';
 import { TileRouter } from './tilerouter.ts';
 import { Rng } from './rng.ts';
 import {
-  IndustryKind, SiteState, SiteTable, TownTable, hashSites, stepSiteDecay,
+  IndustryKind, SiteState, SiteTable, TownTable, hashSites, stepSiteDecay, ageSites,
   stepSites, stepTowns, type RecipeTables,
 } from './sites.ts';
 import { DEPOSIT_NAMES, TileFlag, generateTerrain, SEA_LEVEL, type Terrain, type WorldConfig } from './terrain.ts';
@@ -129,7 +132,9 @@ export class World {
   private vehicleCapacity = new Int32Array(256);
   private vehicleTransfer = new Int32Array(256);
   private vehicleRunning = new Float64Array(256);
-  private vehicleMode = new Uint8Array(256);
+  /** Which layer each vehicle type runs on. Public because the renderer
+   *  needs it to stand a vehicle on its own formation. */
+  readonly vehicleMode = new Uint8Array(256);
   private cargoPrice = new Int32Array(64);
   private recipes: RecipeTables;
   /** The authority's competition powers, and how far it has had to use them
@@ -165,7 +170,10 @@ export class World {
   private townWant: Record<string, number> = {};
   private townSend: Record<string, number> = {};
   private basketEra = 0;
+  /** Character multipliers, flattened to (character, cargo). */
+  private appetite = new Float64Array(0);
   private touristCargo = -1;
+  private passengerCargo = -1;
   private townProducePerThousand: Float64Array;
   private routeCosts: RouteCosts;
 
@@ -323,6 +331,7 @@ export class World {
     this.townDemandPerThousand = new Float64Array(content.cargo.length);
     this.townProducePerThousand = new Float64Array(content.cargo.length);
     this.touristCargo = content.cargoIndex.get('tourists') ?? -1;
+    this.passengerCargo = content.cargoIndex.get('passengers') ?? -1;
     this.rebuildTownBasket(1);
 
     this.routeCosts = { speedLimit: this.waySpeed, valueOfTime: content.balance.valueOfTime };
@@ -357,12 +366,29 @@ export class World {
   private rebuildTownBasket(era: number): void {
     if (this.basketEra === era) return;
     this.basketEra = era;
+    this.buildAppetiteTable();
     this.townDemandPerThousand.fill(0);
     this.townProducePerThousand.fill(0);
     for (const [id, v] of Object.entries(this.townWant)) {
       const i = this.content.cargoIndex.get(id);
       if (i === undefined || this.content.cargo[i].fromEra > era) continue;
-      this.townDemandPerThousand[i] = v / ECONOMY_SCALE;
+      /*
+       * Last-mile, from era six. features.md 6: "demand shifts from shops to
+       * doorsteps; freight pattern inverts."
+       *
+       * The inversion is the point and it is why this is a shift in the
+       * *basket* rather than a new cargo. Retail stock is what a shop takes in
+       * by the pallet, so serving it is a few large deliveries to a few places
+       * — and a carrier who has spent forty years building for that finds the
+       * same tonnage arriving as goods wanted at every town instead. The
+       * network that was right for one is the wrong shape for the other.
+       */
+      let want = v;
+      if (era >= ECOMMERCE_ERA) {
+        if (id === 'retail') want = v * (1 - ECOMMERCE_SHIFT);
+        if (id === 'goods') want = v * (1 + ECOMMERCE_SHIFT);
+      }
+      this.townDemandPerThousand[i] = want / ECONOMY_SCALE;
     }
     // And what a town sends out. Passengers are wanted by other towns as well
     // as produced, so they appear in both tables — which is what makes a
@@ -374,6 +400,86 @@ export class World {
       this.townProducePerThousand[i] = v / ECONOMY_SCALE;
       this.townDemandPerThousand[i] = Math.max(this.townDemandPerThousand[i], (v * 0.8) / ECONOMY_SCALE);
     }
+  }
+
+  /**
+   * Flatten the character multipliers into a lookup, once.
+   *
+   * towncharacter.ts states them against cargo *ids* because that is how the
+   * design reads and how anybody balancing them would want to write them, and
+   * the town step needs them by index on every town on every day. Building the
+   * cross product once per era costs five rows of a dozen numbers and takes
+   * the string comparison out of the inner loop entirely.
+   */
+  private buildAppetiteTable(): void {
+    const n = this.content.cargo.length;
+    this.appetite = new Float64Array(CHARACTER_COUNT * n).fill(1);
+    for (let ch = 0; ch < CHARACTER_COUNT; ch++) {
+      for (let c = 0; c < n; c++) {
+        this.appetite[ch * n + c] = characterAppetite(ch, this.content.cargo[c].id);
+      }
+    }
+  }
+
+  /**
+   * Let each town drift toward the kind of place its circumstances make it.
+   * Once a year, and slowly even then — towncharacter.ts has the reasoning.
+   */
+  private stepCharacter(): void {
+    const n = this.towns.count;
+    const industry = new Float64Array(n);
+    const carriers: Set<number>[] = [];
+    for (let t = 0; t < n; t++) carriers.push(new Set());
+    // Industry near a town, by distance rather than by catchment: what makes a
+    // place industrial is the works you can see from it.
+    for (let s = 0; s < this.sites.count; s++) {
+      if (this.sites.state[s] === SiteState.Dead) continue;
+      const def = this.sites.def[s];
+      if (this.recipes.amenityPenalty[def] <= 0) continue;
+      for (let t = 0; t < n; t++) {
+        const dx = this.sites.x[s] - this.towns.x[t];
+        const dy = this.sites.y[s] - this.towns.y[t];
+        const d2 = dx * dx + dy * dy;
+        if (d2 > INDUSTRY_SIGHT * INDUSTRY_SIGHT) continue;
+        industry[t] += 1 - Math.sqrt(d2) / INDUSTRY_SIGHT;
+      }
+    }
+    // And who serves it, counted as distinct companies rather than services,
+    // because three routes belonging to one carrier is not a market town.
+    for (let sv = 0; sv < this.services.count; sv++) {
+      if (!this.services.active[sv] || this.services.vehicles[sv] === 0) continue;
+      const owner = this.services.company[sv];
+      for (let k = 0; k < this.services.stopCount[sv]; k++) {
+        const i = sv * MAX_STOPS + k;
+        if (this.services.stopKind[i] !== 1) continue;
+        const t = this.services.stopTarget[i];
+        if (t >= 0 && t < n) carriers[t].add(owner);
+      }
+    }
+    stepCharacter(this.towns, {
+      industryNearby: (t) => industry[t],
+      carriers: (t) => carriers[t].size,
+      amenity: (t) => this.amenity.at(this.towns.x[t], this.towns.y[t]),
+      transit: (t) => this.towns.transitQuality[t],
+      coastal: (t) => this.isCoastal(this.towns.tile[t]),
+      yearFraction: 1,
+    });
+  }
+
+  /** Whether a tile has open water within sight of it. */
+  private isCoastal(tile: number): boolean {
+    const size = this.config.size;
+    const x = tile % size;
+    const y = (tile / size) | 0;
+    for (let dy = -3; dy <= 3; dy++) {
+      for (let dx = -3; dx <= 3; dx++) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+        if (this.terrain.isWater(nx, ny)) return true;
+      }
+    }
+    return false;
   }
 
   get era(): number {
@@ -623,10 +729,20 @@ export class World {
 
     this.stepUtilities();
     stepSiteDecay(this.sites, b);
+    if (this.day % DAYS_PER_YEAR === 0) ageSites(this.sites, this.year);
+    this.scoreTransit();
+    if (this.day % DAYS_PER_YEAR === 0 && this.day > 0) this.stepCharacter();
     this.rebuildTownBasket(this.era);
     stepTowns(
       this.towns, this.townDemandPerThousand, this.townProducePerThousand, b.townGrowthPerDay,
       { cargo: this.touristCargo, multiplier: this.climate.tourismMultiplier(this.day) },
+      {
+        cargo: this.passengerCargo,
+        shareLost: (t) => carShare(this.era, this.towns.transitQuality[t]),
+      },
+      {
+        appetite: (t, c) => this.appetite[this.towns.character[t] * this.content.cargo.length + c],
+      },
     );
     this.stepConveyors();
     this.stepContracts();
@@ -637,7 +753,6 @@ export class World {
     if (this.day % b.contractIntervalDays === 0) this.offerContract();
     this.stepObjectives();
     if (this.dayOfMonth === 0 && this.day > 0) this.companies.closeMonth();
-    if (this.tick % TICKS_PER_YEAR === 0 && this.tick > 0) this.companies.closeYear();
     this.syncCargoRibbons();
     {
       const report = stepAgreements(this.agreements, this.tick);
@@ -688,7 +803,13 @@ export class World {
     balanceGrids(
       this.water, this.sites, Mode.Pipe,
       (s) => this.recipes.waterNeed[this.sites.def[s]],
-      (s) => this.siteOutputRate(s, waterCargo),
+      /*
+       * What the reservoirs can actually give, which in a dry summer is less
+       * than what they hold. features.md 5 lists drought with the utility
+       * events, and this is where it lands: the transport game feels a drought
+       * second-hand, through a region that has stopped producing.
+       */
+      (s) => (this.siteOutputRate(s, waterCargo) * waterAvailable(this.events)) / 100,
       (s, pct) => { this.sites.watered[s] = pct; },
       this.assets, ledger, this.cargoPrice[waterCargo],
     );
@@ -1622,6 +1743,51 @@ export class World {
   }
 
   /**
+   * How good the passenger service is at each town, once a day.
+   *
+   * Read by stepTowns to decide how many people take a service at all, which
+   * is what makes the motor car a competitor rather than a decoration.
+   */
+  private scoreTransit(): void {
+    const people = this.passengerCargo;
+    if (people < 0) return;
+    const calls = new Int32Array(this.towns.count);
+    const lapSum = new Float64Array(this.towns.count);
+    const modes = new Int32Array(this.towns.count);
+    for (let s = 0; s < this.services.count; s++) {
+      if (!this.services.active[s] || this.services.vehicles[s] === 0) continue;
+      // Only a service with something that carries people counts.
+      let mode = -1;
+      for (let v = 0; v < this.vehicles.count; v++) {
+        if (!this.vehicles.alive[v] || this.vehicles.service[v] !== s) continue;
+        const def = this.content.vehicles[this.vehicles.type[v]];
+        if (!def.handling.includes('people')) continue;
+        mode = this.vehicleMode[this.vehicles.type[v]];
+        break;
+      }
+      if (mode < 0) continue;
+      for (let k = 0; k < this.services.stopCount[s]; k++) {
+        const i = s * MAX_STOPS + k;
+        if (this.services.stopKind[i] !== 1) continue;
+        const t = this.services.stopTarget[i];
+        if (t < 0 || t >= this.towns.count) continue;
+        calls[t]++;
+        lapSum[t] += this.services.roundTrip[s] || TICKS_PER_YEAR;
+        modes[t] |= 1 << mode;
+      }
+    }
+    scoreTransit(this.towns, {
+      era: this.era,
+      serviceCount: (t) => calls[t],
+      meanRoundTrip: (t) => (calls[t] > 0 ? lapSum[t] / calls[t] : 0),
+      modes: (t) => modes[t],
+      // A month is what a commute ought to feel like at this game's scale —
+      // see scale.md on why a journey and a calendar are not reconciled here.
+      referenceRoundTrip: TICKS_PER_DAY * 30,
+    });
+  }
+
+  /**
    * What the region is like to be in, once a month.
    *
    * Monthly rather than daily because the fastest thing in the field moves
@@ -2216,11 +2382,52 @@ export class World {
    * debt and were about to buy another — bankruptcies went from 0.6 a run to
    * 2.7.
    */
-  private checkStalled(): void {
+  /**
+   * The cheapest vehicle anybody can actually put on the road this year.
+   *
+   * *On the road* is the point. Asking for the cheapest vehicle of any mode
+   * answers "a canal barge, fifty-six thousand pounds" for the whole of the
+   * game, and a company with no canal cannot buy one — so a firm with no fleet
+   * and eighty thousand pounds looked solvent, was not, and sat in the region
+   * doing nothing for a hundred and fifty years because nothing ever wound it
+   * up and nothing ever replaced it. Road is the mode every company can always
+   * reach, because the authority's roads go everywhere, so it is the honest
+   * measure of whether somebody can trade at all.
+   */
+  private cheapestStart(): number {
     let cheapest = Infinity;
     for (const v of this.content.vehicles) {
+      if (this.vehicleMode[this.content.vehicleIndex.get(v.id) as number] !== Mode.Road) continue;
       if (v.era <= this.era && this.year < v.obsoleteYear && v.cost < cheapest) cheapest = v.cost;
     }
+    return cheapest;
+  }
+
+  /**
+   * What a new operator sets up with.
+   *
+   * A fixed sum was right in 1860 and absurd by 1960. Vehicle prices rise
+   * roughly fortyfold across the eras — a dray is twenty-four thousand pounds
+   * and a modern artic is eight hundred and sixty — while starting capital sat
+   * at the 1860 figure for ever. So every entrant after about era three
+   * arrived unable to buy a single vehicle of any kind, could not trade, and
+   * could not fail either, because the test for a failed company also used
+   * 1860 numbers. Four companies sat in the region with a hundred and thirty
+   * thousand pounds each and no vehicles, for a hundred and fifty years.
+   *
+   * Tying it to the price of the cheapest thing they could buy makes it
+   * self-tuning against the content rather than a second ladder to keep in
+   * step with the first: enough for a vehicle and something to run it with.
+   */
+  private startingCapital(): number {
+    const cheapest = this.cheapestStart();
+    const floor = this.content.balance.startingCash;
+    if (cheapest === Infinity) return floor;
+    return Math.max(floor, Math.round(cheapest * ENTRANT_CAPITAL));
+  }
+
+  private checkStalled(): void {
+    const cheapest = this.cheapestStart();
     if (cheapest === Infinity) return;
     const fleet = new Int32Array(this.companies.count);
     for (let v = 0; v < this.vehicles.count; v++) {
@@ -2317,8 +2524,34 @@ export class World {
     }
     if (slot === NONE) return;
 
+    /*
+     * Whatever the administrator could not sell passes to the authority.
+     *
+     * This is the half of design.md 3.8 that was missing, and leaving it out
+     * was quietly fatal. Bankruptcy puts a company's ways on the market, which
+     * is right; but the slot is then re-used by the next operator, and the
+     * ways were still attached to it. So every entrant was born owning the
+     * derelict network of the company that had just died of owning it —
+     * nine ways, four hundred thousand a year of upkeep, on the first morning,
+     * against a quarter of a million of starting capital. There was no
+     * sequence of good decisions that survived it. The region reliably ran out
+     * of vehicles altogether within fifty years and stayed empty for the
+     * remaining two centuries, and every entrant after the first was a
+     * formality.
+     *
+     * The authority taking them on is both the fix and what actually happens
+     * when a transport operator collapses. It also completes a path that was
+     * already half-built: network.ts values an authority-held way at a quarter
+     * of its floor precisely so somebody can pick it up cheaply later, which
+     * is the region recovering rather than the region ending.
+     */
+    for (let a = 0; a < this.assets.count; a++) {
+      if (this.assets.owner[a] !== slot) continue;
+      this.assets.owner[a] = AUTHORITY;
+      this.assets.forSale[a] = 1;
+    }
     const name = ENTRANT_NAMES[this.rng.int(ENTRANT_NAMES.length)];
-    this.companies.revive(slot, name, this.content.balance.startingCash);
+    this.companies.revive(slot, name, this.startingCapital());
     this.companies.isAi[slot] = 1;
     this.companies.aggression[slot] = 30 + this.rng.int(60);
     this.companies.horizon[slot] = 25 + this.rng.int(65);
@@ -2435,6 +2668,9 @@ export class World {
       case Cmd.ListAsset:
         if (this.assets.owner[c.a] === c.issuer) this.assets.forSale[c.a] = c.b ? 1 : 0;
         break;
+      case Cmd.Modernise:
+        this.modernise(c.issuer, c.a);
+        break;
       case Cmd.Reclaim:
         if (Array.isArray(c.data)) this.reclaimLand(c.issuer, c.data);
         break;
@@ -2524,6 +2760,47 @@ export class World {
    * therefore charge — so this is also where the first asset a company owns
    * comes from, and where the rent line in the income statement starts.
    */
+  /**
+   * Rebuild a works to current practice. features.md §4.
+   *
+   * The answer to ageing, and deliberately an expensive one: a works that has
+   * fallen behind is still producing, so this is a choice about capital rather
+   * than a repair somebody has to make. Priced against what it would cost to
+   * found the thing today and scaled by how far behind it has fallen, so
+   * modernising something recently built is nearly free and nearly pointless,
+   * and rescuing a century-old works costs most of a new one.
+   */
+  modernisePrice(site: number): number {
+    if (site < 0 || site >= this.sites.count) return 0;
+    const def = this.content.industries[this.sites.def[site]];
+    const behind = Math.max(0, 100 - this.sites.modernity[site]) / 100;
+    return Math.round(def.foundCost * 0.75 * behind);
+  }
+
+  modernise(company: number, site: number): boolean {
+    if (site < 0 || site >= this.sites.count) return false;
+    if (this.sites.owner[site] !== company) {
+      this.onEvent?.('refused', 'That is not yours to rebuild.');
+      return false;
+    }
+    if (this.sites.modernity[site] >= 96) {
+      this.onEvent?.('refused', 'There is nothing out of date about it.');
+      return false;
+    }
+    const price = this.modernisePrice(site);
+    if (company !== AUTHORITY && this.companies.cash[company] < price) {
+      this.onEvent?.('refused', `Rebuilding that would cost ${Math.round(price / 100)}.`);
+      return false;
+    }
+    if (company !== AUTHORITY) this.companies.post(company, Line.Construction, price);
+    this.sites.built[site] = this.year;
+    this.sites.modernity[site] = 100;
+    if (company === this.player) {
+      this.onEvent?.('founded', `${this.content.industries[this.sites.def[site]].name} rebuilt to current practice.`);
+    }
+    return true;
+  }
+
   /** What a reclamation would cost, without committing it. */
   planReclaim(tiles: readonly number[]): ReclaimPlan {
     return planReclamation(this.terrain, tiles, this.era);
@@ -2733,6 +3010,8 @@ export class World {
     const site = this.sites.alloc(defIndex, x, y, tile, company);
     if (site === NONE) return NONE;
     this.sites.extraction[site] = def.kind === 'extraction' ? 1 : 0;
+    this.sites.built[site] = this.year;
+    this.sites.modernity[site] = 100;
     this.sites.richness[site] = 40 + (this.terrain.deposit[tile] > 0 ? 40 : 20);
     this.sites.cycle[site] = def.recipe.period;
     const cargoCount = this.content.cargo.length;

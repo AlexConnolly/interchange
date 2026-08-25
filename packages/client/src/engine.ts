@@ -19,7 +19,7 @@ import {
   createWorld, Cmd, cmd, SPEED_STEPS, TICKS_PER_DAY, TICKS_PER_SECOND,
   type Command, type World, type WorldConfig,
 } from '@interchange/sim';
-import { OverlayMode, Renderer, hex, type RenderSource } from '@interchange/render';
+import { OverlayMode, Renderer, TOWN_KIT, hex, loadKit, type RenderSource } from '@interchange/render';
 import { content } from '@interchange/data';
 import { Session } from './session.ts';
 import { loadSettings } from './settings.ts';
@@ -29,6 +29,15 @@ export interface EngineEvent {
   text: string;
   tick: number;
 }
+
+/**
+ * How long a full dawn-to-dark-to-dawn takes, in real seconds.
+ *
+ * Four minutes: long enough that the light is a slow change you notice rather
+ * than an effect happening at you, short enough that a player who sits down at
+ * noon sees a dusk before they get bored of noon.
+ */
+const SUN_CYCLE_SECONDS = 240;
 
 export class Engine {
   world: World;
@@ -40,6 +49,9 @@ export class Engine {
 
   private accumulator = 0;
   private lastFrame = 0;
+  /** Where the sun is, 0..1. Advanced in real time, not in game time — see
+   *  the note in buildSource. */
+  private sunPhase = 0.35;
   private raf = 0;
   private source: RenderSource | null = null;
   private listeners = new Set<() => void>();
@@ -139,6 +151,22 @@ export class Engine {
 
   attach(canvas: HTMLCanvasElement): void {
     this.renderer = new Renderer(canvas);
+    /*
+     * Fetch the pipeline's models, and do not wait for them.
+     *
+     * The renderer draws generated geometry until these arrive and swaps when
+     * they do, which keeps first paint immediate and means a failed fetch
+     * costs a nicer set of buildings rather than the whole scene. What is
+     * missing is logged rather than thrown, because a region with no lorry
+     * model is still a playable region and a silent absence is not debuggable.
+     */
+    void loadKit([...TOWN_KIT]).then((kit) => {
+      if (!this.renderer) return;
+      if (kit.geometry.size > 0) this.renderer.useKit(kit.geometry);
+      if (kit.missing.length > 0) {
+        console.warn('[art] models not loaded:', kit.missing.join(', '));
+      }
+    });
     const t = this.world.terrain;
     /*
      * Start looking at the largest town with work around it.
@@ -298,6 +326,30 @@ export class Engine {
     this.notify();
   }
 
+  /**
+   * Move the sun. Real seconds, not game days.
+   *
+   * A game day is forty-eight ticks, and at the fastest speed the simulation
+   * runs several hundred ticks a second — so a sun tied directly to the
+   * calendar completed a dawn-to-dusk cycle about ten times a second and the
+   * screen strobed. That is not a day and night; it is a fault.
+   *
+   * The honest fix is to admit these are two different clocks. The calendar
+   * spans two hundred and forty years and is the *subject* of the game; the
+   * sun is atmosphere, and art-direction.md 13 is explicit that weather and
+   * light are mood and never information. Nothing is read off the sun, so
+   * nothing is lost by letting it keep its own time — and a fixed cycle means
+   * the light looks the same at every game speed, which is what you want from
+   * something whose whole job is to look like light.
+   *
+   * It still stops when the game is paused, because a world that has stopped
+   * and a sky that has not is unsettling in a way nobody can name.
+   */
+  private advanceSun(dt: number): void {
+    if (!this.running || SPEED_STEPS[this.world.speed] === 0) return;
+    this.sunPhase = (this.sunPhase + dt / SUN_CYCLE_SECONDS) % 1;
+  }
+
   private start(): void {
     this.lastFrame = performance.now();
     const frame = (now: number): void => {
@@ -305,6 +357,7 @@ export class Engine {
       const dt = Math.min(0.25, (now - this.lastFrame) / 1000);
       this.lastFrame = now;
 
+      this.advanceSun(dt);
       this.frameTimes.push(dt);
       if (this.frameTimes.length > 30) this.frameTimes.shift();
       this.fps = 1 / (this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length);
@@ -362,6 +415,7 @@ export class Engine {
         wayAsset: w.layers.map((l) => l.asset),
         wayLink: w.layers.map((l) => l.link),
         wayLevel: w.layers.map((l) => l.level),
+        vehicleMode: w.vehicleMode,
         wayFlags: w.layers.map((l) => l.flags),
         assetOwner: w.assets.owner,
         assetCondition: w.assets.condition,
@@ -424,9 +478,7 @@ export class Engine {
      * for everybody is to let it be turned off. Pinned to mid-morning when it
      * is, which is the light the palette was drawn for.
      */
-    s.dayFraction = this.settings.dayNight
-      ? ((w.tick + TICKS_PER_DAY * 0.35) % TICKS_PER_DAY) / TICKS_PER_DAY
-      : 0.35;
+    s.dayFraction = this.settings.dayNight ? this.sunPhase : 0.35;
     /*
      * The season tints the land, which is the whole of "weather in the
      * picture". With it off the palette stays at its spring reference — the

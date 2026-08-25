@@ -31,6 +31,7 @@ export interface WorldLighting {
 const VERT = /* glsl */ `
   attribute vec3 color;
   attribute float emit;
+  attribute float livery;
 
   varying vec3 vColour;
   varying vec3 vNormal;
@@ -46,7 +47,11 @@ const VERT = /* glsl */ `
       // Livery tinting happens here: the instance colour multiplies the
       // material's own, so one lorry mesh serves every company (§10).
       #ifdef USE_INSTANCING_COLOR
-        vColour *= instanceColor;
+        // Only where the geometry says this face is bodywork. A whole-mesh
+        // multiply tinted tyres and window glass in the company's colour,
+        // which is fine on a mesh authored to be tinted end to end and wrong
+        // on one that reserves a livery slot — see art-pipeline.md 4.2.
+        vColour = mix(vColour, vColour * instanceColor, clamp(livery, 0.0, 1.0));
       #endif
       vec4 world = modelMatrix * instanceMatrix * vec4(position, 1.0);
       vNormal = normalize(mat3(modelMatrix) * mat3(instanceMatrix) * normal);
@@ -178,7 +183,7 @@ export function lightingForTime(t: number, season: number, into?: WorldLighting)
   const night = Math.max(0, Math.min(0.78, -elevation * 2.0 + 0.2));
   const dusk = Math.max(0, 1 - Math.abs(elevation) * 4);
 
-  const sunStrength = Math.max(0.16, elevation) * 0.95;
+  const sunStrength = Math.max(0.16, elevation) * 1.05;
   const warm = 1 - Math.max(0, elevation) * 0.35;
 
   const out = into ?? makeLighting();
@@ -190,18 +195,34 @@ export function lightingForTime(t: number, season: number, into?: WorldLighting)
 
   // Winter cools and desaturates the sky; summer warms it.
   const seasonWarm = [0.02, 0.06, 0.04, -0.04][season & 3];
+  /*
+   * Ambient from the sky, and it was too mean.
+   *
+   * The sun does the modelling and the sky fills the shadows, and with the
+   * fill this low every face turned away from the sun went almost black — so a
+   * hillside in plain morning light read as a hillside at dusk, and the whole
+   * region looked like it was being played through smoked glass. A real
+   * overcast sky is a very large soft light source and puts a great deal into
+   * a north-facing slope.
+   *
+   * §13's legibility floor argues the same way from the other end: the shaded
+   * side of a hill is where a great deal of the network is, and it has to be
+   * readable at noon without the player rotating the camera to find it.
+   */
   out.skyColour.setRGB(
-    0.30 + 0.22 * (1 - night) + seasonWarm,
-    0.34 + 0.24 * (1 - night),
-    0.42 + 0.26 * (1 - night) - seasonWarm,
-  ).multiplyScalar(0.30 + 0.16 * (1 - night));
+    0.36 + 0.26 * (1 - night) + seasonWarm,
+    0.40 + 0.28 * (1 - night),
+    0.48 + 0.28 * (1 - night) - seasonWarm,
+  ).multiplyScalar(0.52 + 0.26 * (1 - night));
 
   out.fogColour.setRGB(
     0.10 + 0.58 * (1 - night),
     0.13 + 0.60 * (1 - night),
     0.19 + 0.62 * (1 - night),
   );
-  out.groundColour.setRGB(0.09, 0.09, 0.11).multiplyScalar(0.6 + 0.4 * (1 - night));
+  // Bounce off the ground: never zero, or the underside of everything is a
+  // silhouette.
+  out.groundColour.setRGB(0.16, 0.15, 0.14).multiplyScalar(0.6 + 0.4 * (1 - night));
   out.sun[0] = Math.cos(angle * 0.5 + 0.9) * 0.6;
   out.sun[1] = -Math.max(0.25, elevation);
   out.sun[2] = Math.sin(angle * 0.5 + 0.9) * 0.6;

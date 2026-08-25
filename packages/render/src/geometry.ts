@@ -260,6 +260,54 @@ export class Mesh {
     this.quad(x1, y0, z0, x1, y1, z0, x0, y1, z0, x0, y0, z0, c);
   }
 
+  /**
+   * A pitched roof: two sloping planes meeting at a ridge, closed by a gable
+   * at each end.
+   *
+   * This exists because a town made of boxes reads as a town made of boxes.
+   * A flat slab on top of a cuboid is what the first version drew, and at any
+   * camera angle it is a grey square on a beige square — nothing in the
+   * silhouette says *building*. The pitch is the single strongest cue there
+   * is, because a roof is the one part of a house whose shape is dictated by
+   * rain rather than by taste, and every real one has it.
+   *
+   * `ridgeAlongX` picks which way the house faces. Getting a whole street to
+   * agree on that is most of what makes a row of houses look like a street
+   * rather than like scattered dice.
+   *
+   * `overhang` pushes the eaves out past the walls. It is a small number and
+   * it does a lot: the shadow line under the eaves is what separates the roof
+   * from the wall when the sun is high and the shading is flat.
+   */
+  roof(
+    cx: number, baseY: number, cz: number,
+    hx: number, hz: number, height: number,
+    ridgeAlongX: boolean, overhang: number,
+    c: RGB, gable?: RGB,
+  ): void {
+    const g = gable ?? c;
+    const ex = hx + overhang;
+    const ez = hz + overhang;
+    const ridgeY = baseY + height;
+    if (ridgeAlongX) {
+      const x0 = cx - ex;
+      const x1 = cx + ex;
+      // Two slopes down to the eaves on the long sides.
+      this.quad(x0, ridgeY, cz, x1, ridgeY, cz, x1, baseY, cz - ez, x0, baseY, cz - ez, c);
+      this.quad(x0, baseY, cz + ez, x1, baseY, cz + ez, x1, ridgeY, cz, x0, ridgeY, cz, c);
+      // And a triangle closing each end.
+      this.tri(x0, baseY, cz - ez, x0, baseY, cz + ez, x0, ridgeY, cz, g);
+      this.tri(x1, baseY, cz + ez, x1, baseY, cz - ez, x1, ridgeY, cz, g);
+    } else {
+      const z0 = cz - ez;
+      const z1 = cz + ez;
+      this.quad(cx, ridgeY, z0, cx, ridgeY, z1, cx - ex, baseY, z1, cx - ex, baseY, z0, c);
+      this.quad(cx + ex, baseY, z0, cx + ex, baseY, z1, cx, ridgeY, z1, cx, ridgeY, z0, c);
+      this.tri(cx - ex, baseY, z0, cx + ex, baseY, z0, cx, ridgeY, z0, g);
+      this.tri(cx + ex, baseY, z1, cx - ex, baseY, z1, cx, ridgeY, z1, g);
+    }
+  }
+
   /** A prism about the Y axis. Segments low on purpose: eight is a barrel and
    *  six is a chimney, and at playing size nothing needs more. */
   cyl(
@@ -344,6 +392,21 @@ export class Mesh {
     g.setAttribute('position', new BufferAttribute(this.posBuf.subarray(0, this.n * 3), 3));
     g.setAttribute('color', new BufferAttribute(this.colBuf.subarray(0, this.n * 3), 3));
     g.setAttribute('emit', new BufferAttribute(this.emitBuf.subarray(0, this.n), 1));
+    /*
+     * Livery, as a per-vertex mask rather than a whole-mesh multiply.
+     *
+     * Everything built here is tintable end to end, which is how the shader
+     * always behaved and what the hand-authored models were designed around.
+     * The attribute exists for the models coming out of the Blender pipeline,
+     * where art-pipeline.md 4.2 reserves a named material slot: a lorry's
+     * bodywork takes the company's colour and its tyres and glass do not, and
+     * the only way the shader can tell them apart is if the geometry says so.
+     *
+     * Filled here rather than tracked per vertex because it is the same value
+     * for every vertex of a hand-built mesh, and a whole extra buffer written
+     * on every vertex to hold a constant is a cost for nothing.
+     */
+    g.setAttribute('livery', new BufferAttribute(new Float32Array(this.n).fill(1), 1));
     // Non-indexed, so every face owns its vertices and gets its own normal.
     // That is the whole flat-shading discipline in one line.
     g.computeVertexNormals();

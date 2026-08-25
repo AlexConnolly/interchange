@@ -49,3 +49,6 @@ export * from './amenity.ts';
 export * from './publicworks.ts';
 export * from './reclamation.ts';
 export * from './agreements.ts';
+export * from './transit.ts';
+export * from './towncharacter.ts';
+export * from './erosion.ts';

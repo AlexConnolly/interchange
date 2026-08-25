@@ -644,25 +644,164 @@ export function buildTownBlock(seed: number, size: number, era: number, night: b
   };
   const band = eraBand(era);
   const count = Math.max(3, Math.min(22, Math.round(size)));
-  for (let i = 0; i < count; i++) {
-    const x = (rnd() - 0.5) * 1.7;
-    const z = (rnd() - 0.5) * 1.7;
-    const w = 0.11 + rnd() * 0.07;
-    const d = 0.11 + rnd() * 0.07;
-    // Later eras build taller and flatter; era 1 is all pitched roofs.
-    const h = (band === 0 ? 0.15 : band === 1 ? 0.21 : 0.30) * (0.6 + rnd() * 1.1);
-    const wallTone = 0.85 + rnd() * 0.3;
-    const wall: RGB = [TOWN.wall[0] * wallTone, TOWN.wall[1] * wallTone, TOWN.wall[2] * wallTone];
-    m.box(x, h, z, w, h, d, 0.012, wall, [wall[0] * 1.12, wall[1] * 1.12, wall[2] * 1.12], TOWN.wallDark);
-    if (band === 0 || rnd() < 0.4) {
-      m.box(x, h * 2 + 0.030, z, w * 1.06, 0.030, d * 1.06, 0.018, TOWN.roof, shade(TOWN.roof, 1.35));
-    }
-    // Lit windows carry the night. The floor on legibility (§13) is that this
-    // is emissive, so the town still reads when the shading flattens.
-    if (night && rnd() < 0.75) {
-      m.box(x, h * 1.15, z + d + 0.002, w * 0.55, h * 0.22, 0.004, 0, TOWN.window, TOWN.window, TOWN.window, 1);
+
+  /*
+   * A street, not a scatter.
+   *
+   * The first version put every building at a random point in the block with
+   * a random footprint, and the result read as a heap of dice however good
+   * the individual shapes were — because what makes a town look like a town
+   * is not the houses, it is that they *agree with each other*. Real buildings
+   * share a frontage, face the same way, and sit shoulder to shoulder.
+   *
+   * So the block gets an axis, and everything on it lines up along that axis
+   * with a common frontage. Two short terraces facing each other across a gap
+   * is a street; the same buildings at random angles is a car park.
+   */
+  const alongX = (seed & 4) === 0;
+  /*
+   * Both of these come from the seed and never from the size, and that is a
+   * correctness requirement rather than a preference.
+   *
+   * A town's mesh is rebuilt as it grows, and if the layout depends on how
+   * many buildings there are then adding one moves all the others: the first
+   * version decided one street or two from the count and then filled row by
+   * row, so a town crossing from twelve buildings to thirteen rebuilt itself
+   * as a different town. Houses appeared to move about on their own.
+   *
+   * Dealing the buildings alternately between fixed rows makes building *i*
+   * land in the same place whatever the total is, so growth only ever adds to
+   * the end of a street.
+   */
+  const rows = (seed & 8) === 0 ? 1 : 2;
+  const cursors = [-0.82, -0.82];
+
+  {
+    for (let i = 0; i < count; i++) {
+      const row = i % rows;
+      // The frontage this row shares, offset either side of the street.
+      const frontage = rows === 1 ? 0 : row === 0 ? -0.44 : 0.44;
+      let cursor = cursors[row];
+      /*
+       * Width varies, depth much less: a terrace is a row of narrow houses of
+       * the same depth, and letting depth wander as freely as width is what
+       * made the earlier version look chewed.
+       */
+      const w = (band === 0 ? 0.085 : 0.10) + rnd() * (band === 2 ? 0.10 : 0.05);
+      const d = 0.115 + rnd() * 0.035;
+      // A gap only sometimes: mostly they touch, which is what makes a
+      // terrace, and the occasional break is what stops it being a wall.
+      const gap = rnd() < 0.72 ? 0.004 : 0.03 + rnd() * 0.05;
+      if (cursor + w * 2 > 0.86) continue;
+      const along = cursor + w;
+      cursors[row] = cursor + w * 2 + gap;
+
+      const x = alongX ? along : frontage;
+      const z = alongX ? frontage : along;
+      const hx = alongX ? w : d;
+      const hz = alongX ? d : w;
+
+      // Storeys rather than a continuous height: buildings come in floors, and
+      // a run of them sharing a floor height is another thing that reads as a
+      // street. Later eras build taller.
+      const storeyH = band === 0 ? 0.075 : band === 1 ? 0.082 : 0.095;
+      const storeys = band === 0
+        ? 2 + (rnd() < 0.3 ? 1 : 0)
+        : band === 1 ? 2 + ((rnd() * 3) | 0) : 3 + ((rnd() * 6) | 0);
+      const h = storeyH * storeys;
+
+      const wallTone = 0.88 + rnd() * 0.24;
+      const wall: RGB = [TOWN.wall[0] * wallTone, TOWN.wall[1] * wallTone, TOWN.wall[2] * wallTone];
+      m.box(x, h / 2, z, hx, h / 2, hz, 0.010, wall, shade(wall, 1.12), TOWN.wallDark);
+
+      /*
+       * The roof, and the reason any of this was worth doing.
+       *
+       * Pitched everywhere in the first two eras, and mostly flat in the
+       * third — which is a real change in how buildings were built and reads
+       * immediately as a change of century, so the era arc shows up in the
+       * skyline without anybody being told about it.
+       */
+      const flatRoof = band === 2 && rnd() < 0.72;
+      if (flatRoof) {
+        // A parapet rather than a bare slab: the lip is what stops a flat roof
+        // reading as an unfinished box.
+        m.box(x, h + 0.006, z, hx * 1.02, 0.006, hz * 1.02, 0.004, TOWN.roofDark, shade(TOWN.roofDark, 1.2));
+        m.box(x, h + 0.020, z, hx * 0.94, 0.014, hz * 0.94, 0.004, TOWN.roof, shade(TOWN.roof, 1.15));
+      } else {
+        // The ridge runs along the terrace, which is what a terrace does.
+        const pitch = (alongX ? hz : hx) * (0.75 + rnd() * 0.4);
+        m.roof(x, h, z, hx, hz, pitch, alongX, 0.012, TOWN.roof, TOWN.roofDark);
+        // A chimney on the gable end, era permitting. One small cylinder, and
+        // it is most of what makes a Victorian roofline read as one.
+        if (band < 2 && rnd() < 0.8) {
+          const cx2 = alongX ? x + hx * 0.7 : x;
+          const cz2 = alongX ? z : z + hz * 0.7;
+          m.cyl(cx2, h + pitch * 0.45, cz2, 0.014, 0.014, 0.055, 4, TOWN.wallDark, shade(TOWN.wallDark, 0.8));
+        }
+      }
+
+      // Lit windows carry the night. The floor on legibility (§13) is that
+      // this is emissive, so the town still reads when the shading flattens.
+      // One per storey now rather than one per building, so a tall block in
+      // 2050 glows like a tall block instead of like a cottage.
+      if (night) {
+        for (let f = 0; f < storeys; f++) {
+          if (rnd() > 0.62) continue;
+          const y = storeyH * (f + 0.55);
+          const hh = storeyH * 0.26;
+          // A quad on the wall, not a box in front of it. A chamfered box is
+          // fifty-six triangles and a lit window is two, and there are eight
+          // of them per building on twenty-two buildings in fourteen towns.
+          if (alongX) {
+            const zf = z + hz + 0.002;
+            const ww = hx * 0.6;
+            m.quad(x - ww, y - hh, zf, x + ww, y - hh, zf, x + ww, y + hh, zf, x - ww, y + hh, zf, TOWN.window, 1);
+          } else {
+            const xf = x + hx + 0.002;
+            const ww = hz * 0.6;
+            m.quad(xf, y - hh, z - ww, xf, y - hh, z + ww, xf, y + hh, z + ww, xf, y + hh, z - ww, TOWN.window, 1);
+          }
+        }
+      }
     }
   }
+  return m;
+}
+
+/**
+ * A private car. Deliberately not a vehicle in the fleet sense.
+ *
+ * features.md has "private car adoption from era 4", and the note against it
+ * is that the car is "the pressure that makes public transport a real fight".
+ * The simulation models that properly — transit.ts takes a share of every
+ * town's travel away from whoever runs the buses, and the share grows every
+ * era — but it was entirely invisible. A player in 1975 watching their
+ * omnibus receipts fall had no way to see *why*, and an empty road is a poor
+ * illustration of a road full of cars.
+ *
+ * So the roads get traffic that belongs to nobody. It carries nothing, it is
+ * not in any company's fleet, and no part of the simulation knows it exists —
+ * it is the visible face of a number that was already there.
+ */
+export function buildCar(seed: number): Mesh {
+  const m = new Mesh(64);
+  let r = seed | 1;
+  const rnd = (): number => {
+    r = (Math.imul(r, 1103515245) + 12345) & 0x7fffffff;
+    return r / 0x7fffffff;
+  };
+  // Muted and various: a car park of primary colours would pull the eye off
+  // the network, which art-direction 5.2 reserves the saturation for.
+  const hue = rnd();
+  const body: RGB = hue < 0.3 ? [0.42, 0.44, 0.47]
+    : hue < 0.55 ? [0.30, 0.34, 0.40]
+      : hue < 0.75 ? [0.46, 0.36, 0.31]
+        : hue < 0.9 ? [0.34, 0.40, 0.35] : [0.52, 0.50, 0.46];
+  m.box(0, 0.030, 0, 0.030, 0.020, 0.058, 0.008, body, shade(body, 1.2), shade(body, 0.7));
+  // A cabin set back from the bonnet, which is the whole silhouette at this
+  // size — without it a car is a brick.
+  m.box(0, 0.058, -0.006, 0.024, 0.016, 0.030, 0.006, shade(body, 0.85), shade(body, 1.05));
   return m;
 }
 

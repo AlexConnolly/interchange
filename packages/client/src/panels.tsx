@@ -17,6 +17,7 @@ import {
   Intervention, INTERVENTION_NAMES, DOMINANCE_TILES, DOMINANCE_TRADE,
   PATIENCE_DAYS,
   AgreementState, AGREEMENT_STATE_NAMES, mustAnswer,
+  TownCharacter, DRIFT_YEARS,
 } from '@interchange/sim';
 import { content } from '@interchange/data';
 import { money, num, pct, shortMoney, signClass, tonnes, days } from './format.ts';
@@ -202,6 +203,23 @@ export function Inspector({
             <dd className={w.towns.served[t] > 60 ? 'pos' : w.towns.served[t] > 40 ? 'warnc' : 'neg'}>{pct(w.towns.served[t])}</dd>
             <dt>Trend</dt>
             <dd>{w.towns.served[t] > 60 ? 'growing' : w.towns.served[t] < 40 ? 'shrinking' : 'steady'}</dd>
+            <dt>Character</dt>
+            <dd>
+              {TownCharacter[w.towns.character[t]]}
+              {/*
+                * The half-sentence that turns character from a label into a
+                * thing the player can steer. There is no zoning tool; what
+                * there is, is a town telling you what your network is turning
+                * it into, early enough to change your mind.
+                */}
+              {w.towns.characterDrift[t] > DRIFT_YEARS * 20 && (
+                <span className="sub"> · becoming {TownCharacter[w.towns.characterToward[t]]}</span>
+              )}
+            </dd>
+            <dt>Passenger service</dt>
+            <dd className={w.towns.transitQuality[t] > 50 ? 'pos' : w.towns.transitQuality[t] > 20 ? 'warnc' : 'neg'}>
+              {w.towns.transitQuality[t] === 0 ? 'none' : pct(w.towns.transitQuality[t])}
+            </dd>
           </dl>
           <div className="ledger"><div className="head">Wants delivered</div></div>
           {wants.map((ci) => {

@@ -239,3 +239,41 @@ export const ACCESS_SCALE = 3;
 /** Days a company may sit with no fleet and no means of getting one before the
  *  region stops pretending it is still trading. Three years. */
 export const STALLED_DAYS = DAYS_PER_YEAR * 3;
+
+/** The era the parcel arrives at the door rather than the shop. design.md's
+ *  era table puts e-commerce at the head of era six, with the logistics. */
+export const ECOMMERCE_ERA = 6;
+
+/**
+ * How much of a town's shopping moves from the shop to the doorstep.
+ *
+ * Large enough that a network built for pallets to a few retail parks is
+ * visibly the wrong shape for parcels to every town, which is what features.md
+ * means by the freight pattern inverting. Not total, because the high street
+ * did not disappear either.
+ */
+export const ECOMMERCE_SHIFT = 0.55;
+
+/**
+ * How far a works has to be from a town before the town stops being an
+ * industrial one. towncharacter.ts.
+ *
+ * Sight rather than catchment: what makes a place industrial is the chimney
+ * you can see from the high street, not the one twenty miles off that happens
+ * to employ people who live there.
+ */
+export const INDUSTRY_SIGHT = 9;
+
+/** How many characters a town can have. sites.ts TownCharacter. */
+export const CHARACTER_COUNT = 5;
+
+/**
+ * What a new operator starts with, as a multiple of the cheapest vehicle they
+ * could buy that year.
+ *
+ * Enough for one vehicle and most of a second, which is deliberately thin: a
+ * carrier who can buy three lorries on their first morning has no decision to
+ * make about which route to open. It is also the figure that stops the region
+ * emptying, so it is a floor rather than a target — see world.startingCapital.
+ */
+export const ENTRANT_CAPITAL = 1.8;

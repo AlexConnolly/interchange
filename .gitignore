@@ -8,3 +8,7 @@ art/__pycache__/
 packages/client/public/models/
 .tunnel-*.log
 packages/tools/src/scratch*.ts
+# Review renders and generated artefacts. The scripts that make them are the
+# source; the pictures are output and are regenerated on demand.
+art/shots/
+artefacts/

@@ -12,3 +12,5 @@ export * from './models.ts';
 export * from './material.ts';
 export * from './scene.ts';
 export * from './legibility.ts';
+export * from './glb.ts';
+export * from './town.ts';

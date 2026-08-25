@@ -17,19 +17,32 @@
  */
 
 import {
-  BufferAttribute, BufferGeometry, Color, InstancedMesh, Matrix4, Mesh as ThreeMesh,
-  OrthographicCamera, Quaternion, Scene as ThreeScene, Vector3, WebGLRenderer,
+  BufferAttribute, BufferGeometry, Color, InstancedBufferAttribute, InstancedMesh,
+  Matrix4, Mesh as ThreeMesh, OrthographicCamera, Quaternion, Scene as ThreeScene,
+  Vector3, WebGLRenderer,
 } from 'three';
 import {
   BIOME_COLOURS, LAND, LIVERIES, SEMANTIC, WAY_COLOURS, shade, type RGB,
 } from './palette.ts';
 import { Mesh } from './geometry.ts';
-import { buildIndustry, buildTownBlock, buildTreeClump, buildVehicle } from './models.ts';
+import { buildIndustry, buildTownBlock, buildTreeClump, buildVehicle, buildCar } from './models.ts';
+import { buildingCount, layOutTown, mergeTown } from './town.ts';
 import { applyLighting, createWorldMaterial, lightingForTime, makeLighting } from './material.ts';
 
 /** Tiles per render chunk. Small enough that an edit rebuilds little, large
  *  enough that a region is not a hundred thousand draw calls. */
 export const CHUNK = 32;
+
+/**
+ * A ceiling on ambient cars. Atmosphere gets a fixed budget and never more:
+ * the moment traffic can cost a frame it stops being free and starts being a
+ * decision, and it is not worth one.
+ */
+const TRAFFIC_MAX = 900;
+
+/** Neighbour offsets, in the order the way layer packs its direction bits. */
+const DIRDX = [0, 1, 0, -1];
+const DIRDY = [-1, 0, 1, 0];
 
 /**
  * Vertical exaggeration.
@@ -72,6 +85,9 @@ export interface RenderSource {
   wayLink: Int32Array[];
   /** Formation level per tile, per mode. A way sits on this, not the ground. */
   wayLevel: Int16Array[];
+  /** Which layer each vehicle type runs on, so a vehicle can stand on its own
+   *  formation rather than on the ground beneath it. */
+  vehicleMode: Uint8Array | number[];
   /** Embankment / cutting / bridge / tunnel bits. */
   wayFlags: Uint8Array[];
   assetOwner: Int16Array;
@@ -199,6 +215,21 @@ export class Renderer {
   /** Previous vehicle positions, for tick interpolation. */
   private prevX = new Int32Array(0);
   private prevY = new Int32Array(0);
+  /**
+   * Models from the art pipeline, once they arrive.
+   *
+   * Loaded asynchronously and used only when present, so a region renders
+   * immediately with the generated geometry and swaps to the authored models a
+   * few hundred milliseconds later. That is not a nicety: a renderer that
+   * cannot draw until a fetch completes is a renderer that shows a black
+   * screen on a slow connection, and art-pipeline.md's whole argument for
+   * .glb as the shipped artefact assumes the game still works without it.
+   */
+  private kit: Map<string, BufferGeometry> | null = null;
+  private kitVersion = 0;
+
+  /** Ambient road traffic. One batch, no state, see updateTraffic. */
+  private traffic: { mesh: InstancedMesh; count: number } | null = null;
   private prevHeading = new Int32Array(0);
   private havePrev = false;
 
@@ -456,8 +487,64 @@ export class Renderer {
     const x1 = Math.min(size, x0 + CHUNK);
     const y1 = Math.min(size, y0 + CHUNK);
     const m = new Mesh(CHUNK * CHUNK * 30);
-    const DIRDX = [0, 1, 0, -1];
-    const DIRDY = [-1, 0, 1, 0];
+
+    /*
+     * Where a way sits at the edge it shares with a neighbour.
+     *
+     * Every piece of a way used to be a horizontal quad at its own tile's
+     * level, which is fine on the flat and comes apart on a gradient: two
+     * neighbouring tiles half a metre different in height are two flat plates
+     * with a step of clear air between them, and a road up a hillside read as
+     * a string of disconnected blobs rather than as a road.
+     *
+     * Meeting at the midpoint fixes it exactly rather than approximately.
+     * Both tiles compute the same number for the edge they share — each is the
+     * mean of the same two levels — so the two ramps land on precisely the
+     * same line and the surface is continuous however steep the ground is. It
+     * is also what a road actually does: the formation is a slope between two
+     * points, not a staircase.
+     *
+     * Declared once per chunk rather than once per tile. The obvious place to
+     * write these was inside the tile loop where the values they close over
+     * live, and that allocates two closures per tile — a thousand a chunk, a
+     * hundred and fifty thousand for a first frame — which took the frame rate
+     * from sixty to ten on its own. They take what they need as arguments
+     * instead.
+     */
+    const edgeY = (
+      level: Int16Array, x: number, y: number, yy: number, k: number,
+    ): number => {
+      const nx = x + DIRDX[k];
+      const ny = y + DIRDY[k];
+      if (nx < 0 || ny < 0 || nx >= size || ny >= size) return yy;
+      const n = ny * size + nx;
+      const nLevel = level[n];
+      const nGround = HEIGHT_TO_WORLD(Math.max(0, src.height[n]));
+      return (yy + ((nLevel === 0 ? nGround : HEIGHT_TO_WORLD(nLevel)) + 0.05)) / 2;
+    };
+    /** One arm of a way, sloping from the hub out to the shared edge. */
+    const arm = (
+      level: Int16Array, x: number, y: number, yy: number,
+      k: number, halfAcross: number, lift: number, c: RGB,
+    ): void => {
+      const outer = edgeY(level, x, y, yy, k) + lift;
+      const inner = yy + lift;
+      const cx2 = x + 0.5;
+      const cz2 = y + 0.5;
+      if (DIRDX[k] !== 0) {
+        const xo = cx2 + DIRDX[k] * 0.5;
+        m.quad(
+          cx2, inner, cz2 - halfAcross, xo, outer, cz2 - halfAcross,
+          xo, outer, cz2 + halfAcross, cx2, inner, cz2 + halfAcross, c,
+        );
+      } else {
+        const zo = cz2 + DIRDY[k] * 0.5;
+        m.quad(
+          cx2 - halfAcross, inner, cz2, cx2 + halfAcross, inner, cz2,
+          cx2 + halfAcross, outer, zo, cx2 - halfAcross, outer, zo, c,
+        );
+      }
+    };
 
     for (let mode = 0; mode < src.wayClass.length; mode++) {
       const cls = src.wayClass[mode];
@@ -582,32 +669,36 @@ export class Renderer {
               m.flat(x + 0.5, yy, y + 0.5, 0.17, 0.17, ballast);
               for (let k = 0; k < 4; k++) {
                 if ((d & (1 << k)) === 0) continue;
-                const alongX = DIRDX[k] !== 0;
-                m.flat(
-                  x + 0.5 + DIRDX[k] * 0.25, yy, y + 0.5 + DIRDY[k] * 0.25,
-                  alongX ? 0.25 : 0.17, alongX ? 0.17 : 0.25,
-                  ballast,
-                );
-                // Two rails, set in from the ballast edge.
+                arm(wayLevel, x, y, yy, k, 0.17, 0, ballast);
+                // Two rails, set in from the ballast edge, riding the same
+                // slope as the ballast under them.
+                const outer = edgeY(wayLevel, x, y, yy, k) + 0.006;
+                const inner = yy + 0.006;
+                const cx2 = x + 0.5;
+                const cz2 = y + 0.5;
                 for (const off of [-0.075, 0.075]) {
-                  m.flat(
-                    x + 0.5 + DIRDX[k] * 0.25 + (alongX ? 0 : off),
-                    yy + 0.006,
-                    y + 0.5 + DIRDY[k] * 0.25 + (alongX ? off : 0),
-                    alongX ? 0.25 : 0.018, alongX ? 0.018 : 0.25,
-                    railHead,
-                  );
+                  if (DIRDX[k] !== 0) {
+                    const xo = cx2 + DIRDX[k] * 0.5;
+                    m.quad(
+                      cx2, inner, cz2 + off - 0.018, xo, outer, cz2 + off - 0.018,
+                      xo, outer, cz2 + off + 0.018, cx2, inner, cz2 + off + 0.018,
+                      railHead,
+                    );
+                  } else {
+                    const zo = cz2 + DIRDY[k] * 0.5;
+                    m.quad(
+                      cx2 + off - 0.018, inner, cz2, cx2 + off + 0.018, inner, cz2,
+                      cx2 + off + 0.018, outer, zo, cx2 + off - 0.018, outer, zo,
+                      railHead,
+                    );
+                  }
                 }
               }
             } else {
               m.flat(x + 0.5, yy, y + 0.5, half, half, colour);
               for (let k = 0; k < 4; k++) {
                 if ((d & (1 << k)) === 0) continue;
-                m.flat(
-                  x + 0.5 + DIRDX[k] * 0.25, yy, y + 0.5 + DIRDY[k] * 0.25,
-                  DIRDX[k] !== 0 ? 0.25 : half, DIRDY[k] !== 0 ? 0.25 : half,
-                  colour,
-                );
+                arm(wayLevel, x, y, yy, k, half, 0, colour);
               }
             }
           }
@@ -700,6 +791,21 @@ export class Renderer {
    * thousand quads and no amount of frustum culling saves you from having
    * built them all.
    */
+  /** Tiles the camera can currently see, with a margin, for anything drawn
+   *  per tile. The same reach the chunk streamer uses. */
+  private visibleTileBounds(src: RenderSource): { x0: number; y0: number; x1: number; y1: number } {
+    const c = this.camState;
+    const reachY = (c.view * 0.5) / Math.sin((c.elevation * Math.PI) / 180) + 4;
+    const reachX = c.view * 0.5 * (this.camera.right / this.camera.top) + 4;
+    const reach = Math.max(reachX, reachY);
+    return {
+      x0: Math.max(0, Math.floor(c.x - reach)),
+      y0: Math.max(0, Math.floor(c.z - reach)),
+      x1: Math.min(src.size, Math.ceil(c.x + reach)),
+      y1: Math.min(src.size, Math.ceil(c.z + reach)),
+    };
+  }
+
   private streamChunks(src: RenderSource): void {
     const t0 = performance.now();
     this.cols = Math.ceil(src.size / CHUNK);
@@ -846,12 +952,24 @@ export class Renderer {
     }
   }
 
+  /**
+   * Hand the renderer the pipeline's models. Called once, when they load.
+   *
+   * Bumping the version invalidates every town mesh, so the swap from
+   * generated geometry to authored models happens on the next frame rather
+   * than gradually as towns happen to grow.
+   */
+  useKit(kit: Map<string, BufferGeometry>): void {
+    this.kit = kit;
+    this.kitVersion++;
+  }
+
   private ensureTowns(src: RenderSource, night: boolean): void {
     for (let t = 0; t < src.townCount; t++) {
       // Rebuild in population bands, so a town visibly grows without
       // regenerating its geometry every time somebody moves in.
       const band = Math.floor(Math.sqrt(src.tPopulation[t]) / 4);
-      const key = band * 4 + (night ? 1 : 0) + src.era * 64;
+      const key = band * 4 + (night ? 1 : 0) + src.era * 64 + this.kitVersion * 4096;
       const existing = this.townMeshes.get(t);
       if (existing && existing.userData.key === key) continue;
       if (existing) {
@@ -859,12 +977,32 @@ export class Renderer {
         existing.geometry.dispose();
       }
       this.stats.townsBuilt++;
-      const built = buildTownBlock(t * 40503 + 7, band + 3, src.era, night);
-      const mesh = new ThreeMesh(built.build(), this.material);
+
+      /*
+       * The authored kit if it is here, and the generated fallback if not.
+       *
+       * The two are not interchangeable in look — the kit has pitched roofs,
+       * chimneys and hipped villas that no amount of stacking boxes was going
+       * to produce — but they are interchangeable in *interface*, which is
+       * what lets the library be converted one kit at a time instead of in one
+       * irreversible commit.
+       */
+      let geometry: BufferGeometry | null = null;
+      if (this.kit) {
+        const places = layOutTown(t * 40503 + 7, buildingCount(src.tPopulation[t]), src.era);
+        geometry = mergeTown(places, this.kit);
+      }
+      if (!geometry) {
+        geometry = buildTownBlock(t * 40503 + 7, band + 3, src.era, night).build();
+      }
+
+      const mesh = new ThreeMesh(geometry, this.material);
       const x = src.tX[t];
       const y = src.tY[t];
       mesh.position.set(x + 0.5, HEIGHT_TO_WORLD(Math.max(0, src.height[y * src.size + x])), y + 0.5);
-      mesh.scale.setScalar(1 + band * 0.16);
+      // The generated block was authored at a nominal size and scaled by band;
+      // the kit is authored at true scale and must not be.
+      mesh.scale.setScalar(this.kit ? 1 : 1 + band * 0.16);
       mesh.userData.key = key;
       this.scene.add(mesh);
       this.townMeshes.set(t, mesh);
@@ -986,10 +1124,21 @@ export class Renderer {
       if (dh < -2048) dh += 4096;
       const angle = ((prevH + dh * alpha) / 4096) * Math.PI * 2;
 
-      const groundH = HEIGHT_TO_WORLD(
-        Math.max(0, src.height[Math.min(src.size * src.size - 1, (Math.round(y) * src.size + Math.round(x)) | 0)] ?? 0),
-      );
-      this.tmpPos.set(x, groundH + 0.01, y);
+      /*
+       * Ride the formation, not the ground under it.
+       *
+       * A vehicle placed at terrain height is buried to the axles wherever the
+       * way is on an embankment and floating wherever it is in a cutting —
+       * which is every interesting piece of railway in the region. The way's
+       * own level is what it is running on, so that is what it stands on.
+       */
+      const vTile = Math.min(src.size * src.size - 1, (Math.round(y) * src.size + Math.round(x)) | 0);
+      const vMode = src.vehicleMode[src.vType[id]] ?? 0;
+      const vLevel = src.wayLevel[vMode]?.[vTile] ?? 0;
+      const groundH = vLevel !== 0
+        ? HEIGHT_TO_WORLD(vLevel)
+        : HEIGHT_TO_WORLD(Math.max(0, src.height[vTile] ?? 0));
+      this.tmpPos.set(x, groundH + 0.06, y);
       // Models point along +Z; heading 0 is north, which is -Z.
       this.tmpQuat.setFromAxisAngle(UP, -angle + Math.PI);
       this.tmpMatrix.compose(this.tmpPos, this.tmpQuat, this.tmpScale);
@@ -1075,6 +1224,7 @@ export class Renderer {
     );
     const tVeh = performance.now();
     this.updateVehicles(src, alpha);
+    this.updateTraffic(src);
     this.stats.vehiclesMs = performance.now() - tVeh;
     this.updateCamera(this.camera.right / this.camera.top);
     const tDraw = performance.now();
@@ -1083,6 +1233,100 @@ export class Renderer {
     const info = this.renderer.info.render;
     this.stats.drawCalls = info.calls;
     this.stats.triangles = info.triangles;
+  }
+
+  /**
+   * Private cars on the roads, from era four.
+   *
+   * None of this is in the simulation and none of it may be: adding a
+   * thousand cars to the world would be a thousand more things to path, and
+   * the game would be modelling commuting rather than the transport business
+   * that is its subject. What the simulation has is the *number* — transit.ts
+   * takes a growing share of every town's travel away from the operators from
+   * era four onward — and what was missing was any sight of it.
+   *
+   * So these are drawn straight off the road layer with no state at all. A car
+   * is a road tile plus an offset that advances with the clock; which tiles
+   * get one is decided by a hash of the tile index against a threshold from
+   * the era. That makes them free, deterministic per tile, and impossible to
+   * desync — two clients watching the same region see the same traffic without
+   * a byte crossing between them.
+   */
+  private updateTraffic(src: RenderSource): void {
+    const era = src.era;
+    // The same ceiling transit.ts uses, so what is on the roads and what the
+    // operators lost are visibly the same fact.
+    const density = era < 4 ? 0 : Math.min(0.55, 0.10 + (era - 4) * 0.11);
+    if (density <= 0) {
+      if (this.traffic) this.traffic.count = 0;
+      if (this.traffic) this.traffic.mesh.count = 0;
+      return;
+    }
+    if (!this.traffic) {
+      const built = buildCar(7);
+      const mesh = new InstancedMesh(built.build(), this.material, TRAFFIC_MAX);
+      mesh.frustumCulled = false;
+      mesh.instanceColor = new InstancedBufferAttribute(new Float32Array(TRAFFIC_MAX * 3), 3);
+      this.scene.add(mesh);
+      this.traffic = { mesh, count: 0 };
+    }
+    const t = this.traffic;
+    t.count = 0;
+
+    const size = src.size;
+    const road = src.wayLink[0];
+    const level = src.wayLevel[0];
+    const dirs = src.wayDir[0];
+    if (!road || !dirs) { t.mesh.count = 0; return; }
+
+    // Only what is on screen, and only while the camera is close enough for a
+    // car to be more than a pixel: this is atmosphere and must never be the
+    // thing that costs the frame.
+    if (this.pixelsPerTile() < 22) { t.mesh.count = 0; return; }
+    const view = this.visibleTileBounds(src);
+    const phase = (performance.now() / 1000) % 1000;
+
+    for (let y = view.y0; y < view.y1 && t.count < TRAFFIC_MAX; y++) {
+      for (let x = view.x0; x < view.x1 && t.count < TRAFFIC_MAX; x++) {
+        const tile = y * size + x;
+        if (road[tile] < 0) continue;
+        const d = dirs[tile];
+        if (d === 0) continue;
+        // A stable hash of the tile decides whether this bit of road is busy,
+        // so traffic stays put as the camera moves instead of boiling.
+        const h = (Math.imul(tile, 2654435761) >>> 8) / 0x1000000;
+        if (h > density) continue;
+        // Which way it is going: the first direction this tile connects.
+        let k = 0;
+        for (let i = 0; i < 4; i++) if ((d & (1 << i)) !== 0) { k = i; break; }
+        // Along the tile, looping. Two cars per busy tile, half a tile apart,
+        // so a road reads as a stream rather than as dots.
+        const speed = 0.22 + (h * 7 % 1) * 0.16;
+        for (let lane = 0; lane < 2; lane++) {
+          if (t.count >= TRAFFIC_MAX) break;
+          const along = ((phase * speed + h * 13 + lane * 0.5) % 1) - 0.5;
+          const side = lane === 0 ? 0.075 : -0.075;
+          const cx = x + 0.5 + DIRDX[k] * along + (DIRDX[k] !== 0 ? 0 : side);
+          const cz = y + 0.5 + DIRDY[k] * along + (DIRDY[k] !== 0 ? 0 : side);
+          const yy = level && level[tile] !== 0
+            ? HEIGHT_TO_WORLD(level[tile])
+            : HEIGHT_TO_WORLD(Math.max(0, src.height[tile]));
+          this.tmpPos.set(cx, yy + 0.06, cz);
+          // Cars on one side go the other way, which is what makes it traffic.
+          const facing = DIRDX[k] !== 0
+            ? (lane === 0 ? Math.PI / 2 : -Math.PI / 2)
+            : (lane === 0 ? 0 : Math.PI);
+          this.tmpQuat.setFromAxisAngle(UP, facing);
+          this.tmpMatrix.compose(this.tmpPos, this.tmpQuat, this.tmpScale);
+          t.mesh.setMatrixAt(t.count, this.tmpMatrix);
+          t.mesh.instanceColor?.setXYZ(t.count, 1, 1, 1);
+          t.count++;
+        }
+      }
+    }
+    t.mesh.count = t.count;
+    t.mesh.instanceMatrix.needsUpdate = true;
+    if (t.mesh.instanceColor) t.mesh.instanceColor.needsUpdate = true;
   }
 
   // --------------------------------------------------------------- picking
