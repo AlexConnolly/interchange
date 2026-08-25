@@ -50,6 +50,10 @@ TANK = (0.855, 0.863, 0.855, 1)
 PALLET = (0.639, 0.518, 0.361, 1)
 CRATE = (0.549, 0.400, 0.271, 1)
 HURDLE = (0.600, 0.510, 0.384, 1)
+# A bird, seen from above against a field. Dark, because that is all a bird is
+# at this distance: the underside is never lit and the silhouette is the whole
+# animal.
+BIRD = (0.278, 0.290, 0.318, 1)
 
 
 def _paint(obj, rgba, name, rough=0.85):
@@ -373,6 +377,48 @@ def pen():
     return made
 
 
+def _bird(name, droop):
+    """One bird, wings at a given droop. Two boxes and a body.
+
+    Six triangles of wing either side and nothing else. A bird crossing this
+    district is four pixels across, so everything except the *shape of the
+    outline* is wasted — no head, no tail feathers, no colour beyond dark. What
+    reads at four pixels is the shallow V, and that is the only thing modelled.
+
+    `droop` is what makes it flap. There is no skeletal animation anywhere in
+    this project and there is not going to be for one bird, so the flap is two
+    models and the renderer alternates between them — which is how every
+    hand-drawn bird in every game before about 1996 worked, and it still reads
+    better at this size than a smooth interpolation would.
+    """
+    made = []
+    body = lib.box('%sbody' % name, (0.030, 0.008, 0.007), loc=(0, 0, 0),
+                   chamfer=0.003)
+    _paint(body, BIRD, 'bird')
+    made.append(body)
+    for i, side in enumerate((-1, 1)):
+        # Swept back a little as well as up or down, because a wing held square
+        # to the body reads as an aeroplane.
+        w = lib.box('%swing%d' % (name, i), (0.020, 0.038, 0.005),
+                    loc=(-0.004, side * 0.038, droop * 0.020),
+                    rot=(side * droop * 0.7, 0, 0))
+        _paint(w, BIRD, 'bird')
+        made.append(w)
+    return made
+
+
+def bird_up():
+    """Wings above the body: the top of the stroke."""
+    return _bird('up', 1.0)
+
+
+def bird_down():
+    """And the bottom of it. Not symmetrical with `bird_up` on purpose — a
+    gull's downstroke goes much less far below the body than the upstroke goes
+    above it, and two frames that mirror each other read as a metronome."""
+    return _bird('dn', -0.45)
+
+
 BUILDS = [
     ('prop_lamp_post', lamp_post),
     ('prop_bale_round', bale_round),
@@ -391,6 +437,8 @@ BUILDS = [
     ('prop_tank', tank),
     ('prop_pallets', pallets),
     ('prop_pen', pen),
+    ('prop_bird_up', bird_up),
+    ('prop_bird_down', bird_down),
 ]
 
 

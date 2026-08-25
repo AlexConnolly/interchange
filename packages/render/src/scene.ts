@@ -37,6 +37,7 @@ import {
   buildGround, groundHeightAt, toMesh, HEIGHT_TO_WORLD, type GroundSource,
 } from './ground.ts';
 import { makeAir, type Air } from './air.ts';
+import { makeBirds, type Birds } from './birds.ts';
 import { Mesh } from './geometry.ts';
 import { buildRoads, buildCatsEyes, type RoadSource } from './roads.ts';
 import type { Model } from './glb.ts';
@@ -276,6 +277,9 @@ export class Renderer {
 
   /** Mist, chimney smoke and exhaust. See `air.ts`. */
   private readonly air: Air;
+
+  /** A flock going over, now and then. See `birds.ts`. */
+  private readonly birds: Birds;
   private composed: Composed | null = null;
   private mood: Mood = moodAt(1, 0);
   /** The sun's height, 0 at the horizon and 1 overhead. Written by `placeSun`. */
@@ -503,6 +507,7 @@ export class Renderer {
     this.motes = makeMotes();
     this.scene.add(this.motes.points);
     this.air = makeAir(this.scene);
+    this.birds = makeBirds(this.scene);
     for (let i = 0; i < LAMP_POOL; i++) {
       // Distance rather than decay: a physically correct inverse-square falloff
       // at this scale puts everything either blown out or black, because a tile
@@ -1962,6 +1967,14 @@ export class Renderer {
       level: this.vfx === 'high' ? 1 : this.vfx === 'low' ? 0.5 : 0,
     }, dt, this.elapsed);
 
+    // On at reduced as well as full: a flock crossing is two draw calls of nine
+    // instances, which is cheaper than almost anything else on screen, and it is
+    // the only motion in the district that is nobody's doing.
+    this.birds.step(
+      src, this.camX, this.camZ, this.tilesAcross, dt,
+      this.vfx === 'off' ? 0 : 1,
+    );
+
     if (this.vfx === 'off' || !this.composed) {
       this.renderer.render(this.scene, this.camera);
       return;
@@ -1980,6 +1993,11 @@ export class Renderer {
    * never turns it on never pays for the half-float multisampled target — which
    * at a large window is tens of megabytes.
    */
+  /** The two wing positions. See `birds.ts` for why it is two models. */
+  setBirdModels(up: Model, down: Model): void {
+    this.birds.setModels(up, down, litMaterial({}));
+  }
+
   setVfx(level: 'high' | 'low' | 'off'): void {
     this.vfx = level;
     if (level === 'off') return;

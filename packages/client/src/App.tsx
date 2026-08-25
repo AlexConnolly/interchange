@@ -1425,6 +1425,22 @@ export function App(): JSX.Element {
         renderer.setScatterModels(ordered, SCATTER_BATCH);
       }
     });
+    /*
+     * The birds, loaded as their own pair.
+     *
+     * Not in the scatter kit, though they are props by every other measure: the
+     * scatter layer is for things that never move, and its whole update rule is
+     * "rebuild when influence grows and never again". A flock moves every frame
+     * and needs its own two meshes; putting it in the scatter would either make
+     * that layer rebuild sixty times a second or leave the birds nailed to a
+     * field.
+     */
+    void loadKit(['prop_bird_up', 'prop_bird_down']).then((kit) => {
+      const u = kit.models.get('prop_bird_up');
+      const d = kit.models.get('prop_bird_down');
+      if (u && d) renderer.setBirdModels(u, d);
+      else console.warn(`[birds] no model for: ${kit.missing.join(', ')}`);
+    });
     void loadKit(placeNames).then((kit) => {
       if (kit.missing.length > 0) {
         console.warn(`[places] no model for: ${kit.missing.join(', ')}`);
