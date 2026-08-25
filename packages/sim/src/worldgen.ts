@@ -9,7 +9,7 @@
  * income statement has a line on it they can do nothing about.
  */
 
-import { AUTHORITY, DIR_BIT, DIR_DX, DIR_DY, DIR_OPPOSITE, Mode } from './constants.ts';
+import { ACCESS_SCALE, AUTHORITY, DIR_BIT, DIR_DX, DIR_DY, DIR_OPPOSITE, Mode } from './constants.ts';
 import { generateSeaLanes, connectToSea } from './seaair.ts';
 import { NONE } from './network.ts';
 import { Deposit, SEA_LEVEL, TileFlag, type Terrain } from './terrain.ts';
@@ -264,16 +264,16 @@ function buildPublicRoads(w: World): void {
     const major = w.towns.population[a] > 1200 && w.towns.population[b] > 1200;
     const cls = major ? macadamCls : trackCls;
     const def = major ? macadam : track;
-    layWay(w, layer, path, cls, AUTHORITY, def.publicCharge, def.buildCost);
+    layWay(w, layer, path, cls, AUTHORITY, Math.round(def.publicCharge * ACCESS_SCALE), def.buildCost);
   }
 
   // ---- spurs to every site and town centre ------------------------------
   for (let s = 0; s < w.sites.count; s++) {
-    connect(w, layer, w.sites.tile[s], trackCls, track.publicCharge, track.buildCost);
+    connect(w, layer, w.sites.tile[s], trackCls, Math.round(track.publicCharge * ACCESS_SCALE), track.buildCost);
     w.siteAccessTile[s] = w.sites.tile[s];
   }
   for (let i = 0; i < w.towns.count; i++) {
-    connect(w, layer, w.towns.tile[i], trackCls, track.publicCharge, track.buildCost);
+    connect(w, layer, w.towns.tile[i], trackCls, Math.round(track.publicCharge * ACCESS_SCALE), track.buildCost);
     w.townAccessTile[i] = w.towns.tile[i];
   }
 

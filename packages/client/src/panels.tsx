@@ -16,6 +16,7 @@ import {
   CHARTER_REQUIREMENTS,
   Intervention, INTERVENTION_NAMES, DOMINANCE_TILES, DOMINANCE_TRADE,
   PATIENCE_DAYS,
+  AgreementState, AGREEMENT_STATE_NAMES, mustAnswer,
 } from '@interchange/sim';
 import { content } from '@interchange/data';
 import { money, num, pct, shortMoney, signClass, tonnes, days } from './format.ts';
@@ -867,6 +868,84 @@ export function BuildPalette({
  * costs nothing to choose, buy is a button with a price on it, and bypass is
  * the construction palette.
  */
+/**
+ * Access agreements. design.md 3.6.
+ *
+ * "I use your line; you use my port" — the thing that entangles two operators
+ * rather than merely racing them. Offered here rather than in a separate
+ * screen because it belongs beside the roads it is about: the moment you want
+ * one is the moment you are looking at what somebody else's way is costing
+ * you.
+ *
+ * Only ever a discount, and both sides sign. design.md 3.10 worried that
+ * differential rates would be a griefing vector, and that is exactly right for
+ * *punitive* rates — so those do not exist. The worst anybody pays is the
+ * posted charge.
+ */
+function Agreements({ engine }: { engine: Engine }): JSX.Element | null {
+  const w = engine.world;
+  const me = w.player;
+  const mine = w.agreements.involving(me);
+  const others: number[] = [];
+  for (let c = 1; c < w.companies.count; c++) {
+    if (c === me || w.companies.bankrupt[c]) continue;
+    if (w.agreements.find(me, c) >= 0 || w.agreements.find(c, me) >= 0) continue;
+    others.push(c);
+  }
+  if (mine.length === 0 && others.length === 0) return null;
+
+  return (
+    <>
+      <div className="ledger"><div className="head">Access agreements</div></div>
+      {mine.map((id) => {
+        const grantor = w.agreements.grantor[id];
+        const other = grantor === me ? w.agreements.beneficiary[id] : grantor;
+        const granting = grantor === me;
+        const offered = w.agreements.state[id] === AgreementState.Offered;
+        const mustAnswerMe = offered && mustAnswer(w.agreements, id) === me;
+        return (
+          <div className="row" key={id}>
+            <div className="grow">
+              <div className="title">
+                {w.companies.names[other]}{' '}
+                <span className="dim">{granting ? 'uses your ways' : 'lets you use theirs'}</span>
+              </div>
+              <div className="sub">
+                {w.agreements.ratePct[id]}% of the usual charge
+                {' · '}{AGREEMENT_STATE_NAMES[w.agreements.state[id]].toLowerCase()}
+              </div>
+            </div>
+            {mustAnswerMe ? (
+              <div style={{ display: 'flex', gap: 3 }}>
+                <button className="btn tiny" onClick={() => engine.issue(Cmd.AcceptAgreement, id)}>Accept</button>
+                <button className="btn tiny" onClick={() => engine.issue(Cmd.DeclineAgreement, id)}>Decline</button>
+              </div>
+            ) : granting && w.agreements.state[id] === AgreementState.Active ? (
+              <button className="btn tiny danger" onClick={() => engine.issue(Cmd.WithdrawAgreement, id)}>End</button>
+            ) : (
+              <span className="dim" style={{ fontSize: 11 }}>{offered ? 'awaiting them' : ''}</span>
+            )}
+          </div>
+        );
+      })}
+      {others.map((c) => (
+        <div className="row" key={`offer-${c}`}>
+          <div className="grow">
+            <div className="title">{w.companies.names[c]}</div>
+            <div className="sub">no arrangement</div>
+          </div>
+          <div style={{ display: 'flex', gap: 3 }}>
+            <button className="btn tiny" title="Let them use your ways at half the usual charge"
+              onClick={() => engine.issue(Cmd.OfferAgreement, c, 50, 1)}>Offer half</button>
+            <button className="btn tiny" title="Ask to use theirs at half the usual charge"
+              onClick={() => engine.issue(Cmd.OfferAgreement, c, 50, 0)}>Ask half</button>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function Ownership({ engine, onFocus }: { engine: Engine; onFocus: (x: number, y: number) => void }): JSX.Element {
   const w = engine.world;
   const rows: number[] = [];
@@ -884,6 +963,10 @@ export function Ownership({ engine, onFocus }: { engine: Engine; onFocus: (x: nu
     <div className="window left">
       <h2>Ownership <span className="dim mono">{rows.filter((a) => w.assets.owner[a] === w.player).length} yours</span></h2>
       <div className="body">
+        {/* Above the asset list, not below sixty rows of it: an agreement is a
+            short section and a decision, and burying it under the inventory
+            means nobody finds it. */}
+        <Agreements engine={engine} />
         {rows.slice(0, 60).map((a) => {
           const owner = w.assets.owner[a];
           const mine = owner === w.player;

@@ -13,7 +13,8 @@ import {
   ACCEL, AUTHORITY, CELLS_PER_TILE, Control, DIR_BIT, DIR_DX, DIR_DY,
   DIR_OPPOSITE, FLOW_WINDOW, HASH_INTERVAL, MAX_COMPANIES, MAX_VEHICLES,
   MAX_NODES, MODE_COUNT, MODE_NAMES, Mode, PATH_LATENCY_TICKS, SPEED_STEPS, START_YEAR,
-  TICKS_PER_DAY, TICKS_PER_YEAR, DAYS_PER_MONTH, DAYS_PER_YEAR, ECONOMY_SCALE, LOAD_PATIENCE_DAYS, LOAD_PATIENCE_SHARE, CONTAINER_ERA, CONTAINER_TRANSFER_GAIN,
+  TICKS_PER_DAY, TICKS_PER_YEAR, DAYS_PER_MONTH, DAYS_PER_YEAR, ECONOMY_SCALE, LOAD_PATIENCE_DAYS, LOAD_PATIENCE_SHARE, CONTAINER_ERA, CONTAINER_TRANSFER_GAIN, PUBLIC_STANDARD,
+  ACCESS_SCALE,
 } from './constants.ts';
 import { Cmd, CommandQueue, type Command } from './commands.ts';
 import {
@@ -29,6 +30,9 @@ import {
 } from './weather.ts';
 import { AmenityField, stepAmenity, REMEDIATION_PRICE, REMEDIATION_FROM_ERA } from './amenity.ts';
 import { planReclamation, reclaim, type ReclaimPlan } from './reclamation.ts';
+import {
+  AgreementTable, agreedCharge, stepAgreements, propose, accept, decline, withdraw,
+} from './agreements.ts';
 import { SchemeTable, stepPublicWorks, SchemeState } from './publicworks.ts';
 import { RegulatorTable, stepRegulator, accessChargeFor, Intervention, INTERVENTION_NAMES } from './regulation.ts';
 import {
@@ -117,6 +121,8 @@ export class World {
   /** Cached derived tables so the hot loops never touch strings. */
   private waySpeed = new Int32Array(64);
   private wayUpkeep = new Int32Array(64);
+  /** The authority's posted charge per tile, scaled — see ACCESS_SCALE. */
+  private wayCharge = new Int32Array(64);
   private wayWear = new Int32Array(64);
   private wayLanes = new Int32Array(64);
   private vehicleSpeed = new Int32Array(256);
@@ -146,6 +152,8 @@ export class World {
    */
   readonly tileCargo: Uint8Array;
   readonly tileTonnes: Float32Array;
+  /** Standing arrangements between companies about passage. design.md 3.6. */
+  readonly agreements = new AgreementTable();
   readonly climate = new Climate();
   readonly events = new EventTable();
   private lastEra = 0;
@@ -223,6 +231,7 @@ export class World {
     content.ways.forEach((w, i) => {
       this.waySpeed[i] = w.speedLimit;
       this.wayUpkeep[i] = w.upkeep;
+      this.wayCharge[i] = Math.round(w.publicCharge * ACCESS_SCALE);
       this.wayWear[i] = w.wear;
       this.wayLanes[i] = w.lanes;
     });
@@ -584,6 +593,32 @@ export class World {
       else if (this.rng.chance(Math.round(drop * 100), 100)) {
         this.assets.condition[a] = Math.max(0, this.assets.condition[a] - 1);
       }
+
+      /*
+       * And somebody mends it, which nobody was doing.
+       *
+       * Wear had no counterpart, so every way in the region ground down to
+       * nothing: an unused dirt track loses about a fortieth of its condition
+       * a year from age alone, so the entire authority network was derelict by
+       * about 1880 — permanently slower for everybody, and, since a worn asset
+       * values at nothing, free for anybody to buy. A player could acquire the
+       * region's roads for no money at all.
+       *
+       * The authority maintains its own ways to a serviceable standard, which
+       * is what the public charge on them is for. It is not a good standard —
+       * public roads sit noticeably below what an owner who is spending money
+       * keeps theirs at, and that gap is a reason to own one.
+       */
+      if (owner === AUTHORITY) {
+        if (this.assets.condition[a] < PUBLIC_STANDARD && this.rng.chance(1, 3)) {
+          this.assets.condition[a]++;
+        }
+      } else if (this.companies.cash[owner] > upkeep * 40 && this.assets.condition[a] < 250) {
+        // A private owner keeps their way up while they can afford to, and the
+        // bill is the upkeep they are already paying. An owner with no money
+        // watches it degrade, which is the intended pressure.
+        if (this.rng.chance(1, 2)) this.assets.condition[a]++;
+      }
     }
 
     this.stepUtilities();
@@ -603,6 +638,15 @@ export class World {
     if (this.dayOfMonth === 0 && this.day > 0) this.companies.closeMonth();
     if (this.tick % TICKS_PER_YEAR === 0 && this.tick > 0) this.companies.closeYear();
     this.syncCargoRibbons();
+    {
+      const report = stepAgreements(this.agreements, this.tick);
+      for (const i of [...report.lapsed, ...report.ended]) {
+        if (this.agreements.grantor[i] !== this.player
+          && this.agreements.beneficiary[i] !== this.player) continue;
+        this.onEvent?.('agreement', 'An access agreement has run out.');
+      }
+      if (report.ended.length > 0) this.router.invalidate();
+    }
     this.stepWeather();
     if (this.dayOfMonth === 0) this.stepAmenityField();
     this.stepRegulation();
@@ -808,7 +852,15 @@ export class World {
     if (owner === payer) return;
     this.assets.foreignPasses[asset]++;
     const tiles = this.graph.linkChainLen[link] - 1;
-    const charge = accessChargeFor(this.regulator, this.assets, asset) * tiles;
+    /*
+     * Regulation first, then any deal between these two.
+     *
+     * The order matters and is the fair one: a charge cap is a ceiling
+     * imposed on the owner, and a private agreement can go below it but must
+     * not be able to lift anybody back above it.
+     */
+    const posted = accessChargeFor(this.regulator, this.assets, asset);
+    const charge = agreedCharge(this.agreements, owner, payer, posted) * tiles;
     if (charge <= 0) return;
     this.companies.post(payer, Line.AccessPaid, charge);
     this.assets.revenue[asset] += charge;
@@ -1735,7 +1787,7 @@ export class World {
       const cls = this.publicRoadClass();
       if (cls < 0) continue;
       const way = this.content.ways[cls];
-      const laid = this.layPublicWay(Mode.Road, cls, path, way.publicCharge, way.buildCost);
+      const laid = this.layPublicWay(Mode.Road, cls, path, this.wayCharge[cls], way.buildCost);
       if (!laid) continue;
       const owner = this.assets.owner[this.schemes.against[i]];
       this.onEvent?.(
@@ -1988,7 +2040,7 @@ export class World {
     const cls = this.publicRoadClass();
     if (cls < 0) return;
     const way = this.content.ways[cls];
-    this.layPublicWay(Mode.Road, cls, path, way.publicCharge, way.buildCost);
+    this.layPublicWay(Mode.Road, cls, path, this.wayCharge[cls], way.buildCost);
     layer.terminal[tile] = 1;
     this.rebuild();
   }
@@ -2034,7 +2086,7 @@ export class World {
       (asset, from, price) => {
         this.assets.owner[asset] = AUTHORITY;
         this.assets.forSale[asset] = 0;
-        this.assets.charge[asset] = this.content.ways[this.assets.cls[asset]].publicCharge;
+        this.assets.charge[asset] = this.wayCharge[this.assets.cls[asset]];
         this.companies.post(from, Line.AssetTrade, price);
         this.router.invalidate();
         if (from === this.player) {
@@ -2278,6 +2330,37 @@ export class World {
       case Cmd.SetCharge:
         this.setCharge(c.a, c.b, c.issuer);
         break;
+      case Cmd.OfferAgreement: {
+        const other = c.a;
+        const granting = c.c === 1;
+        const id = propose(
+          this.agreements, c.issuer,
+          granting ? c.issuer : other,
+          granting ? other : c.issuer,
+          c.b, this.tick,
+        );
+        if (id >= 0 && (other === this.player || c.issuer === this.player)) {
+          this.onEvent?.('agreement', granting
+            ? `${this.companies.names[c.issuer]} offers ${this.companies.names[other]} passage at ${c.b}% of the usual.`
+            : `${this.companies.names[c.issuer]} asks ${this.companies.names[other]} for passage at ${c.b}% of the usual.`);
+        }
+        break;
+      }
+      case Cmd.AcceptAgreement:
+        if (accept(this.agreements, c.a, c.issuer, this.tick)) {
+          this.router.invalidate();
+          this.onEvent?.('agreement', 'Terms agreed.');
+        }
+        break;
+      case Cmd.DeclineAgreement:
+        decline(this.agreements, c.a, c.issuer);
+        break;
+      case Cmd.WithdrawAgreement:
+        if (withdraw(this.agreements, c.a, c.issuer)) {
+          this.router.invalidate();
+          this.onEvent?.('agreement', 'An access agreement has been ended.');
+        }
+        break;
       case Cmd.BuyAsset:
         this.buyAsset(c.a, c.issuer);
         break;
@@ -2497,7 +2580,7 @@ export class World {
       return false;
     }
 
-    const asset = this.assets.alloc(mode, cls, company, way.publicCharge, this.tick);
+    const asset = this.assets.alloc(mode, cls, company, this.wayCharge[cls], this.tick);
     if (asset === NONE) return false;
     const laid = layAlignment(this.layers[mode], this.config.size, plan, cls, asset);
     this.assets.tiles[asset] = laid;
@@ -2754,7 +2837,7 @@ export class World {
     if (this.assets.owner[asset] !== seller) return false;
     const price = Math.round(this.assets.valuation(asset, this.content.balance.valuationPct) * 0.7);
     this.assets.owner[asset] = AUTHORITY;
-    this.assets.charge[asset] = this.content.ways[this.assets.cls[asset]].publicCharge;
+    this.assets.charge[asset] = this.wayCharge[this.assets.cls[asset]];
     this.assets.forSale[asset] = 0;
     this.companies.post(seller, Line.AssetTrade, price);
     this.recomputeLinkCharges();
@@ -2800,6 +2883,15 @@ export class World {
     h.array(this.regulator.relief, this.companies.count);
     h.int(this.climate.weather).int(this.climate.severity);
     h.int(this.containerised ? 1 : 0);
+    // Agreements change what everybody pays, so a divergence in them is a
+    // divergence in the economy and has to show up here rather than as an
+    // unexplained difference in two players' books a decade later.
+    h.int(this.agreements.count);
+    h.array(this.agreements.state, this.agreements.count);
+    h.array(this.agreements.grantor, this.agreements.count);
+    h.array(this.agreements.beneficiary, this.agreements.count);
+    h.array(this.agreements.ratePct, this.agreements.count);
+    h.array(this.agreements.endTick, this.agreements.count);
     h.int(this.events.count);
     h.array(this.events.active, this.events.count);
     h.array(this.events.kind, this.events.count);

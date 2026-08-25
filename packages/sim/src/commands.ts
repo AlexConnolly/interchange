@@ -53,6 +53,14 @@ export const Cmd = {
   SetCharge: 52,
   ListAsset: 53,
 
+  // --- access agreements (Act IV, and shared worlds) ---------------------
+  /** a: the other company. b: rate as a percentage of the standard charge.
+   *  c: 1 if you are the one granting it, 0 if you are asking. */
+  OfferAgreement: 54,
+  AcceptAgreement: 55,
+  DeclineAgreement: 56,
+  WithdrawAgreement: 57,
+
   // --- industry (Act III) ------------------------------------------------
   FoundIndustry: 60,
   DemolishSite: 61,

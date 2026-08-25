@@ -598,7 +598,20 @@ function PhotoBar({ engine, onLeave }: { engine: Engine; onLeave: () => void }):
 }
 
 function RailButton({ label, icon, on, onClick }: { label: string; icon: string; on: boolean; onClick: () => void }): JSX.Element {
-  return <button aria-pressed={on} title={label} onClick={onClick}>{icon}</button>;
+  /*
+   * The label is the button's name, not only its tooltip.
+   *
+   * These are icon buttons — a glyph and nothing else — so without an
+   * accessible name a screen reader announces "button, right-left arrow" and
+   * the entire left rail is unusable. `title` gives a sighted mouse user a
+   * tooltip and gives everybody else nothing, which is the commonest way an
+   * interface like this fails an audit.
+   */
+  return (
+    <button aria-pressed={on} aria-label={label} title={label} onClick={onClick}>
+      <span aria-hidden="true">{icon}</span>
+    </button>
+  );
 }
 
 /** Overlay modes recolour the world wholesale, so the legend is the only mark

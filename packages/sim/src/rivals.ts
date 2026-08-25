@@ -24,8 +24,9 @@
  */
 
 import { Cmd, cmd } from './commands.ts';
-import { AUTHORITY, MAX_COMPANIES, Mode, TICKS_PER_DAY } from './constants.ts';
+import { AUTHORITY, FLOW_WINDOW, MAX_COMPANIES, Mode, TICKS_PER_DAY, TICKS_PER_YEAR } from './constants.ts';
 import { Charter, ContractState, Line, LINE_COUNT, MAX_STOPS, StopAction } from './economy.ts';
+import { AgreementState, mustAnswer } from './agreements.ts';
 import { NONE } from './network.ts';
 import type { Rng } from './rng.ts';
 import { SiteState } from './sites.ts';
@@ -352,8 +353,56 @@ export function stepRival(w: World, company: number, rng: Rng): void {
     }
   }
 
+  /*
+   * ---- 3b. saving up ----------------------------------------------------
+   *
+   * A company that spends every spare pound on lorries never has the price of
+   * a road, and the sweep showed exactly that: rivals earned construction
+   * charters and then bought nothing for the rest of the century, because
+   * their cash was always near zero on the day they looked. The ownership
+   * spine cannot start until somebody stops buying vehicles for a season.
+   *
+   * So a chartered company that is within reach of a piece of way worth
+   * having puts the money aside instead. Within reach rather than merely
+   * wanting it, or a company would save forever for a bridge it will never
+   * afford and stop growing in the meantime.
+   */
+  let savingFor = 0;
+  if (w.companies.charter[company] >= Charter.Construction) {
+    /*
+     * The reserve, and why it has to work this way round.
+     *
+     * The first attempt only saved when the target was already within reach —
+     * "if I have a third of the price, stop and save the rest" — and a company
+     * that spends every spare pound on lorries never has a third of the price
+     * of anything, so it never started saving and never bought a road. Rivals
+     * earned construction charters and then bought nothing for a century.
+     *
+     * Reserving against the *cheapest worthwhile* way instead turns it round:
+     * the company keeps that much back from the day it is chartered and buys
+     * lorries out of what is left. It grows more slowly and it eventually owns
+     * something, which is the whole of Act II.
+     */
+    let cheapest = Infinity;
+    const windowsPerYear = TICKS_PER_YEAR / FLOW_WINDOW;
+    for (let a = 0; a < w.assets.count; a++) {
+      if (w.assets.owner[a] === company || w.assets.tiles[a] <= 0) continue;
+      if (w.assets.owner[a] !== AUTHORITY && !w.assets.forSale[a]) continue;
+      const price = w.assets.valuation(a, w.content.balance.valuationPct);
+      if (price <= 0 || price >= cheapest) continue;
+      const earns = w.assets.revenuePrev[a] * windowsPerYear;
+      const own = Math.max(0, w.assets.passesPrev[a] - w.assets.foreignPassesPrev[a]);
+      const saves = own * windowsPerYear * w.assets.charge[a] * (w.assets.tiles[a] / 8);
+      if ((earns + saves) * PAYBACK_YEARS - price > 0) cheapest = price;
+    }
+    if (cheapest !== Infinity) savingFor = cheapest;
+  }
+
   // ---- 4. more vehicles on whatever is working --------------------------
-  if (mine.length > 0) {
+  // What is left after the reserve above. A chartered company buys lorries out
+  // of the money it is not putting aside for a road.
+  const forVehicles = spendable - savingFor;
+  if (mine.length > 0 && forVehicles > 0) {
     // A service with no vehicles gets one unconditionally. Judging it on its
     // returns first is circular — it cannot earn anything until something runs
     // on it — and that circle is why the first version of this file created
@@ -375,7 +424,7 @@ export function stepRival(w: World, company: number, rng: Rng): void {
     let targetType = -1;
     for (const s of mine) {
       if (w.services.vehicles[s] !== 0 || w.services.stopCount[s] < 2) continue;
-      const type = affordableVehicle(w, spendable, serviceHandling(w, s));
+      const type = affordableVehicle(w, forVehicles, serviceHandling(w, s));
       if (type < 0) continue;
       target = s;
       targetType = type;
@@ -428,13 +477,43 @@ export function stepRival(w: World, company: number, rng: Rng): void {
       // twelve times.
       const bestType = targetType >= 0
         ? targetType
-        : affordableVehicle(w, spendable, serviceHandling(w, target));
+        : affordableVehicle(w, forVehicles, serviceHandling(w, target));
       if (bestType >= 0) {
         issue(Cmd.BuyVehicle, bestType, stopSite);
         issue(Cmd.AssignVehicle, -1, target);
         return;
       }
     }
+  }
+
+  /*
+   * ---- 4b. answer the post, and strike a deal ---------------------------
+   *
+   * An offer on the table gets an answer, because an AI that never replies
+   * makes the whole feature dead to a human player — you would offer terms
+   * once, hear nothing, and never try again. The rule is the one a business
+   * would use: take a discount, and give one to somebody whose traffic is
+   * already paying you, since a regular customer at a lower rate is worth
+   * more than an occasional one at the full rate.
+   */
+  for (let i = 0; i < w.agreements.count; i++) {
+    if (w.agreements.state[i] !== AgreementState.Offered) continue;
+    if (mustAnswer(w.agreements, i) !== company) continue;
+    if (w.agreements.beneficiary[i] === company) {
+      // Somebody is offering us cheaper passage. There is no version of that
+      // worth refusing.
+      issue(Cmd.AcceptAgreement, i);
+      return;
+    }
+    // Somebody is asking us for cheaper passage. Worth it if they are already
+    // using our ways enough that keeping them is better than the difference.
+    let theirTraffic = 0;
+    for (let a = 0; a < w.assets.count; a++) {
+      if (w.assets.owner[a] === company) theirTraffic += w.assets.foreignPassesPrev[a];
+    }
+    const generous = theirTraffic > 40 || p.aggression < 45;
+    issue(generous ? Cmd.AcceptAgreement : Cmd.DeclineAgreement, i);
+    return;
   }
 
   // ---- 5. bid for work ---------------------------------------------------
@@ -460,35 +539,12 @@ export function stepRival(w: World, company: number, rng: Rng): void {
    * A rival that has earned the charter has met the same bar the player does.
    */
   if (w.companies.charter[company] >= Charter.Construction) {
-    // Buy the road you are paying the most to use. design.md §3.2: buy flips
+    // Buy the road you are paying the most to use. design.md 3.2: buy flips
     // a cost into an income, and the asset that costs you most is the one
     // worth the most to own.
-    let bestAsset = NONE;
-    let bestValue = 0;
-    for (let a = 0; a < w.assets.count; a++) {
-      if (w.assets.owner[a] === company) continue;
-      if (w.assets.owner[a] !== AUTHORITY && !w.assets.forSale[a]) continue;
-      const price = w.assets.valuation(a, w.content.balance.valuationPct);
-      if (price > spendable) continue;
-      /*
-       * Weight by the traffic that would actually pay.
-       *
-       * An empty road is cheap and worthless; a busy one is expensive because
-       * it is worth having — but only if the traffic on it is somebody else's.
-       * Buying by total passes buys the busy road you are already driving on,
-       * which converts none of your costs into income because a toll is not
-       * charged to its own owner. Every company in the region did that, and
-       * rent stayed at zero per cent of everybody's income for a century.
-       */
-      const foreign = w.assets.foreignPassesPrev[a];
-      const value = foreign * 140 + w.assets.passesPrev[a] * 20 - price * 0.02;
-      if (value > bestValue) {
-        bestValue = value;
-        bestAsset = a;
-      }
-    }
-    if (bestAsset !== NONE && bestValue > 0) {
-      issue(Cmd.BuyAsset, bestAsset);
+    const best = bestAssetFor(w, company, spendable);
+    if (best.asset !== NONE) {
+      issue(Cmd.BuyAsset, best.asset);
       return;
     }
 
@@ -821,6 +877,57 @@ function bestUnservedTownPair(w: World, rng: Rng): { a: number; b: number } | nu
   }
   return best;
 }
+
+/**
+ * The best piece of way this company could buy, and what it would cost.
+ *
+ * Separated out because two decisions need the same answer: whether to buy
+ * one now, and whether to stop buying lorries and save for one.
+ */
+function bestAssetFor(
+  w: World, company: number, budget: number,
+): { asset: number; price: number; value: number } {
+  let bestAsset = NONE;
+  let bestValue = 0;
+  let bestPrice = 0;
+  const windowsPerYear = TICKS_PER_YEAR / FLOW_WINDOW;
+  for (let a = 0; a < w.assets.count; a++) {
+    if (w.assets.owner[a] === company) continue;
+    if (w.assets.owner[a] !== AUTHORITY && !w.assets.forSale[a]) continue;
+    if (w.assets.tiles[a] <= 0) continue;
+    const price = w.assets.valuation(a, w.content.balance.valuationPct);
+    if (price > budget) continue;
+    /*
+     * Does the traffic pay for the price? An investment test, not a score.
+     *
+     * What it earns from other people, plus what this company would stop
+     * paying to cross it, against what it costs — which is the question
+     * design.md 3.2 asks: the asset that costs the most to use is the one
+     * worth the most to own. Both figures are per flow window, which is
+     * thirty days, so they are scaled to the year before being compared with
+     * a price.
+     */
+    const earns = w.assets.revenuePrev[a] * windowsPerYear;
+    const ownPasses = Math.max(0, w.assets.passesPrev[a] - w.assets.foreignPassesPrev[a]);
+    const saves = ownPasses * windowsPerYear * w.assets.charge[a] * (w.assets.tiles[a] / 8);
+    const value = (earns + saves) * PAYBACK_YEARS - price;
+    if (value > bestValue) {
+      bestValue = value;
+      bestAsset = a;
+      bestPrice = price;
+    }
+  }
+  return { asset: bestAsset, price: bestPrice, value: bestValue };
+}
+
+/**
+ * How long a carrier will wait to get its money back on a piece of way.
+ *
+ * Generous, because infrastructure is a long asset and because the alternative
+ * to owning the road is paying to use it for ever. Short enough that a rival
+ * does not buy a quiet lane on the grounds that it might matter one day.
+ */
+export const PAYBACK_YEARS = 9;
 
 /** Days between readings of the pile at the origin. Short enough to react in
  *  a season, long enough that a single lorry arriving does not read as the

@@ -201,3 +201,37 @@ export const CONTAINER_ERA = 5;
  * else in the region irrelevant overnight rather than merely obsolete.
  */
 export const CONTAINER_TRANSFER_GAIN = 3;
+
+/**
+ * The condition the authority keeps its own ways at.
+ *
+ * Deliberately mediocre. A public road is passable and no better, and the gap
+ * between it and what a private owner who is spending money maintains is one
+ * of the quieter reasons to want to own one.
+ */
+export const PUBLIC_STANDARD = 150;
+
+/**
+ * How much the posted charge for crossing somebody's way is multiplied by.
+ *
+ * The whole design is that owning the road somebody drives on turns their cost
+ * into your income, and that only means anything if the cost is worth having.
+ * It was not. Access charges came to about three per cent of a haulier's
+ * outgoings, so a road could never pay back what it cost to buy: across three
+ * seeds, every chartered company in the region valued every one of eighty-odd
+ * available ways at zero or less, and the ownership spine — the thing this
+ * game is about — simply never started.
+ *
+ * The immediate cause is a number I moved and did not follow through. Early
+ * balancing raised HAUL_BASE from two hundred to five hundred and sixty to
+ * make carriage pay at all, and left the charges in the content where they
+ * were, so passage got cheaper against carriage by a factor of nearly three
+ * on top of a ratio that was already too low.
+ *
+ * Applied here rather than by editing every publicCharge in the JSON, because
+ * the figures there are readable as pence per tile and should stay that way;
+ * this is one number that says what a mile of somebody else's road is worth
+ * against a mile of carriage, and it belongs beside HAUL_BASE conceptually
+ * even though it lives here.
+ */
+export const ACCESS_SCALE = 3;

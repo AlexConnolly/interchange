@@ -200,8 +200,23 @@ export class CompanyTable {
  * mediocre one does not.
  */
 export const CHARTER_REQUIREMENTS = {
-  /** Carrier -> Construction: you may lay your own way. */
-  construction: { contracts: 2, revenue: 250000, cash: 300000 },
+  /*
+   * Carrier -> Construction: you may lay your own way.
+   *
+   * Contracts used to be part of this and are not any more, and the reason is
+   * measured rather than felt. Across thirty-two company-runs of a hundred
+   * years, eighteen reached the net worth, eleven reached the revenue, and
+   * four completed two contracts — so a single one of the three conditions
+   * was deciding the gate on its own, and Act II stayed shut against
+   * companies that were plainly substantial operators.
+   *
+   * That is also the right answer on its own terms. A charter is granted to
+   * somebody who has built a real business; the contract board is one way to
+   * do that and hauling on the spot market is another, and the authority does
+   * not care which. A contract record still counts, through the reliability
+   * weighting that decides who wins the next one.
+   */
+  construction: { contracts: 0, revenue: 250000, cash: 300000 },
   /** Construction -> Extraction: you may found industry. */
   extraction: { revenue: 900000, assets: 3 },
   /** Extraction -> Land: you may deal in land itself. */

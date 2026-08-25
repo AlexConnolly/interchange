@@ -251,7 +251,16 @@ const earliestChain = (id: string): number => {
   }
   return Math.max(makes, takes);
 };
-const eraAtEnd = C.eras.reduce((n, e) => (e.from <= 1860 + YEARS ? e.n : n), 1);
+/*
+ * The era with time to spare, not the era on the last day.
+ *
+ * A chain that only becomes possible in the closing years of a run has not
+ * had a chance to happen: the region founds new industry when an era turns,
+ * and then somebody has to notice and go and serve it. Judging against the
+ * final era called retail stock dead on a hundred-and-forty-year run that
+ * reached era six with months to go.
+ */
+const eraAtEnd = C.eras.reduce((n, e) => (e.from <= 1860 + YEARS - 15 ? e.n : n), 1);
 const live: { name: string; share: number }[] = [];
 for (let k = 0; k < C.cargo.length; k++) {
   const cargo = C.cargo[k];

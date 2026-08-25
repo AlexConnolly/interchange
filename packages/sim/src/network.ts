@@ -29,6 +29,11 @@ import type { Hasher } from './hash.ts';
 export const NO_WAY = 255;
 export const NONE = -1;
 
+/** How much of what a way cost to build is in the ground rather than on it —
+ *  cuttings, embankments, bridge piers. This part does not wear out and so
+ *  never stops being worth something. */
+export const FORMATION_SHARE = 0.45;
+
 /**
  * One mode's tile layer. Separate arrays per mode rather than one tagged
  * layer, because a road and a railway crossing the same tile is normal and a
@@ -155,7 +160,19 @@ export class AssetTable {
   valuation(id: number, valuationPct: number): number {
     const earnings = this.revenuePrev[id];
     const fromEarnings = (earnings * valuationPct) / 100;
-    const floor = (this.buildCost[id] * this.condition[id]) / 255 / 2;
+    /*
+     * The surface wears out; the formation and the land do not.
+     *
+     * Scaling the whole floor by condition meant a worn way was worth
+     * literally nothing, so once the authority's roads had aged — which took
+     * about twenty years, because nobody was maintaining them — the entire
+     * public network could be bought for no money at all. A cutting is still
+     * a cutting when the metalling has gone, and an embankment somebody built
+     * is an embankment you did not have to build.
+     */
+    const earthworks = this.buildCost[id] * FORMATION_SHARE;
+    const surface = (this.buildCost[id] * (1 - FORMATION_SHARE) * this.condition[id]) / 255;
+    const floor = (earthworks + surface) / 2;
     return Math.round(Math.max(floor, fromEarnings));
   }
 
