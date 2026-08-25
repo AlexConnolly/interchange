@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { Crop, arableStage, grassStage } from '../src/fields.ts';
+import {
+  Crop, NEEDS_WORK, arableStage, grassStage, springSown,
+} from '../src/fields.ts';
 
 /*
  * The farming year, which is the only part of the seasons that has an answer you
@@ -53,5 +55,78 @@ describe('grass', () => {
     expect(grassStage(6, 0, Crop.Meadow)).toBe(Crop.Stubble);
     expect(grassStage(2, 0, Crop.Meadow)).toBe(Crop.Meadow);
     expect(grassStage(10, 0, Crop.Meadow)).toBe(Crop.Meadow);
+  });
+});
+
+
+/**
+ * The one thing about the farming year that is not a matter of taste.
+ *
+ * A tractor only has something to do when a field's stage changes into one that
+ * needs working, and for a while the calendar had a four-month hole in it — March
+ * to June, which happen to be the four months a new player sees, because the
+ * world opens in March. The tractors were correct the whole time and there was
+ * nothing for them to do, which looked exactly like a broken feature and was
+ * reported as one.
+ *
+ * A count of jobs per month is therefore not a nicety. It is the assertion that
+ * the district is *worked*, and it is the one that would fail silently if anybody
+ * ever retuned the rotations.
+ */
+function jobsIn(month: number): number {
+  const before = (month + 11) % 12;
+  let n = 0;
+  for (const spring of [false, true]) {
+    for (const off of [0, 1, 2]) {
+      const now = arableStage(month, off, spring);
+      if (now !== arableStage(before, off, spring) && NEEDS_WORK.has(now)) n++;
+    }
+  }
+  for (const off of [0, 1, 2]) {
+    const now = grassStage(month, off, Crop.Meadow);
+    if (now !== grassStage(before, off, Crop.Meadow) && NEEDS_WORK.has(now)) n++;
+  }
+  return n;
+}
+
+describe('the district is worked all year', () => {
+  it('has a job for a tractor in every single month', () => {
+    for (let m = 0; m < 12; m++) {
+      expect(jobsIn(m), `month ${m} has no field work in it`).toBeGreaterThan(0);
+    }
+  });
+
+  it('is busiest in the autumn, which is when a farm is', () => {
+    const autumn = jobsIn(8) + jobsIn(9) + jobsIn(10);
+    const spring = jobsIn(2) + jobsIn(3) + jobsIn(4);
+    expect(autumn).toBeGreaterThan(spring);
+  });
+
+  it('splits the arable land between two rotations', () => {
+    // Neither all nor none, or the second rotation is not doing its job.
+    let spring = 0;
+    for (let p = 0; p < 400; p++) if (springSown(p)) spring++;
+    expect(spring).toBeGreaterThan(40);
+    expect(spring).toBeLessThan(360);
+  });
+
+  it('drills spring barley in March and cuts it in September', () => {
+    expect(arableStage(2, 0, true)).toBe(Crop.Drilled);
+    expect(arableStage(8, 0, true)).toBe(Crop.Stubble);
+    // And the winter crop is doing something else at both of those moments,
+    // which is the entire point of having two.
+    expect(arableStage(2, 0, false)).not.toBe(Crop.Drilled);
+    expect(arableStage(8, 0, false)).not.toBe(Crop.Stubble);
+  });
+});
+
+describe('meadows', () => {
+  it('are cut twice in the summer, not once', () => {
+    let cuts = 0;
+    for (let m = 0; m < 12; m++) {
+      const now = grassStage(m, 0, Crop.Meadow);
+      if (now !== grassStage((m + 11) % 12, 0, Crop.Meadow) && now === Crop.Stubble) cuts++;
+    }
+    expect(cuts).toBe(2);
   });
 });

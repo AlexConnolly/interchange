@@ -72,7 +72,7 @@ export const CROP_COUNT = 11;
  * Winter wheat, which is what most of England grows: in the ground before
  * Christmas, harvested in high summer. Months are 0-based, so 8 is September.
  */
-const YEAR: { from: number; crop: Crop }[] = [
+const WINTER_SOWN: { from: number; crop: Crop }[] = [
   { from: 0, crop: Crop.Growing },     // January: in the ground, low and green
   { from: 3, crop: Crop.Wheat },       // April: away
   { from: 6, crop: Crop.WheatRipe },   // July: turning
@@ -81,6 +81,46 @@ const YEAR: { from: number; crop: Crop }[] = [
   { from: 9, crop: Crop.Plough },      // October: turned over
   { from: 10, crop: Crop.Drilled },    // November: drilled
 ];
+
+/**
+ * And the other half of the district: spring barley.
+ *
+ * Not variety for its own sake — it is the fix for a real hole. Winter wheat is
+ * drilled before Christmas and cut in August, so every job that *shows* on a
+ * winter-sown field falls between August and November. A district growing
+ * nothing else has four months, March to June, in which there is no field work
+ * anywhere in it at all, and those are precisely the months a new player sees:
+ * the world opens in March, and the first tractor with anything to do would have
+ * appeared about eight hours in. Reported, correctly, as "visually I can't see a
+ * difference as tractors go over the ground".
+ *
+ * Spring barley is the answer a farm would give. It sits as ploughed ground over
+ * winter, is drilled in March, is up by April and cut in September — so it works
+ * in exactly the months the winter crop does not, and a mixed district has
+ * something going on in nearly every one of them. Which is also just what
+ * English farmland is: nobody puts a whole parish into one crop.
+ */
+const SPRING_SOWN: { from: number; crop: Crop }[] = [
+  { from: 0, crop: Crop.Plough },       // January: turned over, waiting on the weather
+  { from: 2, crop: Crop.Drilled },      // March: drilled
+  { from: 3, crop: Crop.Growing },      // April: through
+  { from: 4, crop: Crop.Wheat },        // May: away
+  { from: 7, crop: Crop.WheatRipe },    // August: turning
+  { from: 8, crop: Crop.Stubble },      // September: cut
+  { from: 9, crop: Crop.Bare },         // October: cleared
+  { from: 11, crop: Crop.Plough },      // December: ploughed for the spring
+];
+
+/**
+ * Which rotation a parcel is on, from its own id.
+ *
+ * Two in five, and stable for the life of the world because it is a pure
+ * function of the parcel. A random draw per call would have a field changing its
+ * mind about what it is growing every time anything asked.
+ */
+export function springSown(parcel: number): boolean {
+  return ((parcel * 2246822519) >>> 0) % 5 < 2;
+}
 
 /**
  * The stages that somebody has to go out and do.
@@ -104,24 +144,34 @@ export const NEEDS_WORK: ReadonlySet<number> = new Set<number>([
  * and a whole valley changing colour in one frame would look like a switch being
  * thrown. Derived from the parcel id by the caller, so it is stable.
  */
-export function arableStage(month: number, offset: number): Crop {
+export function arableStage(month: number, offset: number, spring = false): Crop {
+  const year = spring ? SPRING_SOWN : WINTER_SOWN;
   const m = ((month - offset) % 12 + 12) % 12;
-  let crop: Crop = YEAR[0].crop;
-  for (const step of YEAR) if (m >= step.from) crop = step.crop;
+  let crop: Crop = year[0].crop;
+  for (const step of year) if (m >= step.from) crop = step.crop;
   return crop;
 }
 
 /**
- * And grass, which changes far less — but not nothing.
+ * And grass, which changes far less — but not nothing, and not once.
  *
- * A meadow is cut for hay in June and is pasture the rest of the year. Getting
- * this wrong in the other direction is the risk: grass that cycled as hard as
- * wheat would make the whole district pulse, and grass in England is green.
+ * A meadow is cut more than annually: silage in the middle of May, a second cut
+ * in July, and it is green again within a fortnight of each. Cutting it once was
+ * both wrong and the reason the early summer had nothing in it — May and June
+ * are the busiest weeks of the grass year and the district was standing still
+ * through them.
+ *
+ * Getting this wrong in the other direction is the real risk, and it is why only
+ * *meadows* are touched. Pasture is grazed rather than cut, it is the majority of
+ * the grass in the district, and grass that cycled as hard as wheat would make
+ * the whole valley pulse. England is green; the meadows are the part that gets
+ * mown.
  */
 export function grassStage(month: number, offset: number, base: Crop): Crop {
   if (base !== Crop.Meadow) return base;
   const m = ((month - offset) % 12 + 12) % 12;
-  return m === 6 || m === 7 ? Crop.Stubble : Crop.Meadow;
+  // Cut in May and again in July, green in between and after.
+  return m === 4 || m === 6 ? Crop.Stubble : Crop.Meadow;
 }
 
 /** Crops that want good flat ground, in rough order of how much they want it.

@@ -37,7 +37,9 @@ import {
 } from './network.ts';
 import { Router, type RouteCosts } from './pathfinding.ts';
 import { TileRouter } from './tilerouter.ts';
-import { Crop, NEEDS_WORK, arableStage, grassStage } from './fields.ts';
+import {
+  Crop, NEEDS_WORK, arableStage, grassStage, springSown,
+} from './fields.ts';
 import { Heap } from './heap.ts';
 import {
   APPROVAL_DRIFT_PER_DAY, APPROVAL_PER_LOAD, APPROVAL_REST, PLANNING_FROM_VEHICLES,
@@ -3163,7 +3165,7 @@ export class World {
       // in one frame.
       const offset = ((p2 * 2654435761) >>> 0) % 3;
       const stage = base === Crop.Wheat || base === Crop.WheatRipe || base === Crop.Plough
-        ? arableStage(month, offset)
+        ? arableStage(month, offset, springSown(p2))
         : grassStage(month, offset, base);
       want[t] = stage;
       /*
@@ -3243,9 +3245,18 @@ export class World {
     const want = this.cropWant;
     if (!want) return;
     this.daysWorking++;
-    // Six days to finish a field unaided. A day is four minutes, so a district
-    // settles into its season over about half an hour of play.
-    const share = Math.min(1, this.daysWorking / 6);
+    /*
+     * Two days' grace, then twelve days to finish a field unaided.
+     *
+     * The first figures gave no grace and six days, which meant a sixth of every
+     * field changed colour on the first day of the month whether a tractor went
+     * near it or not — so by the time the player looked, most of the work had
+     * already done itself and the tractor was following behind its own result.
+     * The grace period is the important half: for the first two days of a job,
+     * the only thing that changes a field is a tractor driving over it.
+     */
+    const share = Math.max(0, Math.min(1, (this.daysWorking - 2) / 12));
+    if (share <= 0) return;
     const fields = this.terrain.fields;
     const size = this.config.size;
     for (let t = 0; t < size * size; t++) {
