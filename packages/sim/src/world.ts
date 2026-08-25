@@ -768,6 +768,7 @@ export class World {
     const payer = this.vehicles.company[vehicle];
     this.assets.passes[asset]++;
     if (owner === payer) return;
+    this.assets.foreignPasses[asset]++;
     const tiles = this.graph.linkChainLen[link] - 1;
     const charge = accessChargeFor(this.regulator, this.assets, asset) * tiles;
     if (charge <= 0) return;
@@ -2000,7 +2001,7 @@ export class World {
         this.companies.ledgerYear[base + Line.ContractBonus] +
         this.companies.ledgerYear[base + Line.AccessCharged];
       const delivered = this.companies.delivered[c];
-      const cash = this.companies.cash[c];
+      const cash = this.netWorth(c);
       /*
        * Thresholds measured against the game, not guessed at.
        *
@@ -2033,6 +2034,35 @@ export class World {
 
   onCharter: ((company: number, charter: number) => void) | null = null;
   onEvent: ((kind: string, text: string) => void) | null = null;
+
+  /**
+   * What a company is actually worth: cash, less debt, plus what it owns.
+   *
+   * The charter used to ask for cash in hand, and a growing carrier does not
+   * hold cash — it holds lorries. Across eight forty-year runs the median
+   * surviving company had nothing in the bank and a working fleet, so a gate
+   * written in cash was a gate that punished the exact behaviour it was meant
+   * to reward, and Act II stayed shut against companies that had plainly
+   * earned it.
+   *
+   * Vehicles are counted at what they would fetch, which is roughly half of
+   * new and falling with age — the same figure a sale actually pays, so the
+   * books cannot be flattered by owning something rather than selling it.
+   */
+  netWorth(company: number): number {
+    let worth = this.companies.cash[company] - this.companies.debt[company];
+    for (let v = 0; v < this.vehicles.count; v++) {
+      if (!this.vehicles.alive[v] || this.vehicles.company[v] !== company) continue;
+      const def = this.content.vehicles[this.vehicles.type[v]];
+      const ageYears = (this.tick - this.vehicles.boughtTick[v]) / TICKS_PER_YEAR;
+      worth += Math.max(def.cost * 0.15, def.cost * 0.55 * Math.pow(0.88, ageYears));
+    }
+    for (let a = 0; a < this.assets.count; a++) {
+      if (this.assets.owner[a] !== company) continue;
+      worth += this.assets.valuation(a, this.content.balance.valuationPct);
+    }
+    return worth;
+  }
 
   ownedAssets(company: number): number {
     let n = 0;

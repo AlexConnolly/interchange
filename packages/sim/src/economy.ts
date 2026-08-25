@@ -338,6 +338,20 @@ export class ServiceTable {
    */
   readonly tonnesMark = new Float64Array(MAX_ROUTES);
   readonly markTick = new Int32Array(MAX_ROUTES);
+  /*
+   * The pile at the origin when the fleet was last reviewed, and when that
+   * was.
+   *
+   * Buying decisions need to know whether the pile is *growing*, which is a
+   * different question from how big it is. A single reading cannot tell them
+   * apart: a colliery with nine tonnes at the pithead looks the same whether
+   * it is filling up because nobody is collecting or emptying because four
+   * drays already are. Reading it once was how a company went from three
+   * vehicles to eight in a year and watched its haulage fall from six hundred
+   * and seventy-eight pounds to ninety-eight.
+   */
+  readonly stockMark = new Float64Array(MAX_ROUTES);
+  readonly stockMarkTick = new Int32Array(MAX_ROUTES);
 
   private free: number[] = [];
 
@@ -356,6 +370,8 @@ export class ServiceTable {
     this.created[id] = tick;
     this.markTick[id] = tick;
     this.tonnesMark[id] = 0;
+    this.stockMark[id] = 0;
+    this.stockMarkTick[id] = tick;
     this.company[id] = company;
     this.names[id] = name;
     this.stopCount[id] = 0;

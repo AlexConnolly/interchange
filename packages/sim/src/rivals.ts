@@ -62,7 +62,16 @@ export function stepRival(w: World, company: number, rng: Rng): void {
   const cash = w.companies.cash[company];
   const base = company * LINE_COUNT;
   const annualRunning = w.companies.ledgerYear[base + Line.RunningCosts] + 1;
-  const buffer = (annualRunning * p.thrift) / 100;
+  /*
+   * A year's running costs in reserve, give or take temperament.
+   *
+   * Half a year was not enough. A company would spend down to a hundred and
+   * fourteen pounds against a fodder bill of five hundred and sixty, and the
+   * first quiet season put it into debt it never came out of. A carrier that
+   * cannot pay for its horses until the next load arrives is not solvent, it
+   * is lucky.
+   */
+  const buffer = annualRunning * (0.6 + p.thrift / 100);
   const spendable = cash - buffer;
   // Not recorded in the log: a replay re-runs this same function against the
   // same world and produces the same commands, so logging them would apply
@@ -167,7 +176,12 @@ export function stepRival(w: World, company: number, rng: Rng): void {
      * bankrupt by year eight. A route down to one vehicle is either worth
      * running or worth closing, and closing it is handled below.
      */
-    if (net < -w.services.costs[s] * 0.3 && w.services.vehicles[s] > 1) {
+    // Recent carrying, for the same reason as above: a route living on an old
+    // reputation should still shed lorries it is no longer using.
+    const recentlyCarried = w.services.tonnes[s] - w.services.tonnesMark[s];
+    const stalled = recentlyCarried <= 0
+      && w.tick - w.services.markTick[s] > deadAfter * TICKS_PER_DAY * 0.5;
+    if ((stalled || net < -w.services.costs[s] * 0.3) && w.services.vehicles[s] > 1) {
       // Shrink it rather than close it: a route that loses money with six
       // lorries can make money with two, and closing it throws away the
       // knowledge that the route exists.
@@ -195,7 +209,18 @@ export function stepRival(w: World, company: number, rng: Rng): void {
       const carried = w.services.tonnes[s] - w.services.tonnesMark[s];
       w.services.tonnesMark[s] = w.services.tonnes[s];
       w.services.markTick[s] = w.tick;
-      if (carried <= 0 && net < 0) {
+      /*
+       * Nothing carried in a year closes it, whatever the books say.
+       *
+       * This used to require the lifetime net to be negative as well, and
+       * lifetime net is a ratchet: a route that made five hundred pounds in
+       * its first three years stays in the black in the ledger for ever, so a
+       * company kept seven lorries on three routes that had stopped carrying
+       * anything at all, paying the fodder and earning nothing, until it had
+       * spent everything it made in the good years. Whether a route worked in
+       * 1863 is not evidence about 1868.
+       */
+      if (carried <= 0) {
         issue(Cmd.DeleteService, s);
         return;
       }
@@ -218,8 +243,56 @@ export function stepRival(w: World, company: number, rng: Rng): void {
    * dray on a route that already works. The cap stays where temperament puts
    * it.
    */
-  const wantServices = 1 + Math.floor((p.aggression / 100) * 5);
-  if (mine.length < wantServices) {
+  /*
+   * Temperament sets the appetite; a proven book of business raises it.
+   *
+   * Scaling this with income was tried once before and made everything worse,
+   * because a company would spread its capital over routes none of which had
+   * proved anything. With the two conditions below in place that failure mode
+   * is closed — nothing opens until an existing route has actually carried
+   * something and paid for itself — so a company that has genuinely built a
+   * trade can now grow past the three routes temperament allows, which is
+   * what it takes to reach the revenue a construction charter asks for.
+   */
+  const annualIncome =
+    w.companies.ledgerYear[base + Line.Haulage] + w.companies.ledgerYear[base + Line.ContractBonus];
+  const wantServices = 1 + Math.floor((p.aggression / 100) * 5)
+    + Math.min(8, Math.floor(annualIncome / 600000));
+  /*
+   * And every route you already have has to be paying.
+   *
+   * A company would open three routes in its first year, before any of them
+   * had been round once, and then spread its capital across all three. The
+   * arithmetic is unforgiving: the opening harness shows one extraction route
+   * with two drays returning about half the starting capital over twelve
+   * years, while three routes with five vehicles between them ran at
+   * break-even for a decade and then failed. A second route is not a hedge
+   * against the first one being bad; it is a second thing that needs its own
+   * fleet before it earns anything.
+   *
+   * Judged only on routes old enough to have proved something, so a route
+   * opened last month does not block the next one for ever.
+   */
+  const provenGrace = idleGrace * TICKS_PER_DAY;
+  const allPaying = mine.every((s) => {
+    if (w.tick - w.services.created[s] < provenGrace) return true;
+    return w.services.revenue[s] > w.services.costs[s];
+  });
+  /*
+   * And the first route has to have worked before there is a second.
+   *
+   * Judging only on routes past their grace period is not enough on its own,
+   * because a company opens its second and third in the same season as its
+   * first, while all three are still too young to judge. It then splits its
+   * capital three ways before knowing whether any of the three is worth
+   * having. One route that has carried something and paid for itself is the
+   * evidence that this company can trade at all; until then, a second route
+   * is a guess funded by the money the first one needs.
+   */
+  const oneWorks = mine.length === 0 || mine.some(
+    (s) => w.services.tonnes[s] > 0 && w.services.revenue[s] > w.services.costs[s],
+  );
+  if (mine.length < wantServices && allPaying && oneWorks) {
     /*
      * People, or goods.
      *
@@ -316,6 +389,22 @@ export function stepRival(w: World, company: number, rng: Rng): void {
         if (w.services.vehicles[s] >= 12) continue;
         // Do not buy a lorry the source cannot fill.
         if (!routeHasSpareSupply(w, s, 3)) continue;
+        /*
+         * Judged on what it is earning now, not on what it has ever earned.
+         *
+         * Lifetime net is a ratchet: a route that made five hundred pounds
+         * over its first three good years goes on justifying another lorry
+         * long after it stopped carrying anything, because the number in the
+         * books never comes down. A company that had doubled its capital by
+         * year three then bought its way from five vehicles to nine while its
+         * haulage fell to nothing, and was finished by year six.
+         *
+         * The mark is already kept for deciding whether to close a route. The
+         * same two readings answer this, and answer it about the present.
+         */
+        const window = Math.max(1, w.tick - w.services.markTick[s]);
+        const carried = w.services.tonnes[s] - w.services.tonnesMark[s];
+        if (carried <= 0 && window > deadAfter * TICKS_PER_DAY * 0.5) continue;
         const net = w.services.revenue[s] - w.services.costs[s];
         const perVehicle = net / Math.max(1, w.services.vehicles[s]);
         if (perVehicle > bestNet) {
@@ -381,9 +470,18 @@ export function stepRival(w: World, company: number, rng: Rng): void {
       if (w.assets.owner[a] !== AUTHORITY && !w.assets.forSale[a]) continue;
       const price = w.assets.valuation(a, w.content.balance.valuationPct);
       if (price > spendable) continue;
-      // Weight by how much traffic it carries: an empty road is cheap and
-      // worthless, and a busy one is expensive because it is worth having.
-      const value = w.assets.passesPrev[a] * 100 - price * 0.02;
+      /*
+       * Weight by the traffic that would actually pay.
+       *
+       * An empty road is cheap and worthless; a busy one is expensive because
+       * it is worth having — but only if the traffic on it is somebody else's.
+       * Buying by total passes buys the busy road you are already driving on,
+       * which converts none of your costs into income because a toll is not
+       * charged to its own owner. Every company in the region did that, and
+       * rent stayed at zero per cent of everybody's income for a century.
+       */
+      const foreign = w.assets.foreignPassesPrev[a];
+      const value = foreign * 140 + w.assets.passesPrev[a] * 20 - price * 0.02;
       if (value > bestValue) {
         bestValue = value;
         bestAsset = a;
@@ -724,23 +822,15 @@ function bestUnservedTownPair(w: World, rng: Rng): { a: number; b: number } | nu
   return best;
 }
 
-/**
- * Is there cargo piled up at the origin waiting for a lorry?
- *
- * The obvious test — fleet throughput against the source's production rate —
- * does not work, because throughput is vehicles times capacity over the round
- * trip, and adding a vehicle to a saturated route lengthens the round trip by
- * about as much as the extra vehicle adds. The ratio barely moves, the test
- * never trips, and the company buys lorries until the running costs bury it:
- * nineteen vehicles earning less than fourteen did.
- *
- * A stockpile is the honest signal and the one a real haulier would use. If
- * there is a queue at the pithead, another dray has something to carry. If
- * there is not, it will join the others waiting for the shift to end.
- */
-function routeHasSpareSupply(w: World, service: number, capacity: number): boolean {
+/** Days between readings of the pile at the origin. Short enough to react in
+ *  a season, long enough that a single lorry arriving does not read as the
+ *  route collapsing. */
+export const STOCK_REVIEW_DAYS = 50;
+
+/** How much cargo is waiting at a route's origin, across everything it makes. */
+function originStock(w: World, service: number): number {
   const first = service * MAX_STOPS;
-  if (w.services.stopKind[first] !== 0) return true;
+  if (w.services.stopKind[first] !== 0) return Infinity;
   const site = w.services.stopTarget[first];
   const outs = w.content.industries[w.sites.def[site]].recipe.outputs;
   let waiting = 0;
@@ -748,7 +838,60 @@ function routeHasSpareSupply(w: World, service: number, capacity: number): boole
     const ci = w.content.cargoIndex.get(id);
     if (ci !== undefined) waiting += w.sites.stockOf(site, ci);
   }
-  return waiting >= capacity * 3;
+  return waiting;
+}
+
+/**
+ * Is the pile at the origin still growing with the fleet that is on it?
+ *
+ * The question a haulier actually asks, and not the one this used to ask.
+ * Reading the stock once cannot distinguish a colliery filling up because
+ * nobody is collecting from one that is emptying because four drays already
+ * are — both show nine tonnes at the pithead. So a company saw a pile, bought
+ * a lorry, saw the same pile a moment later because the lorry had not reached
+ * it yet, bought another, and kept going: three vehicles to eight inside a
+ * year, haulage down from six hundred and seventy-eight pounds to ninety-
+ * eight, and everything sold again at half price the year after.
+ *
+ * Comparing against the pile at the last review answers it properly. If the
+ * heap is bigger than it was fifty days ago the fleet is not keeping up and
+ * another lorry has work; if it is level or falling, the fleet is already
+ * taking everything the ground produces and another lorry would only wait in
+ * the queue with the others.
+ *
+ * The rate-based version of this — fleet throughput against the works's
+ * production — was tried first and does not work, because throughput is
+ * vehicles times capacity over the round trip and adding a vehicle to a
+ * saturated route lengthens the round trip by about as much as the vehicle
+ * adds. The ratio barely moves and the test never trips.
+ */
+function routeHasSpareSupply(w: World, service: number, capacity: number): boolean {
+  const waiting = originStock(w, service);
+  if (waiting === Infinity) return true;
+  if (w.services.vehicles[service] === 0) return waiting >= capacity;
+
+  /*
+   * The reading has to span a whole round trip.
+   *
+   * With a hundred-and-thirty-day round trip and a fifty-day review, the pile
+   * grows between readings whatever the fleet is doing, because the drays are
+   * simply away. The company then buys on every review, empties the pit, and
+   * watches its haulage fall while its fodder bill rises. Comparing across a
+   * full cycle asks the right question: after everything on this route has
+   * been round once, is there still more waiting than there was?
+   */
+  const lap = w.services.roundTrip[service];
+  const window = Math.max(STOCK_REVIEW_DAYS * TICKS_PER_DAY, lap);
+  const since = w.tick - w.services.stockMarkTick[service];
+  if (since < window) {
+    // Between readings, hold. Buying on every think would empty the pit
+    // before the first lorry had come back to prove it could not.
+    return false;
+  }
+  const grew = waiting > w.services.stockMark[service] + capacity * 0.5;
+  w.services.stockMark[service] = waiting;
+  w.services.stockMarkTick[service] = w.tick;
+  return grew && waiting >= capacity;
 }
 
 function affordableVehicle(w: World, spendable: number, handling: Set<string>): number {

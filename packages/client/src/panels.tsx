@@ -664,7 +664,7 @@ export function CharterPanel({ engine }: { engine: Engine }): JSX.Element {
       ? [
           { label: 'Contracts delivered', have: w.companies.delivered[p], need: CHARTER_REQUIREMENTS.construction.contracts },
           { label: 'Revenue this year', have: revenue, need: CHARTER_REQUIREMENTS.construction.revenue },
-          { label: 'Cash in hand', have: w.companies.cash[p], need: CHARTER_REQUIREMENTS.construction.cash },
+          { label: 'What you are worth', have: w.netWorth(p), need: CHARTER_REQUIREMENTS.construction.cash },
         ]
       : have === 1
         ? [

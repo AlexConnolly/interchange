@@ -104,6 +104,18 @@ export class AssetTable {
    *  half-finished window cannot make an asset look worthless. */
   readonly passes = new Int32Array(MAX_ASSETS);
   readonly passesPrev = new Int32Array(MAX_ASSETS);
+  /*
+   * Passes by somebody who is not the owner — the only ones that pay.
+   *
+   * A toll road used exclusively by its owner's own lorries earns nothing at
+   * all, so buying by total traffic buys the busy road you are already on
+   * rather than the one other people need. Rent stayed at zero per cent of
+   * every company's income for the whole of a hundred-year run, which made
+   * the ownership spine look inert when what was actually happening was that
+   * everybody had bought their own road.
+   */
+  readonly foreignPasses = new Int32Array(MAX_ASSETS);
+  readonly foreignPassesPrev = new Int32Array(MAX_ASSETS);
   /** Access-charge revenue, same windowing. */
   readonly revenue = new Float64Array(MAX_ASSETS);
   readonly revenuePrev = new Float64Array(MAX_ASSETS);
@@ -126,6 +138,8 @@ export class AssetTable {
     this.tiles[id] = 0;
     this.passes[id] = 0;
     this.passesPrev[id] = 0;
+    this.foreignPasses[id] = 0;
+    this.foreignPassesPrev[id] = 0;
     this.revenue[id] = 0;
     this.revenuePrev[id] = 0;
     this.buildCost[id] = 0;
@@ -148,8 +162,10 @@ export class AssetTable {
   rollWindow(): void {
     for (let i = 0; i < this.count; i++) {
       this.passesPrev[i] = this.passes[i];
+      this.foreignPassesPrev[i] = this.foreignPasses[i];
       this.revenuePrev[i] = this.revenue[i];
       this.passes[i] = 0;
+      this.foreignPasses[i] = 0;
       this.revenue[i] = 0;
     }
   }
