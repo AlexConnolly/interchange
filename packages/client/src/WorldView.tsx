@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useRef } from 'react';
+import { actionFor, loadSettings, type Settings } from './settings.ts';
 import { OverlayMode } from '@interchange/render';
 import type { Engine } from './engine.ts';
 
@@ -34,6 +35,20 @@ export function WorldView({ engine, onPick, onHover, onDragStart, onDragMove, on
   // see the current callbacks rather than the ones from their closure.
   const handlers = useRef({ onPick, onHover, onDragStart, onDragMove, onDragEnd });
   handlers.current = { onPick, onHover, onDragStart, onDragMove, onDragEnd };
+  /*
+   * Bindings in a ref, and re-read when they change.
+   *
+   * The key handler is installed once, so it would otherwise capture whatever
+   * the settings were when the view mounted and go on obeying them after a
+   * rebind. A ref costs nothing and means a rebind takes effect on the next
+   * key press rather than on the next reload.
+   */
+  const settingsRef = useRef<Settings>(loadSettings());
+  useEffect(() => {
+    const reread = (): void => { settingsRef.current = loadSettings(); };
+    window.addEventListener('interchange:settings', reread);
+    return () => window.removeEventListener('interchange:settings', reread);
+  }, []);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -209,26 +224,41 @@ export function WorldView({ engine, onPick, onHover, onDragStart, onDragMove, on
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA')) return;
       const c = rr.camState;
-      switch (e.key) {
-        case 'q': case 'Q': c.rotation = (c.rotation + 3) % 4; break;
-        case 'e': case 'E': c.rotation = (c.rotation + 1) % 4; break;
-        case '=': case '+': c.view = clamp(c.view * 0.8, 12, 420); break;
-        case '-': case '_': c.view = clamp(c.view * 1.25, 12, 420); break;
-        case ' ': e.preventDefault(); engine.setSpeed(engine.world.speed === 0 ? 1 : 0); break;
-        case '1': engine.setSpeed(1); break;
-        case '2': engine.setSpeed(2); break;
-        case '3': engine.setSpeed(3); break;
-        case '4': engine.setSpeed(4); break;
-        case 'c': case 'C':
+      /*
+       * Through the binding table, not a switch on literal keys.
+       *
+       * The switch worked and could not be rebound, which made a Phase 1
+       * feature — settings and key rebinding — impossible without rewriting
+       * this. Actions are the stable thing and keys are what is bound to
+       * them, so this asks what the press *means* and then does it.
+       */
+      const action = actionFor(settingsRef.current, e.key);
+      if (action === null) return;
+      switch (action) {
+        case 'rotateLeft': c.rotation = (c.rotation + 3) % 4; break;
+        case 'rotateRight': c.rotation = (c.rotation + 1) % 4; break;
+        case 'zoomIn': c.view = clamp(c.view * 0.8, 12, 420); break;
+        case 'zoomOut': c.view = clamp(c.view * 1.25, 12, 420); break;
+        case 'pause': e.preventDefault(); engine.setSpeed(engine.world.speed === 0 ? 1 : 0); break;
+        case 'speed1': engine.setSpeed(1); break;
+        case 'speed2': engine.setSpeed(2); break;
+        case 'speed3': engine.setSpeed(3); break;
+        case 'speed4': engine.setSpeed(4); break;
+        case 'congestion':
           engine.setOverlay(rr.overlay === OverlayMode.Congestion ? OverlayMode.None : OverlayMode.Congestion);
           break;
-        case 'o': case 'O':
+        case 'ownership':
           engine.setOverlay(rr.overlay === OverlayMode.Ownership ? OverlayMode.None : OverlayMode.Ownership);
           break;
-        // Photo mode. Handled by dispatching rather than by threading state
-        // down here, because the camera keys belong to the view and the
-        // interface's visibility does not.
-        case 'p': case 'P':
+        case 'cargo':
+          engine.setOverlay(rr.overlay === OverlayMode.Cargo ? OverlayMode.None : OverlayMode.Cargo);
+          break;
+        case 'amenity':
+          engine.setOverlay(rr.overlay === OverlayMode.Amenity ? OverlayMode.None : OverlayMode.Amenity);
+          break;
+        // Photo mode is announced rather than handled: the camera keys belong
+        // to this view and the interface's visibility does not.
+        case 'photo':
           window.dispatchEvent(new CustomEvent('interchange:photo'));
           break;
         default: break;

@@ -503,3 +503,25 @@ table.data tr.click:hover { background: rgba(232, 230, 223, 0.055); cursor: poin
 }
 .photobar:hover { opacity: 1; }
 .photobar .stamp { font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+
+/*
+ * Accessibility settings. features.md 20.
+ *
+ * Two classes on the root rather than a theme system, because these are the
+ * two requests that actually arrive and each is a handful of declarations.
+ * Larger text scales the interface only: the world is drawn at its own scale
+ * and the player has a zoom for that.
+ */
+html.large-text { font-size: 17px; }
+html.large-text .panel .sub,
+html.large-text .kv dt,
+html.large-text .kv dd { font-size: 13px; }
+html.large-text .topbar .label { font-size: 10.5px; letter-spacing: 0.1em; }
+
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}

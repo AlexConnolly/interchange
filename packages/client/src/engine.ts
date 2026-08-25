@@ -22,6 +22,7 @@ import {
 import { OverlayMode, Renderer, hex, type RenderSource } from '@interchange/render';
 import { content } from '@interchange/data';
 import { Session } from './session.ts';
+import { loadSettings } from './settings.ts';
 
 export interface EngineEvent {
   kind: string;
@@ -60,6 +61,10 @@ export class Engine {
     // developer tools, which is worth more than any amount of logging when the
     // question is "why is that lorry sitting there".
     (globalThis as Record<string, unknown>).interchange = this;
+    globalThis.addEventListener?.('interchange:settings', () => {
+      this.settings = loadSettings();
+      this.revision++;
+    });
   }
 
   private wireWorld(): void {
@@ -120,6 +125,13 @@ export class Engine {
 
   /** The shared-world connection, or an idle one in single player. */
   session = new Session();
+
+  /*
+   * Presentation preferences. Never consulted by the simulation — see
+   * settings.ts, and determinism rule 6: nothing about how the world is drawn
+   * or driven may reach what the world does.
+   */
+  settings = loadSettings();
 
   issueAs(issuer: number, kind: number, a = 0, b = 0, c = 0, d = 0, data?: number[] | string): void {
     this.world.queue.push(cmd(this.world.tick + 2, issuer, kind, a, b, c, d, data));
@@ -404,8 +416,24 @@ export class Engine {
     // Tick zero is a quarter past eight in the morning, not midnight. The
     // calendar does not care, but a player whose first sight of the region is
     // a dark field does, and "1 Jan 1860" starting at dawn is also just true.
-    s.dayFraction = ((w.tick + TICKS_PER_DAY * 0.35) % TICKS_PER_DAY) / TICKS_PER_DAY;
-    s.season = Math.floor((w.month / 12) * 4) % 4;
+    /*
+     * Day and night, unless the player has asked for neither.
+     *
+     * art-direction.md 13 puts a hard floor on legibility — night is a mood
+     * and never a readability tax — and the honest way to keep that promise
+     * for everybody is to let it be turned off. Pinned to mid-morning when it
+     * is, which is the light the palette was drawn for.
+     */
+    s.dayFraction = this.settings.dayNight
+      ? ((w.tick + TICKS_PER_DAY * 0.35) % TICKS_PER_DAY) / TICKS_PER_DAY
+      : 0.35;
+    /*
+     * The season tints the land, which is the whole of "weather in the
+     * picture". With it off the palette stays at its spring reference — the
+     * simulation still has seasons and snow still shuts passes, so what is
+     * being turned off is the tint and not the world.
+     */
+    s.season = this.settings.weatherEffects ? Math.floor((w.month / 12) * 4) % 4 : 0;
     s.era = w.era;
     return s;
   }

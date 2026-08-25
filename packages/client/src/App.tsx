@@ -7,6 +7,8 @@ import { OverlayMode } from '@interchange/render';
 import { content } from '@interchange/data';
 import { Engine } from './engine.ts';
 import { Session } from './session.ts';
+import { SettingsPanel } from './Settings.tsx';
+import { loadSettings } from './settings.ts';
 import { WorldView, type Picked } from './WorldView.tsx';
 import { BuildPalette, CharterPanel, Contracts, Finance, Fleet, FleetList, Industries, Inspector, Objectives, Ownership, Saves, Services } from './panels.tsx';
 import { Reports } from './Reports.tsx';
@@ -207,6 +209,7 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
   const [hoverTile, setHoverTile] = useState(-1);
   const [showSaves, setShowSaves] = useState(false);
   const [showReports, setShowReports] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   /** features.md 19: photo mode. Everything the interface draws goes away and
    *  the world stays, which is the whole feature. */
   const [photo, setPhoto] = useState(false);
@@ -415,6 +418,7 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
           </div>
           <button className="btn" style={{ margin: 4 }} onClick={() => setShowDepot(true)}>Depot</button>
           <button className="btn" style={{ margin: '4px 4px 4px 0' }} onClick={() => setShowReports(true)}>Reports</button>
+          <button className="btn" style={{ margin: '4px 4px 4px 0' }} onClick={() => setShowSettings(true)} aria-label="Settings and key bindings">Settings</button>
           <button className="btn" style={{ margin: '4px 4px 4px 0' }} onClick={() => setShowSaves(true)}>Saves</button>
         </div>
 
@@ -514,6 +518,7 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
       {hover && <div className="tooltip" style={{ left: hover.x, top: hover.y - 10 }}>{hover.text}</div>}
       {showDepot && <Fleet engine={engine} onClose={() => setShowDepot(false)} />}
       {showReports && <Reports engine={engine} onClose={() => setShowReports(false)} />}
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
       {showSaves && (
         <Saves
           engine={engine}
