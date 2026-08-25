@@ -5,9 +5,7 @@
     "kind": "extraction",
     "deposit": 9,
     "recipe": {
-      "inputs": {
-        "feed": 2
-      },
+      "inputs": {},
       "outputs": {
         "milk": 5
       },
@@ -263,5 +261,79 @@
     "fromEra": 1,
     "kit": "yard",
     "colour": "#43506a"
+  },
+  {
+    "id": "livestock-farm",
+    "name": "Livestock farm",
+    "kind": "extraction",
+    "deposit": 9,
+    "recipe": {
+      "inputs": {
+        "feed": 3
+      },
+      "outputs": {
+        "livestock": 4
+      },
+      "period": 48
+    },
+    "footprint": 2,
+    "foundCost": 420000,
+    "powerNeed": 0,
+    "waterNeed": 0,
+    "labourNeed": 0,
+    "amenityPenalty": 6,
+    "amenityRadius": 4,
+    "fromEra": 1,
+    "kit": "farm",
+    "colour": "#a89a6e"
+  },
+  {
+    "id": "abattoir",
+    "name": "Abattoir",
+    "kind": "processing",
+    "deposit": 0,
+    "recipe": {
+      "inputs": {
+        "livestock": 5
+      },
+      "outputs": {
+        "meat": 4
+      },
+      "period": 36
+    },
+    "footprint": 3,
+    "foundCost": 1750000,
+    "powerNeed": 0,
+    "waterNeed": 0,
+    "labourNeed": 0,
+    "amenityPenalty": 30,
+    "amenityRadius": 9,
+    "fromEra": 1,
+    "kit": "works",
+    "colour": "#b9b3ab"
+  },
+  {
+    "id": "village-shop",
+    "name": "Village shop",
+    "kind": "terminal",
+    "deposit": 0,
+    "recipe": {
+      "inputs": {
+        "meat": 2,
+        "dairy": 2
+      },
+      "outputs": {},
+      "period": 30
+    },
+    "footprint": 1,
+    "foundCost": 260000,
+    "powerNeed": 0,
+    "waterNeed": 0,
+    "labourNeed": 0,
+    "amenityPenalty": 2,
+    "amenityRadius": 3,
+    "fromEra": 1,
+    "kit": "yard",
+    "colour": "#c8a95e"
   }
 ]

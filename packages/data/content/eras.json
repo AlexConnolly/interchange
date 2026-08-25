@@ -29,7 +29,10 @@
       "concrete-plant",
       "terminal",
       "builders-merchant",
-      "filling-station"
+      "filling-station",
+      "livestock-farm",
+      "abattoir",
+      "village-shop"
     ]
   }
 ]

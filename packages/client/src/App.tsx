@@ -12,12 +12,13 @@
  * right would be repeating the exact mistake the post-mortem is about.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  createWorld, InfluenceField, Mode, NO_WAY, TICKS_PER_DAY, SPEED_STEPS,
+  createWorld, Mode, NO_WAY, TICKS_PER_DAY, SPEED_STEPS, type World,
 } from '@interchange/sim';
 import { loadContent } from '@interchange/data';
 import { Renderer, RoadClass, TILES_ACROSS_DEFAULT, type RenderSource } from '@interchange/render';
+import { ContractPanel, Pins, money } from './Pins.tsx';
 import './style.css';
 
 loadContent();
@@ -42,7 +43,18 @@ function roadClassOf(cls: number, names: string[]): RoadClass {
 export function App(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [ready, setReady] = useState(false);
-  const [hud, setHud] = useState({ date: '', vehicles: 0, fps: 0, tris: 0 });
+  const [hud, setHud] = useState({ date: '', vehicles: 0, fps: 0, tris: 0, cash: 0, free: 0 });
+  const [live, setLive] = useState<{ world: World; renderer: Renderer } | null>(null);
+  const [open, setOpen] = useState(-1);
+  const [revision, setRevision] = useState(0);
+
+  const accept = useCallback((id: number): void => {
+    if (!live) return;
+    if (live.world.acceptContract(id, live.world.player)) {
+      setOpen(-1);
+      setRevision((r) => r + 1);
+    }
+  }, [live]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -70,8 +82,6 @@ export function App(): JSX.Element {
      * once: fog of war, the tutorial, the tech tree, and the reason you cannot
      * begin by driving into the city.
      */
-    const influence = new InfluenceField(DISTRICT);
-
     const src: RenderSource = {
       size: DISTRICT,
       height: world.terrain.height,
@@ -79,7 +89,7 @@ export function App(): JSX.Element {
       crop: world.terrain.fields.crop,
       hasRoad: (t) => roadClass[t] >= 0,
       isWater: (t) => world.terrain.height[t] <= 0,
-      influence: (t) => influence.at(t),
+      influence: (t) => world.influence.at(t),
       roadClass,
       level: layer.level,
       vehicleCount: 0,
@@ -110,7 +120,36 @@ export function App(): JSX.Element {
     renderer.camZ = clamp(world.towns.y[best] ?? DISTRICT / 2);
 
     // Where you begin: one small pocket, and nothing else visible.
-    influence.rebuild([{ x: renderer.camX, y: renderer.camZ, strength: 2.4 }]);
+    /*
+     * Where you begin: one small pocket round the yard, and nothing else
+     * visible. The yard is not a place yet, so the opening influence is seeded
+     * on the camera and the sites near it; step three replaces this with the
+     * yard itself.
+     */
+    world.refreshInfluence([{ x: renderer.camX, y: renderer.camZ, strength: 2.4 }]);
+
+    /*
+     * One truck, and enough for a second. design.md 1.
+     *
+     * You are not given a fleet, you are given the *first purchase*, and making
+     * it is what starts the loop. The truck starts at the nearest site to the
+     * yard because there is no yard yet — step three gives it one.
+     */
+    {
+      const vanIndex = world.content.vehicles.findIndex((v) => v.id === 'rigid-box');
+      let nearest = 0;
+      let best = Infinity;
+      for (let i = 0; i < world.sites.count; i++) {
+        const dx = world.sites.x[i] - renderer.camX;
+        const dy = world.sites.y[i] - renderer.camZ;
+        const d = dx * dx + dy * dy;
+        if (d < best) { best = d; nearest = i; }
+      }
+      world.companies.cash[world.player] = world.content.balance.startingCash;
+      if (vanIndex >= 0) world.buyVehicle(world.player, vanIndex, nearest);
+      // And work to do, straight away.
+      world.offerWorkNow();
+    }
     /*
      * A little wider than the reference framing.
      *
@@ -212,15 +251,23 @@ export function App(): JSX.Element {
       if (hudTick % 20 === 0) {
         const mean = frames.reduce((a, b) => a + b, 0) / Math.max(1, frames.length);
         const st = renderer.stats;
+        let free = 0;
+        for (let v = 0; v < world.vehicles.count; v++) {
+          if (world.vehicles.alive[v] && world.vehicles.company[v] === world.player
+            && world.vehicles.service[v] === -1) free++;
+        }
         setHud({
           date: world.dateString(),
           vehicles: n,
           fps: Math.round(1 / Math.max(1e-6, mean)),
           tris: st.triangles,
+          cash: world.companies.cash[world.player],
+          free,
         });
       }
     };
     raf = requestAnimationFrame(loop);
+    setLive({ world, renderer });
     setReady(true);
 
     return () => {
@@ -237,11 +284,28 @@ export function App(): JSX.Element {
   return (
     <div className="app">
       <canvas ref={canvasRef} className="world" />
+      {live && (
+        <Pins
+          world={live.world}
+          renderer={live.renderer}
+          revision={revision}
+          onOpen={setOpen}
+        />
+      )}
+      {live && open >= 0 && (
+        <ContractPanel
+          world={live.world}
+          contract={open}
+          onClose={() => setOpen(-1)}
+          onAccept={accept}
+        />
+      )}
       <div className="hud">
         <span className="brand">Interchange</span>
+        <span className="money">{money(hud.cash)}</span>
         <span>{hud.date}</span>
-        <span className="dim">{hud.vehicles} on the road</span>
-        <span className="dim">{hud.fps} fps · {(hud.tris / 1000).toFixed(0)}k tris</span>
+        <span className="dim">{hud.vehicles} out · {hud.free} idle</span>
+        <span className="dim">{hud.fps} fps</span>
       </div>
       {!ready && <div className="loading">Surveying the district…</div>}
     </div>

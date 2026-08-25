@@ -23,6 +23,8 @@ import {
 } from './economy.ts';
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
 import { Hasher } from './hash.ts';
+import { ContractBoard, ContractState, offerContracts } from './contracts.ts';
+import { InfluenceField, type InfluenceSource } from './influence.ts';
 import { AmenityField, stepAmenity, REMEDIATION_PRICE, REMEDIATION_FROM_ERA } from './amenity.ts';
 import {
   AssetTable, Graph, NONE, NO_WAY, WayLayer, hashNetwork, rebuildGraph,
@@ -118,6 +120,18 @@ export class World {
   readonly vehicleMode = new Uint8Array(256);
   private cargoPrice = new Int32Array(64);
   private recipes: RecipeTables;
+
+  /**
+   * Work on offer. design.md 2 — this is the interaction, not a route editor.
+   *
+   * Offers only appear inside the influence area, so the fog and the job board
+   * are the same mechanism seen twice: what you can see is what you can take,
+   * and there is never an offer you have to be told you cannot have.
+   */
+  readonly contractBoard = new ContractBoard();
+
+  /** What you can see, and therefore what you can work in. influence.ts. */
+  readonly influence: InfluenceField;
   /** What the region is like to be in, and what industry has done to it.
    *  design.md 2.3. */
   readonly amenity: AmenityField;
@@ -303,6 +317,7 @@ export class World {
     this.tileTonnes = new Float32Array(this.config.size * this.config.size);
     this.amenity = new AmenityField(this.config.size);
     this.router = new Router(MAX_COMPANIES, 100000);
+    this.influence = new InfluenceField(this.config.size);
   }
 
   // ------------------------------------------------------------- calendar
@@ -632,6 +647,7 @@ export class World {
     if (this.dayOfMonth === 0 && this.day > 0) this.companies.closeMonth();
     this.syncCargoRibbons();
     if (this.dayOfMonth === 0) this.stepAmenityField();
+    if (this.day % DAYS_PER_WEEK === 0) this.stepContractBoard();
   }
 
 
@@ -2202,6 +2218,141 @@ export class World {
     this.router.invalidate();
     this.onEvent?.('purchase', `${this.companies.names[buyer]} has bought ${this.content.ways[this.assets.cls[asset]].name.toLowerCase()} for ${(price / 100).toFixed(0)}.`);
     return true;
+  }
+
+  // ----------------------------------------------------------- contracts
+
+  /**
+   * What a site has spare, and who would want it.
+   *
+   * A contract exists because somebody has something and cannot move it. So
+   * "surplus" is the site's largest pile of anything it produces, and a buyer is
+   * anywhere that lists that cargo as an input. Both are one loop over tables
+   * that already exist — the point of the contract model is that it needs no new
+   * simulation, only a different way of asking.
+   */
+  private surplusAt(site: number): { cargo: number; tonnes: number } | null {
+    const outs = this.recipes.outputs[this.sites.def[site]];
+    let best = NONE;
+    let most = 0;
+    for (let i = 0; i < outs.length; i += 2) {
+      const cargo = outs[i];
+      const have = this.sites.stockOf(site, cargo);
+      if (have > most) {
+        most = have;
+        best = cargo;
+      }
+    }
+    return best === NONE ? null : { cargo: best, tonnes: most };
+  }
+
+  private buyerFor(cargo: number, notSite: number): number {
+    let best = NONE;
+    let room = 0;
+    const cargoCount = this.content.cargo.length;
+    for (let s = 0; s < this.sites.count; s++) {
+      if (s === notSite) continue;
+      const ins = this.recipes.inputs[this.sites.def[s]];
+      let takes = false;
+      for (let i = 0; i < ins.length; i += 2) {
+        if (ins[i] === cargo) { takes = true; break; }
+      }
+      if (!takes) continue;
+      const spare = this.sites.capacity[s * cargoCount + cargo] - this.sites.stockOf(s, cargo);
+      if (spare > room) {
+        room = spare;
+        best = s;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Put work on the board now.
+   *
+   * Public because the game must not open with an empty board: the first thing
+   * a player sees has to be something to do, and waiting for the first week
+   * boundary means the opening screen is a pretty field and no game.
+   */
+  offerWorkNow(): void {
+    this.stepContractBoard();
+  }
+
+  private stepContractBoard(): void {
+    offerContracts(this.contractBoard, {
+      tick: this.tick,
+      siteCount: this.sites.count,
+      siteTile: (s) => this.siteAccessTile[s],
+      siteX: (s) => this.sites.x[s],
+      siteY: (s) => this.sites.y[s],
+      usable: (tile) => tile !== NONE && this.influence.usable(tile),
+      surplus: (s) => this.surplusAt(s),
+      buyerFor: (cargo, not) => this.buyerFor(cargo, not),
+      rate: (cargo, distance) =>
+        haulageRate(this.cargoPrice[cargo], distance, this.cargoRateWeight[cargo]),
+    }, 5);
+  }
+
+  /**
+   * Take a contract on.
+   *
+   * Makes an ordinary two-stop service under the hood, because that is what a
+   * contract is, and assigns a vehicle if one is free. The player never sees the
+   * word service: they see a truck put on a job.
+   */
+  acceptContract(id: number, company: number): boolean {
+    const b = this.contractBoard;
+    if (id < 0 || id >= b.count || b.state[id] !== ContractState.Offered) return false;
+    const from = b.from[id];
+    const to = b.to[id];
+    if (from === NONE || to === NONE) return false;
+
+    const svc = this.services.alloc(company, this.content.industries[this.sites.def[from]].name);
+    if (svc === NONE) return false;
+    this.services.addStop(svc, from, 0, StopAction.LoadFull, b.cargo[id]);
+    this.services.addStop(svc, to, 0, StopAction.Unload, b.cargo[id]);
+    this.services.active[svc] = 1;
+    b.service[id] = svc;
+    b.state[id] = ContractState.Idle;
+
+    // Any idle truck of ours takes it.
+    for (let v = 0; v < this.vehicles.count; v++) {
+      if (!this.vehicles.alive[v]) continue;
+      if (this.vehicles.company[v] !== company) continue;
+      if (this.vehicles.service[v] !== NONE) continue;
+      this.assignVehicle(v, svc, company);
+      b.state[id] = ContractState.Running;
+      break;
+    }
+    this.rebuild();
+    return true;
+  }
+
+  /** Give a contract up. The truck comes off it and it goes back on the board. */
+  dropContract(id: number, company: number): boolean {
+    const b = this.contractBoard;
+    if (id < 0 || id >= b.count) return false;
+    const svc = b.service[id];
+    if (svc === NONE || this.services.company[svc] !== company) return false;
+    for (let v = 0; v < this.vehicles.count; v++) {
+      if (this.vehicles.alive[v] && this.vehicles.service[v] === svc) {
+        this.vehicles.service[v] = NONE;
+        this.vehicles.state[v] = VState.Idle;
+      }
+    }
+    this.services.active[svc] = 0;
+    b.release(id);
+    return true;
+  }
+
+  /** Rebuild the influence area from the yards and places you hold. */
+  refreshInfluence(extra: InfluenceSource[] = []): void {
+    const sources: InfluenceSource[] = [...extra];
+    for (let s = 0; s < this.sites.count; s++) {
+      if (this.sites.owner[s] !== this.player) continue;
+      sources.push({ x: this.sites.x[s], y: this.sites.y[s], strength: 1.5 });
+    }
+    this.influence.rebuild(sources);
   }
 
   // ------------------------------------------------------------- hashing

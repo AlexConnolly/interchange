@@ -366,6 +366,56 @@ export class Renderer {
     this.renderer.render(this.scene, this.camera);
   }
 
+  /**
+   * Where a place on the ground lands on the screen.
+   *
+   * Contract pins are DOM, not geometry, and deliberately: a pin is UI — it
+   * wants crisp text, a pointer cursor and a click handler, and all three are
+   * free in HTML and a project in WebGL. The renderer's only job is to say where
+   * to put it.
+   *
+   * Returns null when the point is behind the camera or off the frame, so the
+   * caller can simply not render that pin rather than clamping it to an edge —
+   * a pin pinned to the edge of the screen points at nothing.
+   */
+  project(x: number, groundHeight: number, z: number): { x: number; y: number } | null {
+    this.tmpVec.set(x, HEIGHT_TO_WORLD(Math.max(0, groundHeight)), z);
+    this.tmpVec.project(this.camera);
+    if (this.tmpVec.z < -1 || this.tmpVec.z > 1) return null;
+    if (this.tmpVec.x < -1.1 || this.tmpVec.x > 1.1) return null;
+    if (this.tmpVec.y < -1.1 || this.tmpVec.y > 1.1) return null;
+    const w = this.renderer.domElement.clientWidth;
+    const h = this.renderer.domElement.clientHeight;
+    return {
+      x: (this.tmpVec.x * 0.5 + 0.5) * w,
+      y: (-this.tmpVec.y * 0.5 + 0.5) * h,
+    };
+  }
+
+  private readonly tmpVec = new Vector3();
+
+  /** Which tile the pointer is over, by intersecting the ground plane. */
+  pick(screenX: number, screenY: number, src: RenderSource): number {
+    const w = this.renderer.domElement.clientWidth;
+    const h = this.renderer.domElement.clientHeight;
+    const ndcX = (screenX / w) * 2 - 1;
+    const ndcY = -((screenY / h) * 2 - 1);
+    // Unproject onto the plane the camera is aimed at. Orthographic, so no ray
+    // divergence to worry about — one unproject and one plane intersection.
+    this.tmpVec.set(ndcX, ndcY, -1).unproject(this.camera);
+    const dir = this.camera.getWorldDirection(this.tmpDir);
+    if (Math.abs(dir.y) < 1e-6) return -1;
+    const t = (this.camY - this.tmpVec.y) / dir.y;
+    const wx = this.tmpVec.x + dir.x * t;
+    const wz = this.tmpVec.z + dir.z * t;
+    const tx = Math.floor(wx);
+    const tz = Math.floor(wz);
+    if (tx < 0 || tz < 0 || tx >= src.size || tz >= src.size) return -1;
+    return tz * src.size + tx;
+  }
+
+  private readonly tmpDir = new Vector3();
+
   get stats(): { chunks: number; calls: number; triangles: number } {
     const info = this.renderer.info.render;
     return { chunks: this.chunks.size, calls: info.calls, triangles: info.triangles };

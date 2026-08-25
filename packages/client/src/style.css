@@ -71,3 +71,108 @@ html, body, #root, .app {
   font-size: 14px;
   background: #bcd0e0;
 }
+
+/* ------------------------------------------------------------------ pins
+ *
+ * A map marker over a place with work going. Pointer-events on the button only,
+ * so the pin is clickable and the world behind it still pans.
+ */
+.pin {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  filter: drop-shadow(0 2px 4px rgba(30, 40, 30, 0.28));
+}
+.pin-body {
+  width: 26px;
+  height: 26px;
+  border-radius: 50% 50% 50% 50%;
+  background: #f0c04a;
+  color: #3a2f14;
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 26px;
+  text-align: center;
+  border: 2px solid #fff8e4;
+}
+/* The point of the marker. A triangle, so it indicates a spot rather than
+   hovering vaguely near one. */
+.pin-tail {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 7px solid #fff8e4;
+  margin-top: -2px;
+}
+.pin:hover .pin-body { background: #ffd469; }
+
+/* ----------------------------------------------------------------- panel */
+.panel {
+  position: absolute;
+  right: 18px;
+  top: 76px;
+  width: 268px;
+  border-radius: 14px;
+  background: rgba(246, 241, 230, 0.94);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 26px rgba(30, 40, 30, 0.20);
+  color: var(--ink);
+  font-size: 13px;
+  overflow: hidden;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 8px;
+}
+.panel-title { font-weight: 600; flex: 1; }
+.x {
+  border: 0;
+  background: none;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--ink-dim);
+  cursor: pointer;
+  padding: 0 2px;
+}
+.panel-body { padding: 0 14px 14px; }
+.offer-line { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.panel dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0 0 12px;
+}
+.panel dt { color: var(--ink-dim); }
+.panel dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.note {
+  color: #8a5a2a;
+  background: rgba(240, 192, 74, 0.16);
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+.actions { display: flex; gap: 8px; }
+.btn {
+  border: 1px solid var(--edge);
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--ink);
+  padding: 8px 14px;
+  border-radius: 9px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn.primary { background: #f0c04a; border-color: #d9a72e; font-weight: 600; }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.money { font-weight: 600; font-variant-numeric: tabular-nums; }

@@ -97,5 +97,27 @@
     "basePrice": 760,
     "fromEra": 1,
     "colour": "#3f4a63"
+  },
+  {
+    "id": "livestock",
+    "name": "Livestock",
+    "tier": "extraction",
+    "handling": "general",
+    "density": 40,
+    "perishability": 18,
+    "basePrice": 900,
+    "fromEra": 1,
+    "colour": "#b98a63"
+  },
+  {
+    "id": "meat",
+    "name": "Meat",
+    "tier": "processing",
+    "handling": "refrigerated",
+    "density": 66,
+    "perishability": 40,
+    "basePrice": 1500,
+    "fromEra": 1,
+    "colour": "#b6544f"
   }
 ]

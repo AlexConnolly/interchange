@@ -531,7 +531,16 @@ export const RATE_WEIGHT_BY_TIER: Record<string, number> = { passenger: 0.11 };
 
 /** Pence per tonne of carriage at the reference distance. The single number
  *  that moves every haulage rate in the game, so the sweep starts here. */
-export const HAUL_BASE = 560;
+/*
+ * The tariff, and it is set from the pace of the game rather than from any real
+ * rate card.
+ *
+ * The target is that one truck on one contract earns enough to buy a second in
+ * a couple of months of play - fast enough that the loop turns over, slow enough
+ * that the purchase is a decision. At 560 a 7.5-tonne load over twenty-six tiles
+ * paid a hundred and seventeen pounds, which was about half of what that needs.
+ */
+export const HAUL_BASE = 1180;
 
 /**
  * How much further than the direct line a haul may be paid for.
