@@ -23,6 +23,7 @@ import {
 import { Alerts, Earnings, Markers, Mine, money } from './Markers.tsx';
 import { Ambient, areaDemand } from './ambient.ts';
 import { eveningFor, litness, type Evening } from './evening.ts';
+import { Sound, type Heard } from './sound.ts';
 import { Fleet, Yard } from './Fleet.tsx';
 import { Planning } from './Planning.tsx';
 import { Dock } from './Dock.tsx';
@@ -35,6 +36,16 @@ import './style.css';
 loadContent();
 
 const DISTRICT = 128;
+
+/**
+ * One audio engine for the page.
+ *
+ * Outside the component because an `AudioContext` is a scarce resource — a
+ * browser allows a handful per tab and then refuses — and React may mount a
+ * component more than once. It is silent until `start()` is called from a user
+ * gesture, which browsers require.
+ */
+const sound = new Sound();
 
 /**
  * The scatter models, in the order the source's `sModel` indexes them.
@@ -172,6 +183,7 @@ export function App(): JSX.Element {
    * coordinate picker in it would be the worst of both.
    */
   const [building, setBuilding] = useState(false);
+  const [muted, setMuted] = useState(sound.isMuted);
   const [note, setNote] = useState('');
   const [revision, setRevision] = useState(0);
   const bump = useCallback(() => setRevision((r) => r + 1), []);
@@ -274,6 +286,20 @@ export function App(): JSX.Element {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    /*
+     * Where in the day the game opens, overridable from the address bar.
+     *
+     * 0.46 is the late afternoon of the target frame. `?time=0.85` starts at
+     * night, which exists because checking anything about the dark — lamps,
+     * cat's eyes, lit windows — otherwise means waiting out a four-minute day,
+     * and a thing that is awkward to look at is a thing that stays broken.
+     */
+    const params = new URLSearchParams(window.location.search);
+    const asked = Number(params.get('time'));
+    const dayOffset = Number.isFinite(asked) && params.has('time')
+      ? ((asked % 1) + 1) % 1
+      : 0.46;
 
     const world = createWorld({
       seed: 1985, size: DISTRICT, townCount: 3, companyCount: 1,
@@ -615,6 +641,11 @@ export function App(): JSX.Element {
     }
 
     const renderer = new Renderer(canvas);
+    // `?rain=1` for a downpour, `?rain=0.4` for a shower. See `forceRain`.
+    if (params.has('rain')) {
+      const r = Number(params.get('rain'));
+      if (Number.isFinite(r)) renderer.forceRain = Math.max(0, Math.min(1, r));
+    }
     /*
      * Open on the largest settlement, well inside the map.
      *
@@ -635,20 +666,6 @@ export function App(): JSX.Element {
      * largest settlement and trusting the generator gave a valley of quarries
      * and sawmills with no dairy anywhere in it.
      */
-    /*
-     * Where in the day the game opens, overridable from the address bar.
-     *
-     * 0.46 is the late afternoon of the target frame. `?time=0.85` starts at
-     * night, which exists because checking anything about the dark — lamps,
-     * cat's eyes, lit windows — otherwise means waiting out a four-minute day,
-     * and a thing that is awkward to look at is a thing that stays broken.
-     */
-    const params = new URLSearchParams(window.location.search);
-    const asked = Number(params.get('time'));
-    const dayOffset = Number.isFinite(asked) && params.has('time')
-      ? ((asked % 1) + 1) % 1
-      : 0.46;
-
     const opening = world.planOpening();
     const inset = DISTRICT * 0.3;
     const clamp = (v: number): number => Math.max(inset, Math.min(DISTRICT - inset, v));
@@ -1018,11 +1035,39 @@ export function App(): JSX.Element {
       live.delete(e.pointerId);
       dragging = false;
     };
+    /*
+     * Audio starts on the first touch of anything, and clicks come from one
+     * listener rather than from every button.
+     *
+     * A browser will not begin audio without a gesture, and a context created
+     * before one sits in `suspended` and silently never plays. Hanging the start
+     * off the first pointer or key event anywhere means it happens whatever the
+     * player does first.
+     *
+     * The click is delegated on the document for the same reason a dozen
+     * components should not each remember to make a noise: `closest('button')`
+     * catches the dock, the panels, the markers and anything added later, and
+     * a control that should be silent can opt out with `data-quiet`.
+     */
+    const wake = (e: Event): void => {
+      void sound.start();
+      const el = (e.target as HTMLElement | null)?.closest?.('button');
+      if (el && !el.hasAttribute('data-quiet') && !el.hasAttribute('disabled')) {
+        sound.oneShot(el.classList.contains('primary') ? 'confirm' : 'click', 0.5);
+      }
+    };
+    window.addEventListener('pointerdown', wake);
+    window.addEventListener('keydown', wake);
+
     canvas.addEventListener('pointerdown', down);
     canvas.addEventListener('pointermove', move);
     canvas.addEventListener('pointerup', up);
     canvas.addEventListener('pointercancel', cancel);
     canvas.addEventListener('wheel', wheel, { passive: false });
+
+    // Reused every frame: allocating thirty objects sixty times a second to hand
+    // the same information to the mixer is pure garbage.
+    const heard: Heard[] = [];
 
     let raf = 0;
     let last = performance.now();
@@ -1233,6 +1278,34 @@ export function App(): JSX.Element {
       renderer.render(src, dt);
 
       /*
+       * The sound, after the render, because it wants the camera the frame was
+       * actually drawn with.
+       *
+       * The listener sits at the point the camera is *looking at* rather than
+       * where it is: the camera is four hundred feet up and forty degrees back,
+       * and putting the ears there would attenuate everything to nothing. What
+       * the player is looking at is what they should be able to hear.
+       */
+      sound.listenAt(renderer.camX, renderer.camY, renderer.camZ);
+      heard.length = 0;
+      for (let i = 0; i < src.vehicleCount; i++) {
+        const model = src.vModel[i];
+        heard.push({
+          id: src.vId[i],
+          x: src.vx[i],
+          z: src.vz[i],
+          // The two cars are the last two models in the fleet list.
+          light: model >= modelNames.length - 2,
+        });
+      }
+      sound.engines(heard, renderer.camX, renderer.camZ);
+      sound.maybeHorn(heard, renderer.camX, renderer.camZ, now);
+      // Wind always, a little more of it when it is blowing up; rain only when
+      // it is actually raining.
+      sound.ambientLevel('wind', 0.10 + renderer.cloud * 0.16);
+      sound.ambientLevel('rain', renderer.rain * 0.55);
+
+      /*
        * The HUD, four times a second, by clock rather than by frame count.
        *
        * Every twentieth frame sounds equivalent and is not: a backgrounded tab
@@ -1278,6 +1351,8 @@ export function App(): JSX.Element {
       window.removeEventListener('keydown', keyDown);
       window.removeEventListener('keyup', keyUp);
       window.removeEventListener('blur', blur);
+      window.removeEventListener('pointerdown', wake);
+      window.removeEventListener('keydown', wake);
       renderer.dispose();
     };
   }, []);
@@ -1404,6 +1479,12 @@ export function App(): JSX.Element {
             dayFraction={hud.dayFraction}
             night={hud.night}
             weather={hud.weather}
+            muted={muted}
+            onMute={() => {
+              sound.setMuted(!muted);
+              setMuted(!muted);
+              void sound.start();
+            }}
           />
         )}
       </div>

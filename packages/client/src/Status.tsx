@@ -56,7 +56,7 @@ function DayRing({ fraction, night }: { fraction: number; night: number }): JSX.
 }
 
 export function Status({
-  cash, date, out, idle, dayFraction, night, weather,
+  cash, date, out, idle, dayFraction, night, weather, muted, onMute,
 }: {
   cash: number;
   date: string;
@@ -65,6 +65,8 @@ export function Status({
   dayFraction: number;
   night: number;
   weather: number;
+  muted: boolean;
+  onMute: () => void;
 }): JSX.Element {
   return (
     <>
@@ -90,6 +92,32 @@ export function Status({
           </span>
         </div>
         <DayRing fraction={dayFraction} night={night} />
+        {/*
+          * A mute button, and it is not optional politeness.
+          *
+          * A game that makes noise with no way to stop it is one the player
+          * closes rather than mutes. `data-quiet` so pressing it does not itself
+          * click — which, unmuting, would be the one click you did not ask for.
+          */}
+        <button
+          className={`mute ${muted ? 'off' : ''}`}
+          onClick={onMute}
+          data-quiet
+          aria-label={muted ? 'Sound off' : 'Sound on'}
+          title={muted ? 'Sound off' : 'Sound on'}
+        >
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M4 9.6h3.4L13 5v14L7.4 14.4H4Z" />
+            {muted
+              ? <path d="M16.2 9.1l1.3-1.3 4.2 4.2-1.3 1.3Zm5.5 0l-1.3-1.3-4.2 4.2 1.3 1.3Z" />
+              : (
+                <>
+                  <path d="M15.6 8.6a5 5 0 0 1 0 6.8l1.3 1.3a7 7 0 0 0 0-9.4Z" />
+                  <path d="M18.3 5.9a8.8 8.8 0 0 1 0 12.2l1.3 1.3a10.8 10.8 0 0 0 0-14.8Z" />
+                </>
+              )}
+          </svg>
+        </button>
       </div>
     </>
   );

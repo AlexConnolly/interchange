@@ -20,6 +20,19 @@
  * has people in it rather than buildings.
  */
 
+/**
+ * A clock hour as a fraction of the day.
+ *
+ * The sun peaks at 0.25 and is lowest at 0.75 (see `placeSun`), so 0 is six in
+ * the morning and the mapping is `hour = 24t + 6`. Inverted here, because every
+ * time this was written as a bare fraction it came out wrong: 0.88 looks like
+ * late evening and is a quarter past three in the morning.
+ *
+ * Hours past midnight run on — `HOUR(26)` is two the following morning — which
+ * is what a bedtime past midnight needs, and the wrap is handled in `isLit`.
+ */
+export const HOUR = (h: number): number => (h - 6) / 24;
+
 /** Warm tungsten, before each house varies it. Matches WINDOW in build_places.py. */
 const BULB: [number, number, number] = [1.0, 0.72, 0.34];
 
@@ -56,20 +69,32 @@ export interface Evening {
 /**
  * Decide a building's evening, once.
  *
- * The windows are `0.52..0.66` — a spread of about a fortieth of the day, which
- * at four real minutes a day is six seconds of village lighting up one house at
- * a time, and that staggering is most of what makes it read as people rather
- * than as a switch. Bedtimes run `0.88..1.04`, so some go dark before midnight
- * and some burn past it, which needs the wrap-around test in `isLit`.
+ * Lights come on between six and half past eight in the evening — a spread of
+ * about a tenth of the day, which at four real minutes a day is twenty seconds
+ * of village lighting up one house at a time, and that staggering is most of
+ * what makes it read as people rather than as a switch.
  *
- * The figures are anchored on the sun: dusk falls around 0.54 and dawn comes up
- * around 0.96, so a house lighting up at 0.52 is switching on just as the light
- * goes, and one still lit at 1.04 is up before dawn.
+ * They go off between ten and two, weighted hard toward ten and eleven. So the
+ * village is at its brightest through the evening, thins out around midnight,
+ * and a couple of windows are still burning in the small hours.
  */
 export function eveningFor(x: number, z: number, seed: number): Evening {
   const dark = hash(x, z, seed, 7) < 0.10;
-  const on = 0.52 + hash(x, z, seed, 11) * 0.14;
-  const off = 0.88 + hash(x, z, seed, 13) * 0.16;
+  const on = HOUR(18) + hash(x, z, seed, 11) * (HOUR(20.4) - HOUR(18));
+  /*
+   * Bedtime, skewed early — and the first version of this was simply wrong.
+   *
+   * It ran 0.88 to 1.04, which converts to between three and seven in the
+   * morning: the whole village sitting up all night, every night. The figures
+   * looked plausible as fractions and were absurd as times, which is exactly the
+   * hazard of writing a clock in fractions of a day and never converting.
+   *
+   * Hence `HOUR`. Ten at night to two in the morning, and cubed so the mass of
+   * it lands near ten and eleven with a thin tail out to two — "most of them
+   * should sit within that window between six and eleven".
+   */
+  const late = hash(x, z, seed, 13);
+  const off = HOUR(22) + late * late * late * (HOUR(26) - HOUR(22));
   // Warmer or cooler by a few per cent, and the green channel moves most: that
   // is the axis a tungsten bulb actually varies along as it ages, and it is the
   // one the eye reads as "warmer" rather than as "a different colour".

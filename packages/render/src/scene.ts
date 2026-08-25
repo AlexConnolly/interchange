@@ -37,6 +37,7 @@ import { buildGround, toMesh, HEIGHT_TO_WORLD, type GroundSource } from './groun
 import { Mesh } from './geometry.ts';
 import { buildRoads, buildCatsEyes, type RoadSource } from './roads.ts';
 import type { Model } from './glb.ts';
+import { Precipitation } from './weather.ts';
 import { LIVERY, NIGHT, SKY, SNOW, type RGB } from './palette.ts';
 
 export { HEIGHT_TO_WORLD };
@@ -187,6 +188,7 @@ export class Renderer {
    * maps and would be the whole frame budget for one window.
    */
   private readonly lampPool: PointLight[] = [];
+  private readonly precipitation: Precipitation;
   private readonly chunks = new Map<number, Chunk>();
   private readonly fleet = new Group();
   /** Batches indexed [model][livery], for bodies and for lamps. */
@@ -353,6 +355,7 @@ export class Renderer {
     this.scene.add(this.fleet);
     this.scene.add(this.places);
     this.scene.add(this.scatter);
+    this.precipitation = new Precipitation(this.scene);
   }
 
   resize(w: number, h: number): void {
@@ -624,6 +627,18 @@ export class Renderer {
     CLOUD_AMOUNT.value = amount;
     this.cloud = amount;
 
+    /*
+     * It only rains when it is properly overcast.
+     *
+     * Rain keyed straight off cloud cover would mean permanent drizzle, because
+     * cover sits around a half most of the time. Thresholding at three quarters
+     * makes rain an *event* — a few hours of a day, several days apart — which is
+     * what makes it worth looking at when it happens.
+     */
+    this.rain = this.forceRain >= 0
+      ? this.forceRain
+      : Math.max(0, Math.min(1, (amount - 0.74) / 0.20));
+
     // Cloud softens the sun and raises the ambient. A covered sky with hard
     // shadows under it is the tell that weather has been painted on.
     this.sun.intensity *= 1 - amount * 0.30;
@@ -633,6 +648,19 @@ export class Renderer {
   private drift = 0;
   /** How overcast it is, 0..1. Read by the client for the sky. */
   cloud = 0.5;
+  /** How hard it is coming down, 0..1. Read by the client for the sound. */
+  rain = 0;
+  /** True when what is falling is snow. Winter turns rain into snow. */
+  snowing = false;
+  /**
+   * Override the weather, or -1 to let it do as it likes.
+   *
+   * The same affordance as the clock override, for the same reason: rain is a
+   * few hours of a day several days apart, so waiting for one means twenty
+   * minutes of watching a field. A thing that is awkward to look at is a thing
+   * that stays broken.
+   */
+  forceRain = -1;
 
   /** How far into the night, 0..1. Read by the glow pass, and by the clock. */
   night = 0;
@@ -1325,6 +1353,16 @@ export class Renderer {
     this.setWeather(src.dayFraction, src.dayNumber, dt);
     // After the sun and the weather, because it reads `this.night`.
     this.placeLights(src);
+    /*
+     * A shower in winter falls as snow, which needs saying rather than assuming:
+     * the two are the same weather and only the temperature differs.
+     */
+    this.snowing = src.snow > 0.35;
+    this.precipitation.update(
+      dt, this.camX, this.camY, this.camZ,
+      this.snowing ? 0 : this.rain,
+      this.snowing ? this.rain : 0,
+    );
     this.placeCamera();
     this.renderer.render(this.scene, this.camera);
   }

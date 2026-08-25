@@ -894,3 +894,23 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 }
 /* And nothing in the interface should be draggable-selectable on a phone. */
 .dock, .hud, .bubble { -webkit-user-select: none; user-select: none; }
+
+/* The mute button. Quiet-looking on purpose: it wants to be findable and never
+   to be the thing you notice. */
+.mute {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: #8b8577;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.mute:hover { background: rgba(0, 0, 0, 0.06); color: #3a352c; }
+.mute.off { color: #c07a5a; }
+/* The readout does not take clicks, but the button inside it must. */
+.purse, .clock { pointer-events: auto; }
