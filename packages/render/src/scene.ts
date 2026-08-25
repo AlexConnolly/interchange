@@ -36,6 +36,7 @@ import {
 import {
   buildGround, groundHeightAt, toMesh, HEIGHT_TO_WORLD, type GroundSource,
 } from './ground.ts';
+import { makeAir, type Air } from './air.ts';
 import { Mesh } from './geometry.ts';
 import { buildRoads, buildCatsEyes, type RoadSource } from './roads.ts';
 import type { Model } from './glb.ts';
@@ -272,6 +273,9 @@ export class Renderer {
   private readonly kicker: DirectionalLight;
   private readonly fog: Fog;
   private readonly motes: Motes;
+
+  /** Mist, chimney smoke and exhaust. See `air.ts`. */
+  private readonly air: Air;
   private composed: Composed | null = null;
   private mood: Mood = moodAt(1, 0);
   /** The sun's height, 0 at the horizon and 1 overhead. Written by `placeSun`. */
@@ -498,6 +502,7 @@ export class Renderer {
     this.scene.fog = this.fog;
     this.motes = makeMotes();
     this.scene.add(this.motes.points);
+    this.air = makeAir(this.scene);
     for (let i = 0; i < LAMP_POOL; i++) {
       // Distance rather than decay: a physically correct inverse-square falloff
       // at this scale puts everything either blown out or black, because a tile
@@ -1936,6 +1941,26 @@ export class Renderer {
       dt, this.elapsed, this.camX, this.camZ,
       this.vfx === 'high' ? (1 - this.snowDepth) * (1 - this.night * 0.8) : 0,
     );
+
+    /*
+     * The air, which is the mist and the smoke and the exhaust.
+     *
+     * Half strength on reduced rather than off, unlike the motes: pollen in the
+     * sunbeams is decoration and the first thing that should go, but a village
+     * with no smoke over it and a morning with no fog in it are missing
+     * *content*. `pixelsPerTile` rather than a scale factor because points under
+     * an orthographic camera have to be sized in pixels — see `air.ts`.
+     */
+    this.air.step(src, {
+      camX: this.camX,
+      camZ: this.camZ,
+      tilesAcross: this.tilesAcross,
+      pixelsPerTile: this.width / this.tilesAcross,
+      dayFraction: src.dayFraction,
+      night: this.night,
+      snow: this.snowDepth,
+      level: this.vfx === 'high' ? 1 : this.vfx === 'low' ? 0.5 : 0,
+    }, dt, this.elapsed);
 
     if (this.vfx === 'off' || !this.composed) {
       this.renderer.render(this.scene, this.camera);

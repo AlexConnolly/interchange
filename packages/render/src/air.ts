@@ -1,0 +1,494 @@
+/**
+ * The air: mist, smoke and exhaust.
+ *
+ * Ported from Tribewars' `ambient.ts`, which is where the idea belongs — a
+ * valley whose only motion is your own army reads as a diorama, and a district
+ * whose only motion is your own lorries reads as a model railway. What fixes it
+ * is not more things, it is *continuous* things: something drifting, something
+ * rising, something the wind is doing whether or not you are looking.
+ *
+ * None of it is gameplay and none of it may ever tell you anything. Smoke over a
+ * building must not mean the building is working, or it becomes a readout, and a
+ * readout that only appears in certain weather is a bad readout.
+ *
+ * Everything here is pooled and camera-local: one `BufferGeometry` and one draw
+ * call per field, particles recycled rather than allocated, and nothing emitted
+ * outside the frame. The cost is set by what is on screen and not by how big the
+ * district is.
+ *
+ * ## Point size under an orthographic camera
+ *
+ * Three's `sizeAttenuation` divides the point size by the view-space depth,
+ * which is the correct perspective formula and completely wrong here: this
+ * camera is orthographic, so depth has nothing to do with apparent size and a
+ * particle would shrink as it moved *away across a flat field*. The sizes below
+ * are therefore in **tiles**, converted to pixels once a frame from the zoom —
+ * which is exact rather than approximately right, and has the side effect that a
+ * bank of mist stays the same size in the world as you zoom into it.
+ */
+
+import {
+  AdditiveBlending, BufferAttribute, BufferGeometry, CanvasTexture, Color,
+  NormalBlending, Points, PointsMaterial, Scene, type Texture,
+} from 'three';
+import { groundHeightAt, type GroundSource } from './ground.ts';
+
+/**
+ * A soft round dot, drawn once and shared.
+ *
+ * A bare `PointsMaterial` draws hard squares. That is survivable for a spark and
+ * hopeless for smoke: a column of grey squares reads as a rendering fault, not
+ * as a fire. The falloff is deliberately not linear — a linear gradient still
+ * has a visible edge where it reaches zero, and the whole job of this texture is
+ * that there is no edge anywhere.
+ */
+let DOT: Texture | null = null;
+
+function softDot(): Texture {
+  if (DOT) return DOT;
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 64;
+  const x = c.getContext('2d');
+  if (x) {
+    const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.42, 'rgba(255,255,255,0.5)');
+    g.addColorStop(0.75, 'rgba(255,255,255,0.12)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = g;
+    x.fillRect(0, 0, 64, 64);
+  }
+  DOT = new CanvasTexture(c);
+  return DOT;
+}
+
+/**
+ * How a particle moves and how it fades, given its age.
+ *
+ * `k` is 1 at birth and 0 at death, which is the only clock a particle has. It
+ * returns the alpha rather than writing it, because every field wants a
+ * different curve and none of them wants to remember which array it lives in.
+ */
+type Behave = (
+  f: FieldArrays, i: number, k: number, dt: number, time: number,
+) => number;
+
+interface FieldArrays {
+  pos: Float32Array;
+  vel: Float32Array;
+  seed: Float32Array;
+}
+
+/** One pooled cloud of particles. One geometry, one draw call. */
+class Field {
+  readonly points: Points;
+
+  private readonly pos: Float32Array;
+
+  private readonly vel: Float32Array;
+
+  private readonly life: Float32Array;
+
+  private readonly max: Float32Array;
+
+  private readonly seed: Float32Array;
+
+  private readonly alpha: Float32Array;
+
+  private readonly geo: BufferGeometry;
+
+  private readonly mat: PointsMaterial;
+
+  private readonly count: number;
+
+  /** In tiles. Converted to pixels every frame — see the note at the top. */
+  private readonly tiles: number;
+
+  private readonly behave: Behave;
+
+  private cursor = 0;
+
+  constructor(scene: Scene, o: {
+    count: number; tiles: number; colour: string; opacity: number;
+    additive?: boolean; behave: Behave; order?: number;
+  }) {
+    this.count = o.count;
+    this.tiles = o.tiles;
+    this.behave = o.behave;
+    this.pos = new Float32Array(o.count * 3);
+    this.vel = new Float32Array(o.count * 3);
+    this.life = new Float32Array(o.count);
+    this.max = new Float32Array(o.count);
+    this.seed = new Float32Array(o.count);
+    this.alpha = new Float32Array(o.count);
+    for (let i = 0; i < o.count; i++) this.seed[i] = Math.random() * 6.283;
+
+    this.geo = new BufferGeometry();
+    this.geo.setAttribute('position', new BufferAttribute(this.pos, 3));
+    this.geo.setAttribute('aAlpha', new BufferAttribute(this.alpha, 1));
+    this.mat = new PointsMaterial({
+      color: new Color(o.colour),
+      size: 1,
+      map: softDot(),
+      transparent: true,
+      opacity: o.opacity,
+      depthWrite: false,
+      sizeAttenuation: false,
+      blending: o.additive === true ? AdditiveBlending : NormalBlending,
+    });
+    /*
+     * Per-particle alpha, which `PointsMaterial` does not have.
+     *
+     * Without it every particle in a field is equally opaque and they all pop in
+     * and out at full strength, which is the single most obvious way a particle
+     * system announces itself. Injected rather than written as a ShaderMaterial
+     * so the material keeps its fog, its tone mapping and its map handling.
+     */
+    this.mat.onBeforeCompile = (shader) => {
+      shader.vertexShader = `attribute float aAlpha;\nvarying float vAlpha;\n${
+        shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          '#include <begin_vertex>\n  vAlpha = aAlpha;',
+        )}`;
+      shader.fragmentShader = `varying float vAlpha;\n${
+        shader.fragmentShader.replace(
+          '#include <premultiplied_alpha_fragment>',
+          '  gl_FragColor.a *= vAlpha;\n#include <premultiplied_alpha_fragment>',
+        )}`;
+    };
+    this.points = new Points(this.geo, this.mat);
+    this.points.frustumCulled = false;
+    this.points.renderOrder = o.order ?? 3;
+    scene.add(this.points);
+  }
+
+  /**
+   * Put one particle into the world.
+   *
+   * Round-robin over the pool rather than a free list. A free list is the
+   * obvious structure and it is worse here: when the pool is full the oldest
+   * particle is exactly the one that should go, and a cursor gives that for
+   * nothing while a free list gives an emitter that silently stops emitting.
+   */
+  spawn(
+    x: number, y: number, z: number,
+    vx: number, vy: number, vz: number, life: number, age = 0,
+  ): void {
+    const i = this.cursor;
+    this.cursor = (i + 1) % this.count;
+    const j = i * 3;
+    this.pos[j] = x;
+    this.pos[j + 1] = y;
+    this.pos[j + 2] = z;
+    this.vel[j] = vx;
+    this.vel[j + 1] = vy;
+    this.vel[j + 2] = vz;
+    this.life[i] = life * (1 - age);
+    this.max[i] = life;
+    this.seed[i] = Math.random() * 6.283;
+  }
+
+  /** How many are alive. A field that is empty needs priming, not filling. */
+  live(): number {
+    let n = 0;
+    for (let i = 0; i < this.count; i++) if (this.life[i] > 0) n++;
+    return n;
+  }
+
+  /** Master opacity, and the pixel size for this zoom. */
+  aim(level: number, pixelsPerTile: number): void {
+    this.mat.opacity = level;
+    this.mat.size = this.tiles * pixelsPerTile;
+    this.points.visible = level > 0.004;
+  }
+
+  step(dt: number, time: number): void {
+    if (!this.points.visible) return;
+    const arrays: FieldArrays = { pos: this.pos, vel: this.vel, seed: this.seed };
+    for (let i = 0; i < this.count; i++) {
+      if (this.life[i] <= 0) { this.alpha[i] = 0; continue; }
+      this.life[i] -= dt;
+      if (this.life[i] <= 0) { this.alpha[i] = 0; continue; }
+      const k = this.life[i] / this.max[i];
+      const j = i * 3;
+      this.pos[j] += this.vel[j] * dt;
+      this.pos[j + 1] += this.vel[j + 1] * dt;
+      this.pos[j + 2] += this.vel[j + 2] * dt;
+      this.alpha[i] = this.behave(arrays, i, k, dt, time);
+    }
+    this.geo.attributes.position.needsUpdate = true;
+    this.geo.attributes.aAlpha.needsUpdate = true;
+  }
+
+  dispose(): void {
+    this.points.removeFromParent();
+    this.geo.dispose();
+    this.mat.dispose();
+  }
+}
+
+/** What the air needs to know about the world, once a frame. */
+export interface AirFrame {
+  camX: number;
+  camZ: number;
+  /** Tiles across the frame, for the point size and the emission radius. */
+  tilesAcross: number;
+  pixelsPerTile: number;
+  /** 0 at six in the morning, as the rest of the renderer has it. */
+  dayFraction: number;
+  night: number;
+  snow: number;
+  /** 0..1, the global VFX dial. Zero switches the whole thing off. */
+  level: number;
+}
+
+/**
+ * What the air emits from.
+ *
+ * Extends `GroundSource` because every emitter needs the ground under the point
+ * it is emitting at: mist lies *on* the field, a chimney stands *on* a building,
+ * and an exhaust is a foot off the road. Nothing here samples the terrain for
+ * any other reason.
+ */
+export interface AirSource extends GroundSource {
+  placeCount: number;
+  px: Float32Array;
+  pz: Float32Array;
+  vehicleCount: number;
+  vx: Float32Array;
+  vz: Float32Array;
+  vHeading: Float32Array;
+  vStopped: Uint8Array;
+}
+
+export interface Air {
+  step(src: AirSource, frame: AirFrame, dt: number, time: number): void;
+  dispose(): void;
+}
+
+/**
+ * How much mist there is, given the hour.
+ *
+ * Radiation fog forms overnight on still clear ground and burns off within an
+ * hour or two of the sun getting to it, which in England means it is a thing you
+ * see between about four and nine in the morning and at no other time. Modelled
+ * as a plateau with a fast edge on the sunny side, because that is the shape of
+ * it: it does not fade evenly, it sits there and then it goes.
+ *
+ * Deliberately not tied to the weather. Fog and rain are close to mutually
+ * exclusive in life, but the district's weather changes on a daily seed and
+ * tying the two together would mean whole weeks with no mornings in them.
+ */
+export function mistAt(hour: number): number {
+  if (hour < 3 || hour > 10) return 0;
+  if (hour < 4) return (hour - 3);
+  if (hour < 7.5) return 1;
+  return Math.max(0, 1 - (hour - 7.5) / 2.5);
+}
+
+export function makeAir(scene: Scene): Air {
+  /*
+   * Mist, and it is the one that is easy to overdo.
+   *
+   * Wide, slow, and very faint indeed: the moment you can pick out an individual
+   * puff it stops being weather and becomes confetti. Everything about the
+   * numbers here is chosen to stop that happening — the sprites are three tiles
+   * across so they overlap into a sheet rather than reading as objects, the
+   * opacity is under a tenth, and they barely move.
+   */
+  const mist = new Field(scene, {
+    count: 220,
+    tiles: 3.2,
+    colour: '#dfe7ea',
+    opacity: 0.075,
+    order: 2,
+    behave: (f, i, k, dt, time) => {
+      const j = i * 3;
+      f.vel[j] += Math.sin(time * 0.21 + f.seed[i]) * dt * 0.09;
+      f.vel[j + 2] += Math.cos(time * 0.17 + f.seed[i]) * dt * 0.09;
+      // In slowly, out slowly, and never at full strength at the edges of its
+      // life — a bank of fog has no beginning.
+      return Math.min(1, (1 - k) * 4) * Math.min(1, k * 2.2);
+    },
+  });
+  let mistAcc = 0;
+
+  /*
+   * Chimney smoke. The oldest trick there is for making a house look lived in,
+   * and the reason it works is that it is the only vertical motion in a
+   * landscape that is otherwise entirely horizontal.
+   *
+   * It leans as it rises and slows as it cools, which is two lines and is most
+   * of the difference between smoke and a column of dots.
+   */
+  const smoke = new Field(scene, {
+    count: 260,
+    tiles: 0.5,
+    colour: '#cfd3d2',
+    opacity: 0.30,
+    behave: (f, i, k, dt, time) => {
+      const j = i * 3;
+      f.vel[j + 1] *= 1 - dt * 0.45;
+      f.vel[j] += (Math.sin(time * 0.4 + f.seed[i]) * 0.5 + 0.42) * dt * 0.34;
+      f.vel[j + 2] += Math.cos(time * 0.33 + f.seed[i]) * dt * 0.22;
+      return Math.min(1, (1 - k) * 3.4) * k * k;
+    },
+  });
+  let smokeAcc = 0;
+
+  /*
+   * Exhaust. Small, dark, brief — a 1985 diesel at the moment it pulls away.
+   *
+   * Behind the vehicle rather than under it, and that is why the heading is in
+   * the source at all. A puff that appears at the centre of a lorry looks like
+   * the lorry is on fire; a puff that appears a quarter of a tile behind it and
+   * is immediately left behind reads as an exhaust without anyone deciding it
+   * has.
+   */
+  const exhaust = new Field(scene, {
+    count: 200,
+    tiles: 0.22,
+    colour: '#8e9092',
+    opacity: 0.34,
+    behave: (f, i, k, dt) => {
+      const j = i * 3;
+      f.vel[j + 1] *= 1 - dt * 0.9;
+      return Math.min(1, (1 - k) * 5) * k * k * 0.9;
+    },
+  });
+  let exhaustAcc = 0;
+
+  const fields = [mist, smoke, exhaust];
+
+  return {
+    step(src, frame, dt, time): void {
+      const hour = (frame.dayFraction * 24 + 6) % 24;
+      const reach = frame.tilesAcross * 0.62;
+
+      /*
+       * Mist strength, and the season is half of it.
+       *
+       * The great fog mornings are autumn ones — long nights, warm ground, damp
+       * air — so it is doubled through the back half of the year and thinned in
+       * high summer when the sun is up before the fog can form. Snow suppresses
+       * it outright: fog over snow is a whiteout, and a whiteout is not a
+       * picture.
+       */
+      const mistLevel = mistAt(hour) * (1 - frame.snow * 0.85) * frame.level;
+      mist.aim(0.14 * mistLevel, frame.pixelsPerTile);
+      if (mistLevel > 0.01) {
+        /*
+         * Fill it in at once the first time, rather than drifting in over ten
+         * seconds.
+         *
+         * A bank of fog has no beginning. Emitting at a steady rate from empty
+         * means the first thing you see on a foggy morning is fog *arriving*,
+         * which is not a thing fog does — and it is also what you get every time
+         * the camera crosses the district faster than the emitter can keep up.
+         * So an empty field is primed with a full complement at random ages, and
+         * the ages are the point: spawned all at once with the same life they
+         * would all die at the same moment and the fog would blink.
+         */
+        const prime = mist.live() < 12 ? 150 : 0;
+        mistAcc += dt * 26 * mistLevel + prime;
+        while (mistAcc >= 1) {
+          mistAcc -= 1;
+          const a = Math.random() * 6.283;
+          const r = Math.sqrt(Math.random()) * reach;
+          const x = frame.camX + Math.cos(a) * r;
+          const z = frame.camZ + Math.sin(a) * r;
+          const g = groundHeightAt(src, x, z);
+          /*
+           * Only in the low ground, and this is the whole picture.
+           *
+           * Fog everywhere is a grey filter over the frame. Fog lying in the
+           * valleys with the hills standing out of it is the thing people
+           * photograph, and the difference between the two is this one test.
+           * Measured against the ground under the camera, so it follows you
+           * across the district rather than needing a survey of it.
+           */
+          const here = groundHeightAt(src, frame.camX, frame.camZ);
+          if (g > here + 0.9) continue;
+          mist.spawn(
+            x, g + 0.12 + Math.random() * 0.30, z,
+            (Math.random() - 0.5) * 0.10, 0.006, (Math.random() - 0.5) * 0.10,
+            12 + Math.random() * 8,
+            prime > 0 ? Math.random() * 0.85 : 0,
+          );
+        }
+      }
+
+      /*
+       * Smoke, on the cold mornings and evenings that a coal fire is lit.
+       *
+       * Not all day and not all year: a chimney going at two in the afternoon in
+       * June says the house is on fire. Morning and evening, doubled in winter,
+       * which the renderer already knows as `snow` — an imperfect proxy for cold
+       * and the only one to hand, but it is the right shape.
+       */
+      const cold = 0.35 + frame.snow * 0.65;
+      const lit = hour < 9.5 ? 1 : hour > 16 ? 1 : 0.15;
+      const smokeLevel = cold * lit * frame.level;
+      smoke.aim(0.30 * frame.level, frame.pixelsPerTile);
+      if (src.placeCount > 0 && smokeLevel > 0.02) {
+        smokeAcc += dt * 16 * smokeLevel;
+        while (smokeAcc >= 1) {
+          smokeAcc -= 1;
+          const p = (Math.random() * src.placeCount) | 0;
+          const x = src.px[p];
+          const z = src.pz[p];
+          if (Math.abs(x - frame.camX) > reach || Math.abs(z - frame.camZ) > reach) continue;
+          /*
+           * Two thirds of the chimneys are out at any moment, chosen per puff.
+           *
+           * Deliberately not per building: a stable set would mean the same
+           * houses smoke every time you look, which is a pattern, and a pattern
+           * in something this incidental is worse than the randomness. What the
+           * eye reads is "some chimneys are going", and that is true either way.
+           */
+          if (Math.random() > 0.34) continue;
+          smoke.spawn(
+            x + (Math.random() - 0.5) * 0.3,
+            groundHeightAt(src, x, z) + 0.85 + Math.random() * 0.15,
+            z + (Math.random() - 0.5) * 0.3,
+            (Math.random() - 0.5) * 0.08, 0.30 + Math.random() * 0.16,
+            (Math.random() - 0.5) * 0.08,
+            3.4 + Math.random() * 2.2,
+          );
+        }
+      }
+
+      exhaust.aim(0.34 * frame.level, frame.pixelsPerTile);
+      if (src.vehicleCount > 0 && frame.level > 0.02) {
+        exhaustAcc += dt * 22 * frame.level;
+        while (exhaustAcc >= 1) {
+          exhaustAcc -= 1;
+          const v = (Math.random() * src.vehicleCount) | 0;
+          // Standing still, standing quiet. A parked lorry with smoke coming off
+          // it is a lorry somebody left running.
+          if (src.vStopped[v] === 1) continue;
+          const x = src.vx[v];
+          const z = src.vz[v];
+          if (Math.abs(x - frame.camX) > reach || Math.abs(z - frame.camZ) > reach) continue;
+          // Behind it, along its own heading. Models are authored nose along +X
+          // and `facing` is measured the same way, so back is simply minus that.
+          const a = src.vHeading[v] * Math.PI * 2;
+          const bx = x - Math.cos(a) * 0.26;
+          const bz = z + Math.sin(a) * 0.26;
+          exhaust.spawn(
+            bx, groundHeightAt(src, bx, bz) + 0.14, bz,
+            (Math.random() - 0.5) * 0.06, 0.16 + Math.random() * 0.10,
+            (Math.random() - 0.5) * 0.06,
+            0.9 + Math.random() * 0.7,
+          );
+        }
+      }
+
+      for (const f of fields) f.step(dt, time);
+    },
+    dispose(): void {
+      for (const f of fields) f.dispose();
+    },
+  };
+}
