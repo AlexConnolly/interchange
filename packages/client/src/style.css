@@ -665,16 +665,56 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   line-height: 1;
 }
 
-/* A panel that is not about a place sits where a screen sits, in the bubble's
-   clothes and without its arrow. */
+/* A panel that is not about a place rises out of the dock that opened it.
+ *
+ * It used to appear in the top-right corner, which is the one place on screen
+ * that has nothing to do with the button you just pressed: the hand is at the
+ * bottom, the press is at the bottom, and the answer arrived a whole screen
+ * away with no visible connection to the thing that caused it. Every other panel
+ * in the game points at its subject — a place bubble has an arrow into the
+ * place, a driver bubble sits on the lorry — and these four were the exception
+ * for no better reason than that the corner was empty.
+ *
+ * So they grow upward out of the bar, from its own top edge, and the lit dock
+ * button underneath stays visible as the thing they belong to. Centred on the
+ * dock rather than on the button, because the panel is wider than the button and
+ * a panel that slid sideways every time you switched tabs would be worse than
+ * one that never moved.
+ *
+ * `--dock-rise` is the dock's height plus its offset plus the gap, in one place
+ * because the animation has to start from exactly the same line the panel rests
+ * on or it appears to come from somewhere else. */
 .bubble.fixed {
-  right: 18px;
-  left: auto;
-  top: 76px;
-  transform: none;
-  animation: none;
+  --dock-rise: 88px;
+  right: auto;
+  left: 50%;
+  top: auto;
+  bottom: var(--dock-rise);
+  transform: translateX(-50%);
+  transform-origin: 50% 100%;
+  animation: dock-rise 170ms cubic-bezier(0.2, 1.35, 0.4, 1) both;
 }
 .bubble.fixed .bubble-arrow { display: none; }
+/* Grows from the bar rather than popping in place: a short lift and a slight
+   scale, which is the difference between "this came out of that" and "this
+   appeared". */
+@keyframes dock-rise {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px) scale(0.96); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
+/* And it must not run out of room upward. The top of the frame carries the
+   money and the clock, so it stops short of them rather than sliding under.
+ *
+ * The 236px floor goes with it. That figure was reserved so a panel with three
+ * offers would not scroll — a max-height argument that had been written as a
+ * min — and against the top-right corner nobody noticed it was also holding a
+ * box of empty cream open under a single row. Above the dock, dead centre of the
+ * frame, it is the first thing you see. Two rows' worth of floor is enough to
+ * stop a one-line panel reading as a stub. */
+.bubble.fixed .bubble-body {
+  min-height: 92px;
+  max-height: min(236px, calc(100vh - var(--dock-rise) - 168px));
+}
 
 /* Taller, and a scrollbar you can look at.
  *
