@@ -310,6 +310,9 @@ export class Engine {
         // space like every other colour. A local hex parser here was quietly
         // feeding sRGB values to the shader and every road came out white.
         wayColourOf: (cls) => hex(c.ways[cls]?.colour ?? '#888888'),
+        // Zero to build means nobody built it: the sea and the sky are
+        // already there, and only the terminal is a thing anybody made.
+        invisibleWay: (cls) => (c.ways[cls]?.buildCost ?? 1) === 0,
         vehicleCount: 0,
         vAlive: w.vehicles.alive,
         vType: w.vehicles.type,

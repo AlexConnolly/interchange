@@ -284,6 +284,7 @@ function sourceFor(world: ReturnType<typeof createWorld>, renderer: Renderer): P
     linkFlowPrev: world.graph.linkFlowPrev,
     linkCellCount: world.graph.linkCellCount,
     wayColourOf: () => [0.35, 0.33, 0.30],
+    invisibleWay: () => false,
     vehicleCount: world.vehicles.count,
     vAlive: world.vehicles.alive,
     vType: world.vehicles.type,

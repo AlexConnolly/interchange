@@ -79,6 +79,9 @@ export interface RenderSource {
   linkFlowPrev: Int32Array;
   linkCellCount: Int32Array;
   wayColourOf: (cls: number) => RGB;
+  /** True for a way class that is a routing convenience rather than a built
+   *  thing: sea lanes and air corridors. */
+  invisibleWay: (cls: number) => boolean;
   /** Vehicles, already projected to world tiles in Q16.16. */
   vehicleCount: number;
   vAlive: Uint8Array;
@@ -461,6 +464,19 @@ export class Renderer {
           const tile = y * size + x;
           const c = cls[tile];
           if (c === 255) continue;
+          /*
+           * A sea lane is not a thing that exists in the world.
+           *
+           * seaair.ts is explicit that the sea is already there and that a
+           * lane is a routing convenience laid on a coarse grid so ships have
+           * something to follow. Drawing it put a pale blue lattice across
+           * every stretch of open water on the map — a piece of the routing
+           * graph showing through the render, which is exactly the sort of
+           * thing art-direction.md means by never letting the machinery
+           * obscure the world. It still draws under an overlay, where the
+           * player has asked to see the machinery.
+           */
+          if (src.invisibleWay(c) && this.overlay === OverlayMode.None) continue;
           const groundY = HEIGHT_TO_WORLD(Math.max(0, src.height[tile]));
           // The formation, not the ground. A level of zero means the way was
           // laid before the profile existed, so fall back to the ground.
