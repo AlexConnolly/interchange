@@ -447,15 +447,33 @@ const ScatterShader = {
       col = mix(col, uHazeColor, (1.0 - toSun) * 0.05 * uAmount);
       col += uSunColor * pow(toSun, 4.0) * 0.06 * uAmount * uSunVisible;
 
-      // Shafts, marched toward the projected sun and sourced from the bright
-      // parts of the frame, so they stream off lit roofs and off the water
-      // rather than being drawn on top of everything.
+      /*
+       * Shafts, marched toward the projected sun and sourced from the bright
+       * parts of the frame, so they stream off lit roofs and off the water
+       * rather than being drawn on top of everything.
+       *
+       * The march is jittered per pixel, and without that this pass draws stripes.
+       * Eight taps over a tenth of the distance to the sun puts each sample more
+       * than a percent of the screen from the last, so a small bright thing — a
+       * white dash painted down the middle of a road — is not smeared into a shaft
+       * at all. It is copied eight times, at eight fixed offsets, and the copies
+       * land on the field beside the road as a row of faint parallel bars that
+       * slide as the camera moves. "Black scrolling lines over the terrain."
+       *
+       * Offsetting every pixel's ray by a fraction of one step turns that banding
+       * into noise finer than a pixel, which is what the effect was meant to look
+       * like: air, rather than a comb. The hash is the usual sin-fract one, which
+       * is cheap and quite good enough for dither — it only has to be
+       * uncorrelated between neighbours, not random.
+       */
+      float jitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
       vec2 delta = (uSun - vUv) * 0.10;
-      vec2 uv = vUv;
+      vec2 step = delta * (1.0 / 12.0);
+      vec2 uv = vUv + step * jitter;
       float w = 1.0;
       vec3 acc = vec3(0.0);
-      for (int i = 0; i < 8; i++) {
-        uv += delta * 0.125;
+      for (int i = 0; i < 12; i++) {
+        uv += step;
         vec3 t = texture2D(tDiffuse, clamp(uv, 0.0, 1.0)).rgb;
         float lum = dot(t, vec3(0.2126, 0.7152, 0.0722));
         // A high threshold, and it is the difference between shafts and a smear.
@@ -464,9 +482,9 @@ const ScatterShader = {
         // things that are genuinely near white — a lit window, sun off water,
         // snow — should be throwing light through the air.
         acc += t * smoothstep(0.88, 1.0, lum) * w;
-        w *= 0.90;
+        w *= 0.93;
       }
-      acc /= 8.0;
+      acc /= 12.0;
       col += acc * uSunColor * pow(toSun, 2.0) * 0.55 * uAmount * uSunVisible;
 
       gl_FragColor = vec4(col, src.a);
