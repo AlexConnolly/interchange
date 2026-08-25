@@ -94,17 +94,45 @@ the farm cannot feed both.
 That is the engine for the rest of the game and none of it is a new mechanic. It
 is the same click-a-place-see-what-it-wants interaction all the way up.
 
-### The land-value gradient
+### The influence area
 
-**Everything costs more the closer it is to the city.** A farm in the hills is
-cheap, a shop on the high street is not.
+**What you can see is what you can work in, and it starts very small.**
 
-This is one number per tile and it does an enormous amount:
+At the beginning your influence covers your yard, the lane outside it and a
+handful of farms. Beyond that the district fades out — you cannot see it, you
+cannot take contracts in it, and you cannot buy anything there. You do not know
+the city is over the hill.
 
-- You cannot jump to the city. You have to work your way in.
-- It makes *where* as interesting as *what*, from the first hour.
-- It gives the map a direction — out here is where you start, in there is where
-  you are going — without a single arrow drawn on it.
+Influence grows two ways, and both are things you were doing anyway:
+
+- **Trading.** The more you move, the further your name goes.
+- **Owning.** Every place you buy is a beachhead that extends influence around
+  *itself*. Buy the shop in the next village and the village and its
+  surroundings open up.
+
+That second one is the good part. It turns a purchase into a *foothold* rather
+than an income, so "buy the far shop" and "buy the near farm" become genuinely
+different decisions — one is cheap and pays, the other is dear and opens the
+map.
+
+This one mechanic does four jobs that were previously four mechanics:
+
+| It replaces | Because |
+|---|---|
+| A land-value gradient stopping you reaching the city | You cannot see the city |
+| A tutorial | The only things visible are the things to do next |
+| A tech tree | Progress is a place on the map, not a list |
+| A minimap and a fog overlay | The world is the map |
+
+And it gives the district a shape it did not have: **the city exists from the
+first minute and you cannot see it.** The moment it comes into view is a moment,
+and it costs nothing to build because it is the same mechanic arriving somewhere
+new.
+
+**Rendered as fade, not as a black shroud.** Beyond the boundary the world
+desaturates toward a pale mist and loses its detail. That fits the pastel look,
+it never puts a hard line on the ground, and it keeps the district legible as
+scenery while making it unusable as territory.
 
 ### What each place gives you
 

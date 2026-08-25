@@ -39,6 +39,31 @@ export interface GroundSource {
   /** True where a road covers the tile, so hedges leave a gap. */
   hasRoad: (tile: number) => boolean;
   isWater: (tile: number) => boolean;
+  /** 0 outside your influence, 1 well inside. The world fades out beyond it. */
+  influence: (tile: number) => number;
+}
+
+/**
+ * The colour of what you cannot reach.
+ *
+ * A pale, slightly cool mist rather than a dark shroud or a grey wash. The
+ * district beyond your influence should still read as countryside — it is
+ * scenery you can see the shape of and cannot touch — and a black fog would
+ * make the map look small, which is the opposite of the intended effect.
+ */
+const MIST: RGB = [0.80, 0.845, 0.86];
+
+/** Fade a colour out toward the mist. */
+function faded(c: RGB, influence: number): RGB {
+  if (influence >= 0.999) return c;
+  // Squared, so the inside of the boundary stays fully coloured and the falloff
+  // happens close to the edge. A linear fade washes out half the visible world.
+  const k = influence * influence;
+  return [
+    c[0] * k + MIST[0] * (1 - k),
+    c[1] * k + MIST[1] * (1 - k),
+    c[2] * k + MIST[2] * (1 - k),
+  ];
 }
 
 const NO_PARCEL = -1;
@@ -104,6 +129,7 @@ export function buildGround(
           if (along % 2 === 0) colour = shade(colour, 0.945);
         }
       }
+      colour = faded(colour, src.influence(tile));
 
       /*
        * Split the quad along the shorter diagonal, so a ridge stays a ridge
@@ -137,13 +163,31 @@ function buildHedges(
 ): void {
   const s = src.size;
   /** Thin. A hedge wants to be a line, and the strongest lines in the frame. */
-  const T = 0.11;
-  const H = 0.30;
+  /*
+   * Thin and low. Two passes at this: 0.13 by 0.40 read as garden walls, and at
+   * a ten-tile field they were the loudest thing in the frame. A hedge wants to
+   * be the strongest *line* and not the tallest object.
+   */
+  const T = 0.095;
+  const H = 0.21;
   const TAPER = 0.80;
 
   const wants = (a: number, b: number): boolean => {
     if (src.parcel[a] === src.parcel[b]) return false;
     if (src.parcel[a] === NO_PARCEL || src.parcel[b] === NO_PARCEL) return false;
+    /*
+     * No hedges outside your influence, and this is a fix rather than a saving.
+     *
+     * Fading their *colour* was not enough: a hedge is a vertical surface, so
+     * its sides catch almost no light from a sun overhead, and a pale hedge in
+     * pale mist still renders as a dark dash. The result was the far half of the
+     * district reading as scattered black marks on fog.
+     *
+     * Dropping the detail is also what the mechanic wants. Beyond the boundary
+     * you can see the *shape* of the country and not what is in it, which is
+     * both truer and the reason to go there.
+     */
+    if (Math.max(src.influence(a), src.influence(b)) < 0.06) return false;
     // A gap where the road goes through.
     return !src.hasRoad(a) && !src.hasRoad(b);
   };
@@ -154,8 +198,20 @@ function buildHedges(
       // Vary the colour and height along a run so a boundary is a hedgerow
       // rather than an extrusion.
       const jitter = ((x * 73856093) ^ (y * 19349663)) >>> 0;
-      const h = H + ((jitter & 63) / 63 - 0.4) * 0.20;
-      const c = (jitter & 3) === 0 ? HEDGE.lit : HEDGE.dark;
+      const inf = src.influence(tile);
+      /*
+       * Hedges shrink into the ground as influence falls away.
+       *
+       * Cutting them off at a threshold left a ragged fringe of dark marks
+       * along the boundary — a hedge is a vertical surface, so it catches almost
+       * no light from a high sun and stays dark however pale its colour is
+       * made. Scaling the height means they sink rather than pop, so the
+       * boundary is a place where the country loses its detail instead of a line
+       * where the hedges stop.
+       */
+      const h = (H + ((jitter & 63) / 63 - 0.4) * 0.20) * Math.min(1, inf * 1.6);
+      const c = faded((jitter & 3) === 0 ? HEDGE.lit : HEDGE.dark, inf);
+      if (h < 0.02) continue;
 
       if (x + 1 < s && wants(tile, tile + 1)) {
         const base = Math.max(cornerHeight(src, x + 1, y), cornerHeight(src, x + 1, y + 1));

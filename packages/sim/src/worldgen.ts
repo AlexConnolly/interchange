@@ -11,6 +11,7 @@
 
 import { ACCESS_SCALE, AUTHORITY, DIR_BIT, DIR_DX, DIR_DY, DIR_OPPOSITE, Mode } from './constants.ts';
 import { NONE } from './network.ts';
+import { generateRoads } from './roadnet.ts';
 import { Deposit, SEA_LEVEL, TileFlag, type Terrain } from './terrain.ts';
 import { SiteState } from './sites.ts';
 import type { World } from './world.ts';
@@ -143,7 +144,39 @@ export function generateWorld(w: World): void {
   }
 
   // ---- the authority's roads --------------------------------------------
-  buildPublicRoads(w);
+  /*
+   * The roads, with a hierarchy. roadnet.ts.
+   *
+   * The old builder was a minimum spanning tree over the towns plus a few extra
+   * edges, connected by breadth-first search to whatever road tile was nearest.
+   * It produced a wandering, undifferentiated web - a spine, a lane and a farm
+   * track were all the same thing - and that, rather than density, is what made
+   * the district read as a spiderweb.
+   */
+  {
+    const layer = w.layers[Mode.Road];
+    const settlements: { x: number; y: number; weight: number }[] = [];
+    for (let i = 0; i < w.towns.count; i++) {
+      settlements.push({ x: w.towns.x[i], y: w.towns.y[i], weight: w.towns.population[i] });
+    }
+    const sites: { x: number; y: number; weight: number }[] = [];
+    for (let i = 0; i < w.sites.count; i++) {
+      sites.push({ x: w.sites.x[i], y: w.sites.y[i], weight: 1 });
+    }
+    const idx = (id: string): number => w.content.wayIndex.get(id) ?? 0;
+    const byTier = [idx('road'), idx('lane'), idx('track')];
+    generateRoads(
+      {
+        size: w.config.size,
+        height: w.terrain.height,
+        isWater: (t: number): boolean => w.terrain.height[t] <= SEA_LEVEL,
+        parcel: w.terrain.fields.parcel,
+        classOf: (tier: number): number => byTier[tier] ?? byTier[1],
+        cls: layer.cls,
+      },
+      settlements, sites,
+    );
+  }
 
   w.rebuild();
 }
@@ -195,145 +228,8 @@ function findSiteSpot(
   return null;
 }
 
-/**
- * The public road network.
- *
- * A minimum spanning tree over the towns, plus a handful of extra edges. The
- * extras matter more than they look: without them every journey has exactly
- * one possible route, so there is nothing for congestion to spread onto and no
- * such thing as a bypass — and the ownership triangle collapses from three
- * options to two.
- */
-function buildPublicRoads(w: World): void {
-  const t = w.terrain;
-  const layer = w.layers[Mode.Road];
-  const trackCls = w.content.wayIndex.get('track') ?? 0;
-  const macadamCls = w.content.wayIndex.get('macadam') ?? trackCls;
-  const track = w.content.ways[trackCls];
-  const macadam = w.content.ways[macadamCls];
-
-  const n = w.towns.count;
-  if (n === 0) return;
-
-  const dist = (a: number, b: number): number =>
-    Math.hypot(w.towns.x[a] - w.towns.x[b], w.towns.y[a] - w.towns.y[b]);
-
-  // Prim's, deterministic because ties break on index.
-  const inTree = new Uint8Array(n);
-  const edges: [number, number][] = [];
-  inTree[0] = 1;
-  for (let k = 1; k < n; k++) {
-    let bestA = -1;
-    let bestB = -1;
-    let bestD = Infinity;
-    for (let a = 0; a < n; a++) {
-      if (!inTree[a]) continue;
-      for (let b = 0; b < n; b++) {
-        if (inTree[b]) continue;
-        const d = dist(a, b);
-        if (d < bestD - 1e-9) {
-          bestD = d;
-          bestA = a;
-          bestB = b;
-        }
-      }
-    }
-    if (bestB < 0) break;
-    inTree[bestB] = 1;
-    edges.push([bestA, bestB]);
-  }
-
-  // Extra edges: the shortest pairs not already joined, so the network has
-  // loops and therefore alternatives.
-  const joined = new Set(edges.map(([a, b]) => `${Math.min(a, b)}-${Math.max(a, b)}`));
-  const extras: [number, number, number][] = [];
-  for (let a = 0; a < n; a++) {
-    for (let b = a + 1; b < n; b++) {
-      if (joined.has(`${a}-${b}`)) continue;
-      extras.push([a, b, dist(a, b)]);
-    }
-  }
-  extras.sort((p, q) => p[2] - q[2] || p[0] - q[0] || p[1] - q[1]);
-  for (let i = 0; i < Math.min(extras.length, Math.max(2, Math.floor(n / 3))); i++) {
-    edges.push([extras[i][0], extras[i][1]]);
-  }
-
-  for (const [a, b] of edges) {
-    const path = w.tileRouter.route(w.towns.tile[a], w.towns.tile[b]);
-    if (!path) continue;
-    // The two biggest towns on an edge get macadam; everything else is dirt,
-    // which is the difference the player is meant to feel in Act I.
-    const major = w.towns.population[a] > 1200 && w.towns.population[b] > 1200;
-    const cls = major ? macadamCls : trackCls;
-    const def = major ? macadam : track;
-    layWay(w, layer, path, cls, AUTHORITY, Math.round(def.publicCharge * ACCESS_SCALE), def.buildCost);
-  }
-
-  // ---- spurs to every site and town centre ------------------------------
-  for (let s = 0; s < w.sites.count; s++) {
-    connect(w, layer, w.sites.tile[s], trackCls, Math.round(track.publicCharge * ACCESS_SCALE), track.buildCost);
-    w.siteAccessTile[s] = w.sites.tile[s];
-  }
-  for (let i = 0; i < w.towns.count; i++) {
-    connect(w, layer, w.towns.tile[i], trackCls, Math.round(track.publicCharge * ACCESS_SCALE), track.buildCost);
-    w.townAccessTile[i] = w.towns.tile[i];
-  }
-
-  // The field starts at whatever the terrain deserves, before anybody has
-  // done anything to it.
-  w.amenity.seed(t);
-}
 
 
-/** Join a tile to whatever road is nearest. */
-function connect(
-  w: World, layer: { cls: Uint8Array; dir: Uint8Array; asset: Int32Array; terminal: Uint8Array; tileCount: number },
-  tile: number, cls: number, charge: number, buildCost: number,
-): void {
-  const t = w.terrain;
-  const size = t.size;
-  if (layer.cls[tile] !== 255) {
-    layer.terminal[tile] = 1;
-    return;
-  }
-  // Nearest existing road tile by breadth-first search, then a route to it.
-  const target = nearestRoadTile(layer, size, tile, 90);
-  if (target === NONE) {
-    layer.terminal[tile] = 1;
-    return;
-  }
-  const path = w.tileRouter.route(tile, target);
-  if (!path || path.length < 2) {
-    layer.terminal[tile] = 1;
-    return;
-  }
-  layWay(w, layer as never, path, cls, AUTHORITY, charge, buildCost);
-  layer.terminal[tile] = 1;
-}
-
-function nearestRoadTile(
-  layer: { cls: Uint8Array }, size: number, from: number, maxRadius: number,
-): number {
-  const fx = from % size;
-  const fy = (from / size) | 0;
-  for (let r = 1; r <= maxRadius; r++) {
-    let best = NONE;
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-        const x = fx + dx;
-        const y = fy + dy;
-        if (x < 0 || y < 0 || x >= size || y >= size) continue;
-        const tile = y * size + x;
-        if (layer.cls[tile] === 255) continue;
-        // Lowest tile index at this radius, so the choice is deterministic.
-        if (best === NONE || tile < best) best = tile;
-      }
-    }
-    if (best !== NONE) return best;
-  }
-  return NONE;
-}
 
 /**
  * Lay a way along a path of tiles, creating one asset for the whole run.

@@ -60,6 +60,21 @@ export interface RoadSource {
   /** The formation level per tile, if the way was graded. 0 means follow the
    *  ground. */
   level: Int16Array;
+  influence: (tile: number) => number;
+}
+
+/** Matches ground.ts. A road that stayed sharp while the fields round it faded
+ *  would draw the eye to exactly the part of the map you cannot use. */
+const MIST: RGB = [0.80, 0.845, 0.86];
+
+function faded(c: RGB, influence: number): RGB {
+  if (influence >= 0.999) return c;
+  const k = influence * influence;
+  return [
+    c[0] * k + MIST[0] * (1 - k),
+    c[1] * k + MIST[1] * (1 - k),
+    c[2] * k + MIST[2] * (1 - k),
+  ];
 }
 
 const DX = [0, 1, 0, -1];
@@ -91,13 +106,14 @@ export function buildRoads(
       const cls = src.roadClass[tile];
       if (cls < 0) continue;
       const st = STYLE[cls] ?? STYLE[1];
+      const inf = src.influence(tile);
       const yy = surfaceY(src, tile);
       const cx = x + 0.5;
       const cz = y + 0.5;
 
       // The verge goes down first and wider, so the surface sits inside it.
-      flat(m, cx, yy - 0.006, cz, st.verge, st.verge, ROAD.verge);
-      flat(m, cx, yy, cz, st.half, st.half, st.surface);
+      flat(m, cx, yy - 0.006, cz, st.verge, st.verge, faded(ROAD.verge, inf));
+      flat(m, cx, yy, cz, st.half, st.half, faded(st.surface, inf));
 
       for (let d = 0; d < 4; d++) {
         const nx = x + DX[d];
@@ -107,20 +123,22 @@ export function buildRoads(
         if (src.roadClass[n] < 0) continue;
         // The shared edge, at the mean of the two surfaces.
         const edgeY = (yy + surfaceY(src, n)) / 2;
-        arm(m, cx, cz, d, st.verge, yy - 0.006, edgeY - 0.006, ROAD.verge);
-        arm(m, cx, cz, d, st.half, yy, edgeY, st.surface);
+        arm(m, cx, cz, d, st.verge, yy - 0.006, edgeY - 0.006, faded(ROAD.verge, inf));
+        arm(m, cx, cz, d, st.half, yy, edgeY, faded(st.surface, inf));
 
-        if (st.worn) {
+        // Furniture only where you can see it, for the same reason as the
+        // hedges: a white dash in fog is a white dash.
+        if (st.worn && inf > 0.18) {
           for (const off of [-st.half * 0.5, st.half * 0.5]) {
             armOffset(m, cx, cz, d, st.half * 0.30, off,
-                      yy + 0.003, edgeY + 0.003, ROAD.worn);
+                      yy + 0.003, edgeY + 0.003, faded(ROAD.worn, inf));
           }
         }
-        if (st.lined) {
+        if (st.lined && inf > 0.18) {
           // Dashed: one dash per tile, which at forty pixels a tile is the
           // right rhythm and costs two triangles.
           armOffset(m, cx, cz, d, 0.035, 0,
-                    yy + 0.005, edgeY + 0.005, ROAD.line, 0.42);
+                    yy + 0.005, edgeY + 0.005, faded(ROAD.line, inf), 0.42);
         }
       }
     }

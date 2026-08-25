@@ -13,7 +13,9 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { createWorld, Mode, NO_WAY, TICKS_PER_DAY, SPEED_STEPS } from '@interchange/sim';
+import {
+  createWorld, InfluenceField, Mode, NO_WAY, TICKS_PER_DAY, SPEED_STEPS,
+} from '@interchange/sim';
 import { loadContent } from '@interchange/data';
 import { Renderer, RoadClass, TILES_ACROSS_DEFAULT, type RenderSource } from '@interchange/render';
 import './style.css';
@@ -59,6 +61,17 @@ export function App(): JSX.Element {
       if (layer.cls[i] !== NO_WAY) roadClass[i] = roadClassOf(layer.cls[i], wayNames);
     }
 
+    /*
+     * The influence area. design.md 3.
+     *
+     * Seeded with the yard — for now, the largest settlement, since there is no
+     * yard yet — so the opening view is a small pocket of countryside with the
+     * rest of the district faded out behind it. That fade is doing four jobs at
+     * once: fog of war, the tutorial, the tech tree, and the reason you cannot
+     * begin by driving into the city.
+     */
+    const influence = new InfluenceField(DISTRICT);
+
     const src: RenderSource = {
       size: DISTRICT,
       height: world.terrain.height,
@@ -66,6 +79,7 @@ export function App(): JSX.Element {
       crop: world.terrain.fields.crop,
       hasRoad: (t) => roadClass[t] >= 0,
       isWater: (t) => world.terrain.height[t] <= 0,
+      influence: (t) => influence.at(t),
       roadClass,
       level: layer.level,
       vehicleCount: 0,
@@ -94,7 +108,16 @@ export function App(): JSX.Element {
     const clamp = (v: number): number => Math.max(inset, Math.min(DISTRICT - inset, v));
     renderer.camX = clamp(world.towns.x[best] ?? DISTRICT / 2);
     renderer.camZ = clamp(world.towns.y[best] ?? DISTRICT / 2);
-    renderer.tilesAcross = TILES_ACROSS_DEFAULT;
+
+    // Where you begin: one small pocket, and nothing else visible.
+    influence.rebuild([{ x: renderer.camX, y: renderer.camZ, strength: 2.4 }]);
+    /*
+     * Open a little wider than the reference framing, so the edge of the
+     * influence area is on screen from the first second. The point of the
+     * mechanic is the boundary; opening inside it with the fade off-frame would
+     * hide the one thing it is for.
+     */
+    renderer.tilesAcross = TILES_ACROSS_DEFAULT * 2.4;
 
     const fit = (): void => {
       const w = canvas.clientWidth || window.innerWidth;
