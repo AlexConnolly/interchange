@@ -1,287 +1,196 @@
 # Design
 
-Six systems. If something is not one of these, or does not directly serve one
-of them, it is not in the game.
+A fun, casual game about running a haulage firm in a small, beautiful district,
+and slowly ending up owning the place.
+
+The look is settled: [`art/reference/TARGET-FRAME.png`](../art/reference/TARGET-FRAME.png).
+That picture is the goal. Everything here serves it.
 
 ---
 
-## 0. The north star
+## 0. The two rules
 
-**Every action you take must visibly change the district, quickly, and it must
-be obvious that it was you.**
+**Simple.** Icons and short text. No spreadsheet. If a screen needs a
+paragraph to explain it, it is the wrong screen.
 
-That is the test for every feature here and every feature proposed later. It is
-also the diagnosis of what went wrong before: four AI companies meant the
-district changed constantly for reasons that were not yours, and nineteen
-feature categories meant any single decision you made was a rounding error.
+**Beautiful.** Low poly, pastel, real shadows, late afternoon light. It should
+feel like doing something in a place you like looking at.
+
+Every feature below is checked against both. The last spec failed because it
+was checked against neither — it had 133 features, twenty overlay modes, and
+the word "fun" appeared once in two thousand lines. See
+[`postmortem.md`](postmortem.md).
 
 ---
 
-## 1. The ladder
+## 1. Where you start
 
-The whole progression, in the order the player meets it:
+A small yard with a couple of trucks. Farms around you. A little village.
 
-```
-buy trucks  ->  buy yards  ->  hire other modes  ->  buy infrastructure  ->  build it
-   user ------------------------------------>  owner ------------->  producer
-```
+You do not own the farms, the dairy or the roads. You own two trucks and the
+yard they sleep in.
 
-Every rung is a **purchase**, and every rung changes what the binding
-constraint is. That is the design in one line: you are never solving the same
-problem twice, and you are never solving it by doing more of what worked last
-time.
+## 2. The core loop, and it is one sentence
 
-| Rung | The constraint before | The constraint after |
+**Click a place, take a contract, put a truck on it, get paid.**
+
+- Click a farm. It has **contracts**: *milk to the creamery, 3 collections a
+  week, £48 a load.*
+- Accept it. Assign a truck.
+- The truck drives there and back, through the day, and the money comes in.
+- Buy another truck. Take another contract.
+
+That is the whole of the first half hour and there is nothing else in it. Two
+spots, back and forth, paid per load. No route editor, no stop list, no
+timetable.
+
+**Contracts are the interaction.** The previous spec cut them as "paperwork"
+and replaced them with a route editor, which was exactly backwards: a route
+editor is a tool, and a contract is *somebody offering you work*, which is a
+thing that happens to you and is much more legible.
+
+## 3. The ladder
+
+Each rung is one purchase and one new problem. Nothing unlocks by date.
+
+| | You buy | The new problem |
 |---|---|---|
-| Trucks | you have no capacity | your yard is too far from the work |
-| Yards | your yard is too far from the work | your best routes are congested |
-| Modes | congestion on the road | the line costs you a fee per wagon |
-| Buy infrastructure | you pay to use everything | you own it, and it needs maintaining |
-| Build infrastructure | what exists is the wrong shape | you decide the shape |
+| 1 | **trucks** | which contracts are worth taking |
+| 2 | **production** — a dairy, a mill, a quarry | you make your own freight now, and it needs *different vehicles* |
+| 3 | **facilities** — a weighbridge, a chiller, a tank bay | this yard cannot handle that vehicle |
+| 4 | **more yards** | where they go decides what you can reach |
+| 5 | **distribution centres** | consolidation: many small drops instead of one big haul |
+| 6 | **influence** | you cannot expand until the district lets you |
 
-The old draft had four acts and eight eras and no answer to "what is the
-problem right now". This table is that answer.
+The arc in the player's words: *I work for someone, then I start buying the
+land.*
 
----
+### Why buying production is the pivot
 
-## 2. Yards
+Taking contracts is working for other people. Buying the creamery means the
+milk contract is now *yours to set*, and it means you need a tanker rather than
+a flatbed, and a tanker needs a bay your yard has not got.
 
-**The yard is the unit of expansion**, and this is the structural idea the
-previous draft was missing entirely.
+That single purchase creates three problems at once, all of them concrete, all
+of them solved by another purchase. That is the engine of the whole game and it
+needs no new systems to work.
 
-- A yard is a site you own. Vehicles are based there, serviced there, and
-  return there.
-- A yard has a **catchment**. A route whose ends are far from any yard costs
-  more to run — empty running, driver hours, a fitter who has to drive out.
-- Buying a second yard does not make your existing routes better. It opens work
-  you could not previously reach at a price that worked.
-- Yards cost to buy and cost to keep.
+### Facilities, which are the good constraint
+
+A yard is not a spawn point. It has **facilities**, and a vehicle needs the
+right one:
 
-That makes expansion a *geographic* decision rather than a numeric one. "Buy a
-yard at Aldbridge" is legible in a way "increase capacity by 20%" never is, and
-it puts a map decision at the centre of the second act.
+| Facility | Needed by |
+|---|---|
+| Weighbridge | tippers, bulk |
+| Chiller | refrigerated |
+| Tank bay | tankers |
+| Long bay | artics |
+| Workshop | keeps the whole fleet running |
 
-A yard is also where the fleet becomes visible. Two trucks in a yard is a
-picture; two trucks in a spreadsheet is not.
-
----
-
-## 3. Routing
-
-A **service** is a list of stops. Vehicles based at a yard run it.
-
-- Two stops is the normal case: collect here, deliver there.
-- Three is the useful case, and the district rewards it — grain to the mill and
-  feed back is not clever, it is what any operator does.
-- Payment is per load, by distance actually travelled and what the load is
-  worth.
-
-**Perishable loads.** Milk and dairy have hours, not days. One field on a cargo,
-not a system, and it does more work than any other number in the game: it makes
-the opening job matter, it makes congestion hurt immediately rather than
-eventually, and it gives a reason to prefer a shorter route that is not merely
-arithmetic.
-
-**Cut:** contracts, bidding, deadlines, penalties, reliability ratings,
-objectives. A route that pays is its own reward.
-
----
-
-## 4. Traffic that is not yours
-
-The most important thing in this rewrite, and the thing that makes rung 4 work
-without AI companies.
-
-**The district has its own traffic.** Farmers' vans, other people's lorries,
-buses, private cars. It is modelled as a **flow on each way**, not as agents: a
-volume with an origin and destination distribution, which responds to what a
-way costs and how congested it is.
-
-This is cheap — no fleets, no decisions, no bankruptcies, no per-company
-pathfinding — and it delivers three things nothing else does:
-
-**It makes a toll worth collecting.** You cannot charge rent to nobody. The old
-draft's answer was four AI companies and roughly two thousand lines of rival
-logic, regulation and access agreements; and when it was finally measured, rent
-was **8.76% of income**. A flow pays the toll for a fraction of the cost.
-
-**It gives the toll a self-balancing curve.** Raise the charge and the flow
-diverts or stays home; lower it and it comes back. There is a revenue-maximising
-price and it moves as the district grows. That is the mechanic the old design
-wanted (its §3.3) and it works better against a demand curve than against
-agents, because a curve cannot go bankrupt or behave stupidly.
-
-**It makes congestion honest.** The lane through the village is busy because it
-is a village. Your sixth truck is the straw, not the whole load. That is truer,
-and it means the queue you have to solve is not one you can solve by simply
-running fewer vehicles.
-
-Your own vehicles cross your own ways free. That is the whole of "buying it
-turns a cost into an income".
-
----
-
-## 5. Traffic and junctions
-
-Vehicles are individually simulated. They occupy cells on a way, queue at
-junctions, and a junction has finite capacity. Background flow occupies the same
-capacity.
-
-This is what makes building interesting rather than decorative. Without it a
-road is a line and more vehicles is always better. With it, the junction where
-three of your routes meet is where the network fails, and it fails visibly — a
-queue is the information, not a warning icon.
-
-The fix is always a decision with a price: a wider way, a different route, a
-bypass round the village, grade separation, or fewer vehicles running better.
-
-The junction editor is a first-class screen. You lay out approaches, priorities
-and separation, and watch traffic run through it.
-
-**Kept in full.** This is where the game is.
-
----
-
-## 6. Building and owning
-
-### Owning
-
-Every way has an owner. At the start that is the council, and you pay per
-crossing. You can **pay**, **buy**, or **build**.
-
-Buying is rung 4 and it is the pivot of the game: the road you have been paying
-to use starts paying you, because most of the traffic on it was never yours.
-Valuation is a multiple of what it earns, so a way is expensive exactly when it
-is worth having.
-
-The same object escalates. The branch line is met three times: first you **pay**
-a fee per wagon to send freight down somebody else's line; then you **buy** the
-line and the fee stops and other people's freight starts paying you; then you
-**extend** it to somewhere it never went. One asset, three acts, no new systems.
-
-Maintenance is the counterweight. An owned way decays and costs to keep, and a
-derelict way earns nothing and is visibly derelict.
-
-### Building
-
-Laying way across terrain, and the terrain fighting back.
-
-- Gradient limits, and they bite. A loaded artic on a 1-in-8 lane is a problem.
-- Cuttings and embankments, priced by earth moved.
-- Bridges, culverts, and the occasional tunnel.
-- Junction geometry, because a T-junction onto an A-road is not free.
-
-The terrain is generated with a real erosion pass — stream-power incision and
-talus — so it has valleys that drain and ridges that are ridges. **The valleys
-are the natural routes, so the map argues about where a road should go before
-you have drawn one.**
-
-Four classes of way, no more: farm track, lane, road, dual carriageway.
-
----
-
-## 7. Growth and amenity
-
-### Growth
-
-The payoff. The district responds to being served.
-
-**Settlements** have a basket of things they want, sized to population,
-part-supplied locally and the rest arriving by road. Serve one and it grows.
-Neglect one and it shrinks. A well-served village becomes a town.
-
-This already works in the simulation — a settlement fed everything it asked for
-grew from 2,712 to 88,248 over a century. What it has never done is happen
-*because of the player*, because four AI carriers were doing the serving badly.
-Now there is only you.
-
-**Industry** needs inputs delivered and output collected. Both and it runs,
-expands, and a second one opens. Starve it and it closes. Chains are two steps
-at most.
-
-**Feedback has to be fast.** Growth is visible within a game month, in the world
-rather than in a panel: the buildings change and the street gets longer.
-
-### Amenity
-
-An industrial estate next to a village is worth money and costs the village
-something. A quarry is worth more and costs more. A bypass takes the lorries out
-of the high street and puts them past somebody's garden.
-
-This is **in**, not deferred. In a game whose top rung is deciding where things
-go, siting industry without a downside is not a decision. Amenity is a field
-over the map — industry lowers it in a radius, traffic lowers it along a way —
-and a settlement's growth and its basket both respond.
-
-One system, already written, 217 lines. It is the counterweight that stops rung
-5 being a shopping list.
-
----
-
-## 8. One era, and what it bought
-
-The game is 1985 to 1995. One decade, one visual language, one vehicle set.
-
-This is the largest cut in the project and most of the previous draft's
-difficulty was downstream of spanning 240 years.
-
-**It removed content multiplication.** Forty-four vehicles becomes nine. Three
-building languages become one.
-
-**It removed a whole class of bug.** Era-gated baskets, so a town wanted
-electronics in 1860 and its satisfaction capped at 70%. Rates flat across eight
-eras while vehicle costs rose tenfold, so every region had no vehicles by year
-80. Starting capital fixed at 1860 levels, so nobody founded after era three
-could buy anything. All era bugs, all now impossible.
-
-**It removed the art coherence risk**, which the old register rated Medium:
-*"eight eras of assets drift in style."*
-
-**It removed the obsolescence cliff.** Vehicles wear out and break down; they
-do not become worthless because a decade turned.
-
-Eras were carrying the sense of advancement. That job now belongs to the ladder,
-which is what the game was always actually about. The old draft spent its whole
-budget on the wrong axis.
-
-### On the calendar, honestly
-
-Cutting history makes the time problem smaller. It does not solve it.
-
-Any transport game has a contradiction: a vehicle must take tens of seconds to
-make a journey you can watch, and a calendar must advance fast enough for
-progression. Realistic road speeds make those incompatible by two orders of
-magnitude. The old draft's answer was a document apologising for it.
-
-The answer here is to **stop showing the player a unit they can do arithmetic
-with.**
-
-- The player-facing unit is the **week**. Accounts are monthly.
-- There is no day in the interface. A day exists in the simulation as a bucket
-  for daily rates and nowhere else.
-- Three collections a week is a real haulage pattern, so what the player *can*
-  see is not absurd.
-- Speeds are shown in mph as flavour, never beside a duration.
-
-| | Value | Real time at 1× |
-|---|---|---|
-| Tile | 32 m — unchanged, so existing art scale holds | |
-| District | 256 × 256, about 8 km square | |
-| Tick | 20 Hz | |
-| Day | 800 ticks — a rate bucket, never shown | 40 s |
-| Week | 6 days | 4 min |
-| Month | 4 weeks | 16 min |
-| Year | 12 months | 3¼ h |
-| Campaign | 10 years | 32 h, or 6½ h at 5× |
-| Speeds | 1×, 2×, 5×. No 20×. | |
-
-**The sun, and what dropping 20× did and did not fix.** A game day is forty real
-seconds at 1× and eight at 5×, so a sun coupled directly to the calendar is a
-real day at the slowest speed and a flicker at the quickest. Dropping 20× made
-that better and not well: eight seconds is still not a day.
-
-So the sun tracks the game clock with a floor on how long a cycle may take —
-forty seconds, which is exactly a game day at 1×. At 1× and 2× the sun *is* the
-game's day. At 5× it falls behind the date and keeps moving at a watchable rate.
-Because no day is ever printed, there is nothing on screen for it to contradict,
-and art.md §8 is what licenses it: light is mood and never information.
+So "buy a tanker" fails with *your yard has no tank bay*, and that is a good
+failure: it is one sentence, it is obviously true, and the fix is a purchase.
+
+## 4. Influence, and how it stays out of the way
+
+Late on, you want to expand — a bigger yard, a new distribution centre, a road.
+The district has to allow it, and whether it does depends on an **approval
+rating** you have been affecting all along without being asked to care.
+
+- It goes up when you pay your taxes, keep lorries out of villages, and serve
+  places nobody else serves.
+- It goes down when you put quarries next to houses and run artics down lanes.
+
+**Nobody looks at this number for the first several hours, and that is the
+design.** It sits in the background until the moment it gates something you
+want, and then it is suddenly the most interesting thing on screen — and it is
+too late to fix quickly, which is what makes it a real constraint rather than a
+slider.
+
+This is the "almost the mayor's job" ending, arrived at from the haulage side.
+
+## 5. What is explicitly not in it
+
+**No price negotiation.** The player's own call, and right: haggling adds a
+dialogue to every transaction and buys nothing a purchase decision does not
+already give.
+
+**No AI rival companies.** With rivals the district changes for reasons that
+are not yours, which is fatal to a building game.
+
+**No route editor, no stop lists, no timetables.** A contract is two places.
+
+**No eras.** One time, one visual language, no obsolescence.
+
+**No multiplayer**, and therefore no deterministic-lockstep constraint on every
+line of code.
+
+## 6. The screens, and there are five
+
+| Screen | What is on it |
+|---|---|
+| **The district** | The map. Click anything. |
+| **Contracts** | On a place: what work it is offering. Accept, decline. |
+| **Yard** | Its trucks, its facilities, what it cannot take and why. |
+| **Vehicles** | Buy one. Greyed out with a reason if no yard can take it. |
+| **Books** | One page: money in, money out, what you own. |
+
+That is the whole interface. If something does not fit on those five, it is not
+in the game yet.
+
+The old build had fifteen buttons in one rail and twenty overlay modes. The cap
+here is a number and a breach is a bug: **no more than eight controls visible at
+once.**
+
+## 7. Scale, derived from the camera
+
+The old spec picked a tile size and a world size and then discovered what a
+lorry looked like. Backwards. Run it the other way:
+
+- A lorry has to read. Call that **40 px**.
+- So a tile is 40 px, and a 1920 px frame shows **26 tiles**.
+- A lorry is drawn **about one tile long** — generous in metres, correct on
+  screen. Every game in this genre draws its vehicles oversized; this one says
+  so.
+- **A tile has no metric size.** A tile is a fifth of a field. A haul is twenty
+  to fifty tiles. There is nothing left to reconcile, which is why there is no
+  longer a document apologising for the scale.
+
+| | |
+|---|---|
+| District | 128 × 128 tiles |
+| Field | 5–13 tiles across, by recursive subdivision |
+| Settlements | one village, one small town, a hamlet |
+| Farms and works | ~12 at the start |
+| A haul | 20–50 tiles, under a minute |
+
+## 8. What the world is made of
+
+Straight off the target frame, and this is the renderer's contract:
+
+- **Fields by recursive subdivision**, each one crop, with crop rows. Not
+  per-tile biome colour — that reads as camouflage.
+- **Hedgerows as geometry** on the parcel boundaries, thin and dark, with gaps
+  where a road crosses.
+- **Roads with hierarchy**: an A-road spine, lanes, farm tracks. Drawn as verge
+  plus cambered surface plus worn wheel tracks plus dashed lining. Few of them,
+  each one properly.
+- **Real directional shadows** from a low sun.
+- **A saturated pastel palette** under a standard view transform.
+- **Trees with multi-lobe canopies.**
+
+## 9. Order of work
+
+Look first. The old roadmap put art in phase six of six and by the time it
+arrived the mistakes were geometric.
+
+1. **The district, looking like the frame.** Terrain, fields, hedges, roads,
+   shadows, one truck driving. No economy at all. If this is not lovely with one
+   truck on one road, nothing later saves it.
+2. **Contracts.** Click a farm, take the milk run, get paid.
+3. **Fleet and yards.** Buy trucks. Facilities gate them.
+4. **Buying production.** The pivot.
+5. **Distribution centres.**
+6. **Influence and the planning board.**
+
+Each step is playable and each step gets deployed so it can be played.
