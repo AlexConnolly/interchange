@@ -258,13 +258,7 @@ export function Services({
         }}>+ New</button>
       </h2>
       <div className="body">
-        {list.length === 0 && (
-          <div style={{ padding: '12px 10px', fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
-            A service is a round of stops your vehicles run over and over.
-            Create one, click an industry on the map to collect from, then click
-            where it should go.
-          </div>
-        )}
+        {list.length === 0 && <FirstRoute engine={engine} />}
         {list.map((i) => {
           const stops = w.services.stopCount[i];
           const profit = w.services.revenue[i] - w.services.costs[i];
@@ -582,6 +576,73 @@ export function FleetList({ engine, onSelect }: { engine: Engine; onSelect: (id:
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/**
+ * What to do first, and why that and not something else.
+ *
+ * features.md says Act I is the tutorial and that was the point of the arc,
+ * which is right — but there is exactly one decision in the opening that
+ * separates a company that gets going from one that quietly fails, and a
+ * player has no way to know it in advance.
+ *
+ * The opening harness measured it. Running the nearest producer-to-town pair
+ * loses nine hundred pounds in twelve years; running the nearest *extraction*
+ * site to a town makes eleven hundred. The difference is that a works only
+ * makes anything while somebody brings it materials, and at the start of the
+ * game nobody does — so it runs through its opening stock and stops. A pit
+ * digs its cargo out of the ground and never stops.
+ *
+ * That is a genuinely interesting thing to work out, and a player who works
+ * it out has learned something real about the game. But working it out costs
+ * twelve years and a company, and finding out afterwards is not a lesson, it
+ * is a wasted evening. So the first route names a specific pit, and says why
+ * it is a pit.
+ */
+function FirstRoute({ engine }: { engine: Engine }): JSX.Element {
+  const w = engine.world;
+  const suggestion = useMemo(() => {
+    let best: { site: number; town: number; d: number } | null = null;
+    for (let s = 0; s < w.sites.count; s++) {
+      if (!w.sites.connected(s) || !w.sites.isExtraction(s)) continue;
+      const outs = C.industries[w.sites.def[s]].recipe.outputs;
+      let wanted = false;
+      for (const id of Object.keys(outs)) {
+        const ci = C.cargoIndex.get(id);
+        if (ci !== undefined && w.townDemandFor(ci) > 0) wanted = true;
+      }
+      if (!wanted) continue;
+      for (let t = 0; t < w.towns.count; t++) {
+        const d = Math.hypot(w.sites.x[s] - w.towns.x[t], w.sites.y[s] - w.towns.y[t]);
+        if (d < 8 || d > 60) continue;
+        if (!best || d < best.d) best = { site: s, town: t, d };
+      }
+    }
+    return best;
+  }, [w.services.count]);
+
+  return (
+    <div style={{ padding: '12px 10px', fontSize: 12, color: 'var(--ink-dim)', lineHeight: 1.6 }}>
+      <p style={{ margin: '0 0 10px' }}>
+        A service is a round of stops your vehicles run over and over. Create
+        one, click an industry on the map to collect from, then click where it
+        should go.
+      </p>
+      {suggestion && (
+        <p style={{ margin: 0 }}>
+          For a first route, try the{' '}
+          <strong style={{ color: 'var(--ink)' }}>
+            {C.industries[w.sites.def[suggestion.site]].name.toLowerCase()}
+          </strong>{' '}
+          near <strong style={{ color: 'var(--ink)' }}>{w.towns.names[suggestion.town]}</strong>,
+          about {Math.round(suggestion.d)} tiles apart. Start from something that
+          digs its cargo out of the ground rather than a works: a works only
+          makes anything while somebody brings it materials, and at the moment
+          nobody does.
+        </p>
+      )}
     </div>
   );
 }
