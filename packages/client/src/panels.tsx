@@ -687,7 +687,9 @@ export function CharterPanel({ engine }: { engine: Engine }): JSX.Element {
           {have === 2 && 'You may found industry. Power, water and workers are three separate networks and a mine needs all three.'}
           {have === 3 && 'You shape what the region is.'}
         </div>
-        {have < 3 && goals.map((g) => {
+        {/* A requirement of nothing is not a requirement. Showing "0 of 0 —
+            met" reads as a condition somebody forgot to fill in. */}
+        {have < 3 && goals.filter((g) => g.need > 0).map((g) => {
           const done = g.have >= g.need;
           const frac = Math.min(1, g.have / g.need);
           const fmt = g.need > 1000 ? shortMoney : num;
