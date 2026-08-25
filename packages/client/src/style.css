@@ -880,3 +880,17 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .ring-moon { fill: rgba(120, 140, 190, 0.85); }
 
 .row-icon { width: 26px; flex: 0 0 26px; display: grid; place-items: center; }
+
+/* Touch: the canvas handles its own gestures.
+ *
+ * Without `touch-action: none` the browser claims the drag for scrolling and the
+ * pinch for page zoom, and the game receives neither — the pointer events fire
+ * once and then stop as soon as the browser decides it is a scroll. This one
+ * line is the difference between the map responding to touch and not. */
+.world {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* And nothing in the interface should be draggable-selectable on a phone. */
+.dock, .hud, .bubble { -webkit-user-select: none; user-select: none; }

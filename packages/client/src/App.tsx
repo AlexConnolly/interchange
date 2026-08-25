@@ -550,6 +550,20 @@ export function App(): JSX.Element {
      * largest settlement and trusting the generator gave a valley of quarries
      * and sawmills with no dairy anywhere in it.
      */
+    /*
+     * Where in the day the game opens, overridable from the address bar.
+     *
+     * 0.46 is the late afternoon of the target frame. `?time=0.85` starts at
+     * night, which exists because checking anything about the dark — lamps,
+     * cat's eyes, lit windows — otherwise means waiting out a four-minute day,
+     * and a thing that is awkward to look at is a thing that stays broken.
+     */
+    const params = new URLSearchParams(window.location.search);
+    const asked = Number(params.get('time'));
+    const dayOffset = Number.isFinite(asked) && params.has('time')
+      ? ((asked % 1) + 1) % 1
+      : 0.46;
+
     const opening = world.planOpening();
     const inset = DISTRICT * 0.3;
     const clamp = (v: number): number => Math.max(inset, Math.min(DISTRICT - inset, v));
@@ -738,12 +752,45 @@ export function App(): JSX.Element {
 
     // Drag to pan, wheel to zoom. Two gestures, which is the whole of the
     // camera: the eight-control budget does not have room for a camera panel.
+    /*
+     * One finger pans, two fingers pinch.
+     *
+     * Pointer events already gave touch the drag for free, which is why it was
+     * easy to miss that there was no way to zoom at all on a phone: the wheel
+     * handler is the only zoom in the game and a touchscreen has no wheel.
+     *
+     * Tracking a *map* of live pointers rather than a single one is what makes
+     * both gestures fall out of the same three handlers. With one pointer down
+     * it is a drag; the moment a second arrives the gesture becomes a pinch and
+     * the drag stops, because a two-finger drag that also panned would fight the
+     * zoom and neither would feel controlled. Lifting back to one finger resumes
+     * panning from wherever that finger now is, so the transition does not jump.
+     */
+    const live = new Map<number, { x: number; y: number }>();
     let dragging = false;
     let lastX = 0;
     let lastY = 0;
     let downX = 0;
     let downY = 0;
+    /** Distance between the two fingers when the pinch began, and the zoom then. */
+    let pinchFrom = 0;
+    let pinchTiles = 0;
+
+    const spread = (): number => {
+      const pts = [...live.values()];
+      if (pts.length < 2) return 0;
+      return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    };
+
     const down = (e: PointerEvent): void => {
+      live.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (live.size >= 2) {
+        // Second finger: stop panning and start pinching.
+        dragging = false;
+        pinchFrom = spread();
+        pinchTiles = renderer.tilesAcross;
+        return;
+      }
       dragging = true;
       lastX = e.clientX;
       lastY = e.clientY;
@@ -751,7 +798,21 @@ export function App(): JSX.Element {
       downY = e.clientY;
       canvas.setPointerCapture(e.pointerId);
     };
+
     const move = (e: PointerEvent): void => {
+      const held = live.get(e.pointerId);
+      if (held) { held.x = e.clientX; held.y = e.clientY; }
+
+      if (live.size >= 2) {
+        const now = spread();
+        if (pinchFrom > 8 && now > 8) {
+          // Fingers apart means zoom in, which means *fewer* tiles across.
+          const next = pinchTiles * (pinchFrom / now);
+          renderer.tilesAcross = Math.max(14, Math.min(70, next));
+          fit();
+        }
+        return;
+      }
       if (!dragging) return;
       // Grab-and-pull, and the renderer owns the arithmetic because it is the
       // thing that knows where the camera is pointing.
@@ -760,8 +821,28 @@ export function App(): JSX.Element {
       lastY = e.clientY;
     };
     const up = (e: PointerEvent): void => {
-      dragging = false;
+      const wasPinching = live.size >= 2;
+      live.delete(e.pointerId);
       if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+      if (wasPinching) {
+        /*
+         * Coming out of a pinch. If one finger is still down, carry on panning
+         * from where *it* is — reading the remaining pointer rather than the one
+         * that left, or the map jumps by the width of the pinch on the next
+         * move. And a pinch is never a click.
+         */
+        dragging = false;
+        const rest = [...live.values()][0];
+        if (rest) {
+          dragging = true;
+          lastX = rest.x;
+          lastY = rest.y;
+          downX = rest.x;
+          downY = rest.y;
+        }
+        return;
+      }
+      dragging = false;
       /*
        * A click, not a drag.
        *
@@ -845,9 +926,17 @@ export function App(): JSX.Element {
     window.addEventListener('keyup', keyUp);
     window.addEventListener('blur', blur);
 
+    const cancel = (e: PointerEvent): void => {
+      // A pointer the browser takes away — a system gesture, an incoming call —
+      // never sends `pointerup`. Without this the map believes a finger is still
+      // down and the next touch is read as the second half of a pinch.
+      live.delete(e.pointerId);
+      dragging = false;
+    };
     canvas.addEventListener('pointerdown', down);
     canvas.addEventListener('pointermove', move);
     canvas.addEventListener('pointerup', up);
+    canvas.addEventListener('pointercancel', cancel);
     canvas.addEventListener('wheel', wheel, { passive: false });
 
     let raf = 0;
@@ -1007,7 +1096,7 @@ export function App(): JSX.Element {
        * dark, which is a poor first frame for a game whose whole argument is how
        * it looks in the sun.
        */
-      src.dayFraction = ((world.tick + TICKS_PER_DAY * 0.46) % TICKS_PER_DAY) / TICKS_PER_DAY;
+      src.dayFraction = ((world.tick + TICKS_PER_DAY * dayOffset) % TICKS_PER_DAY) / TICKS_PER_DAY;
       // One number, read by the renderer to paint the season and by the traffic
       // to decide who can move. There is deliberately not a second one.
       src.snow = world.snow;
@@ -1056,6 +1145,7 @@ export function App(): JSX.Element {
       canvas.removeEventListener('pointerdown', down);
       canvas.removeEventListener('pointermove', move);
       canvas.removeEventListener('pointerup', up);
+      canvas.removeEventListener('pointercancel', cancel);
       canvas.removeEventListener('wheel', wheel);
       window.removeEventListener('keydown', keyDown);
       window.removeEventListener('keyup', keyUp);

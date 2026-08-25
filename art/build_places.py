@@ -58,6 +58,49 @@ def _paint(obj, rgba, name, rough=0.75, metal=0.0):
     return obj
 
 
+# Warm, and warmer than you would guess. A window at night is tungsten, which is
+# far more orange than daylight, and a lit window painted "pale yellow" reads as
+# a hole in the wall rather than as a room with somebody in it.
+WINDOW = (1.0, 0.72, 0.34, 1.0)
+WINDOW_DIM = (0.26, 0.15, 0.05, 1.0)
+
+
+def windows(name, w, d, wall, floor=0.0, rows=1, warm=WINDOW):
+    """Lit windows on the two long walls.
+
+    Painted with the reserved `lamp` slot, so `glb.ts` pulls them into the
+    unlit geometry and the renderer fades them up as it gets dark — exactly the
+    machinery the vehicle lamps already use. A building needs no new system to
+    light up; it needs its windows to say they are lamps.
+
+    This is most of what a village at night *is*. The district had cat's eyes on
+    the roads and lights on the traffic and the houses were black lumps, which
+    reads as an evacuation rather than as evening.
+    """
+    made = []
+    lit = lib.material(lib.LAMP + '_win', warm, emissive=2.4, rough=0.3)
+    halo = lib.material(lib.LAMP + '_winh', WINDOW_DIM, emissive=1.0, rough=0.4)
+    ww = min(0.055, w * 0.16)
+    wh = min(0.055, wall * 0.34)
+    for r in range(rows):
+        z = floor + wall * (0.34 + r * 0.42)
+        for sy in (-1, 1):
+            for k in (-1, 1):
+                x = k * w * 0.24
+                o = lib.box('%s_win%d%d%d' % (name, r, sy, k), (ww, 0.014, wh),
+                            loc=(x, sy * (d / 2 + 0.004), z))
+                o.data.materials.append(lit)
+                made.append(o)
+                # The spill on the wall round it. Additive and dim, so it reads
+                # as light coming out rather than as a bigger window.
+                h = lib.box('%s_winh%d%d%d' % (name, r, sy, k),
+                            (ww * 2.6, 0.008, wh * 2.6),
+                            loc=(x, sy * (d / 2 + 0.001), z))
+                h.data.materials.append(halo)
+                made.append(h)
+    return made
+
+
 # ------------------------------------------------------------- the vocabulary
 
 def pitched(name, w, d, wall, rise, body, roof, ridge='x', eaves=0.07):
@@ -93,6 +136,7 @@ def house(name, w=0.46, d=0.38, wall=0.26, body=BRICK, roof=SLATE, ridge='x'):
         lib.box(name + '_stack', (0.055, 0.055, 0.18),
                 loc=(w * 0.3, 0, wall + wall * 0.80)),
         BRICK, name + '_stackmat'))
+    made += windows(name, w, d, wall)
     return made
 
 
@@ -101,6 +145,10 @@ def barn(name, w=0.80, d=0.42, wall=0.24, body=TIMBER, roof=STEEL, ridge='x',
     """A long shed. Open-ended ones get a dark recess, which reads as a doorway
     a lorry could back into and costs two triangles."""
     made = pitched(name, w, d, wall, wall * 0.55, body, roof, ridge)
+    # One pair of windows on a shed rather than the house's two: a barn with a
+    # light on has somebody working late in it, and a barn lit like a terrace
+    # reads as a hotel.
+    made += windows(name, w * 0.7, d, wall * 0.9)
     if open_end:
         made.append(_paint(
             lib.box(name + '_mouth', (0.02, d * 0.62, wall * 0.78),

@@ -72,27 +72,55 @@ def wheels(name, axles, half_width, radius, length):
 def lamps(name, nose, tail, half_width, height):
     """Head and tail lamps.
 
-    Generously sized - four times a real lamp - because a light is the one part
-    of a vehicle allowed to be bigger than life. At night on a dark lane a pair
-    of white dots moving is the most legible thing this renderer can draw.
+    Absurdly sized, and it took two goes to be absurd enough.
+    
+    The first pass called them "four times a real lamp" and they came out at
+    about a pixel and a half at playing zoom - so at night the district had cat's
+    eyes glowing along every lane and the traffic on it was invisible. A light is
+    the one part of a vehicle allowed to be bigger than life, and being timid
+    about it means the whole reason for having night goes to waste.
+
+    Overshot on the second go and came back: at a fifth of the vehicle's width
+    the lamps were glowing panels with a lorry hidden behind them. The figure
+    that works is a core about a ninth of the width with a dim halo twice that -
+    five or six pixels at playing zoom against a forty-pixel lorry, so it reads
+    as a lamp *on* something rather than as a light in the air.
     """
     made = []
     white = lib.material(lib.LAMP, LAMP_WHITE, emissive=3.0, rough=0.25)
     red = lib.material(lib.LAMP + '_red', LAMP_RED, emissive=2.6, rough=0.25)
-    for side in (-1, 1):
-        f = lib.box('%s_head%d' % (name, side),
-                    (0.030, 0.048, 0.046),
-                    loc=(nose, side * half_width * 0.62, height))
+    # A dim, wide halo round each lamp. The glow mesh is blended *additively*, so
+    # a darker colour over a larger area is a softer light — no second material,
+    # no second draw, just a bigger box painted fainter. It is what turns a lamp
+    # from a lit pixel into something that reads as shining.
+    halo_w = lib.material(lib.LAMP + '_halo', (0.22, 0.20, 0.15, 1.0),
+                          emissive=1.0, rough=0.4)
+    halo_r = lib.material(lib.LAMP + '_halor', (0.24, 0.02, 0.01, 1.0),
+                          emissive=1.0, rough=0.4)
+    for i, side in enumerate((-1, 1)):
+        f = lib.box('%s_head%d' % (name, i),
+                    (0.026, 0.062, 0.056),
+                    loc=(nose, side * half_width * 0.60, height))
         f.data.materials.append(white)
         made.append(f)
-        # Bigger than the headlamp, not smaller. A tail lamp is the thing you
-        # see most of on a road full of traffic going the same way as you, and
-        # at this size it was two pixels.
-        r = lib.box('%s_tail%d' % (name, side),
-                    (0.026, 0.050, 0.046),
-                    loc=(tail, side * half_width * 0.62, height * 0.86))
+        fh = lib.box('%s_headh%d' % (name, i),
+                     (0.014, 0.125, 0.115),
+                     loc=(nose + 0.006, side * half_width * 0.60, height))
+        fh.data.materials.append(halo_w)
+        made.append(fh)
+
+        # Bigger than the headlamp, not smaller. A tail lamp is what you see most
+        # of on a road full of traffic going the same way as you.
+        r = lib.box('%s_tail%d' % (name, i),
+                    (0.024, 0.068, 0.060),
+                    loc=(tail, side * half_width * 0.60, height * 0.88))
         r.data.materials.append(red)
         made.append(r)
+        rh = lib.box('%s_tailh%d' % (name, i),
+                     (0.013, 0.135, 0.122),
+                     loc=(tail - 0.006, side * half_width * 0.60, height * 0.88))
+        rh.data.materials.append(halo_r)
+        made.append(rh)
     return made
 
 
@@ -281,7 +309,9 @@ def main():
     #
     # Dozens of vehicles at 450 triangles each is a few tens of thousands, on a
     # ground pass already drawing sixteen thousand. It is not the frame.
-    lib.summarise(report, budget=480)
+    # 560, up from 480. The halos round the lamps are four boxes a vehicle and
+    # they are the difference between a lorry at night being visible and not.
+    lib.summarise(report, budget=560)
 
 
 if __name__ == '__main__':

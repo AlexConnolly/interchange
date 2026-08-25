@@ -713,7 +713,8 @@ export class Renderer {
    * it.
    */
   setPlaceModels(models: Model[], capacity = 64): void {
-    for (const b of this.placeBatches) {
+    for (const b of [...this.placeBatches, ...this.placeLamps]) {
+      if (!b) continue;
       this.places.remove(b);
       b.dispose();
     }
@@ -731,7 +732,31 @@ export class Renderer {
       this.places.add(mesh);
       return mesh;
     });
+    /*
+     * And the windows, which this used to throw away.
+     *
+     * `setPlaceModels` took only `model.body` and dropped `model.lamps`, so a
+     * building could be painted with the reserved lamp slot all it liked and
+     * nothing would ever draw it — the village stayed black at midnight while
+     * the traffic on the road beside it carried lights. The fleet had this from
+     * the start; the buildings did not, which is exactly the sort of asymmetry
+     * that survives because both halves look correct on their own.
+     */
+    this.placeLamps = models.map((model) => {
+      if (!model.lamps) return null;
+      const mesh = new InstancedMesh(model.lamps, this.glow, capacity);
+      // A lit window does not cast a shadow. It is a hole letting light out.
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.frustumCulled = false;
+      mesh.count = 0;
+      mesh.visible = false;
+      this.places.add(mesh);
+      return mesh;
+    });
   }
+
+  private placeLamps: (InstancedMesh | null)[] = [];
 
   /**
    * Hand the renderer the scatter models.
@@ -792,6 +817,11 @@ export class Renderer {
   }
 
   private scatterKey = '';
+  /*
+   * Nothing here needs redoing when night falls: the lamp meshes hold the same
+   * matrices as the bodies for as long as the bodies do, and how lit they are is
+   * the shared glow material's opacity. One write a frame, in `placeSun`.
+   */
 
   private updatePlaces(src: RenderSource): void {
     if (this.placeBatches.length === 0) return;
@@ -829,13 +859,21 @@ export class Renderer {
       this.tmp.position.set(x, y, z);
       this.tmp.rotation.set(0, src.pRot[i] * Math.PI * 2, 0);
       this.tmp.updateMatrix();
-      batch.setMatrixAt(counts[mi]++, this.tmp.matrix);
+      const at = counts[mi]++;
+      batch.setMatrixAt(at, this.tmp.matrix);
+      this.placeLamps[mi]?.setMatrixAt(at, this.tmp.matrix);
     }
     for (let mi = 0; mi < this.placeBatches.length; mi++) {
       const batch = this.placeBatches[mi];
       batch.count = counts[mi];
       batch.visible = counts[mi] > 0;
       batch.instanceMatrix.needsUpdate = true;
+      const lamp = this.placeLamps[mi];
+      if (lamp) {
+        lamp.count = counts[mi];
+        lamp.visible = counts[mi] > 0;
+        lamp.instanceMatrix.needsUpdate = true;
+      }
     }
   }
 
