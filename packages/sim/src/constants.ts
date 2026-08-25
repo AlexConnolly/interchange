@@ -235,3 +235,7 @@ export const PUBLIC_STANDARD = 150;
  * even though it lives here.
  */
 export const ACCESS_SCALE = 3;
+
+/** Days a company may sit with no fleet and no means of getting one before the
+ *  region stops pretending it is still trading. Three years. */
+export const STALLED_DAYS = DAYS_PER_YEAR * 3;

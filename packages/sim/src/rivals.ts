@@ -27,7 +27,7 @@ import { Cmd, cmd } from './commands.ts';
 import { AUTHORITY, FLOW_WINDOW, MAX_COMPANIES, Mode, TICKS_PER_DAY, TICKS_PER_YEAR } from './constants.ts';
 import { Charter, ContractState, Line, LINE_COUNT, MAX_STOPS, StopAction } from './economy.ts';
 import { AgreementState, mustAnswer } from './agreements.ts';
-import { NONE } from './network.ts';
+import { NONE, otherUsers } from './network.ts';
 import type { Rng } from './rng.ts';
 import { SiteState } from './sites.ts';
 import type { World } from './world.ts';
@@ -232,6 +232,62 @@ export function stepRival(w: World, company: number, rng: Rng): void {
     }
   }
 
+  /*
+   * ---- 3b. saving up ----------------------------------------------------
+   *
+   * A company that spends every spare pound on lorries never has the price of
+   * a road, and the sweep showed exactly that: rivals earned construction
+   * charters and then bought nothing for the rest of the century, because
+   * their cash was always near zero on the day they looked. The ownership
+   * spine cannot start until somebody stops buying vehicles for a season.
+   *
+   * So a chartered company that is within reach of a piece of way worth
+   * having puts the money aside instead. Within reach rather than merely
+   * wanting it, or a company would save forever for a bridge it will never
+   * afford and stop growing in the meantime.
+   */
+  let savingFor = 0;
+  if (w.companies.charter[company] >= Charter.Construction) {
+    /*
+     * The reserve, and why it has to work this way round.
+     *
+     * The first attempt only saved when the target was already within reach —
+     * "if I have a third of the price, stop and save the rest" — and a company
+     * that spends every spare pound on lorries never has a third of the price
+     * of anything, so it never started saving and never bought a road. Rivals
+     * earned construction charters and then bought nothing for a century.
+     *
+     * Reserving against the *cheapest worthwhile* way instead turns it round:
+     * the company keeps that much back from the day it is chartered and buys
+     * lorries out of what is left. It grows more slowly and it eventually owns
+     * something, which is the whole of Act II.
+     */
+    let cheapest = Infinity;
+    const windowsPerYear = TICKS_PER_YEAR / FLOW_WINDOW;
+    for (let a = 0; a < w.assets.count; a++) {
+      if (w.assets.owner[a] === company || w.assets.tiles[a] <= 0) continue;
+      if (w.assets.owner[a] !== AUTHORITY && !w.assets.forSale[a]) continue;
+      const price = w.assets.valuation(a, w.content.balance.valuationPct);
+      if (price <= 0 || price >= cheapest) continue;
+      const earns = w.assets.revenuePrev[a] * windowsPerYear;
+      const own = Math.max(0, w.assets.passesPrev[a] - w.assets.foreignPassesPrev[a]);
+      const saves = own * windowsPerYear * w.assets.charge[a] * (w.assets.tiles[a] / 8);
+      if ((earns + saves) * PAYBACK_YEARS - price > 0) cheapest = price;
+    }
+    if (cheapest !== Infinity) savingFor = cheapest;
+  }
+
+  /*
+   * What is left after the reserve. A chartered company buys lorries out of
+   * the money it is not putting aside for a road, and never puts aside more
+   * than half — reserving the whole price meant a fleet withered by attrition
+   * while its owner saved.
+   *
+   * Worked out before the route step, because opening a route is also a
+   * decision about what this company can afford to carry.
+   */
+  const forVehicles = spendable - Math.min(savingFor, Math.max(0, spendable) * 0.5);
+
   // ---- 3. open a new route ----------------------------------------------
   /*
    * How many routes to run — appetite, not means.
@@ -314,7 +370,7 @@ export function stepRival(w: World, company: number, rng: Rng): void {
         return;
       }
     }
-    const pair = bestUnservedPair(w, company, rng);
+    const pair = bestUnservedPair(w, company, rng, forVehicles);
     if (pair) {
       // -1 is "the service I just created". Predicting the id here is what
       // made four companies build each other's routes.
@@ -353,55 +409,9 @@ export function stepRival(w: World, company: number, rng: Rng): void {
     }
   }
 
-  /*
-   * ---- 3b. saving up ----------------------------------------------------
-   *
-   * A company that spends every spare pound on lorries never has the price of
-   * a road, and the sweep showed exactly that: rivals earned construction
-   * charters and then bought nothing for the rest of the century, because
-   * their cash was always near zero on the day they looked. The ownership
-   * spine cannot start until somebody stops buying vehicles for a season.
-   *
-   * So a chartered company that is within reach of a piece of way worth
-   * having puts the money aside instead. Within reach rather than merely
-   * wanting it, or a company would save forever for a bridge it will never
-   * afford and stop growing in the meantime.
-   */
-  let savingFor = 0;
-  if (w.companies.charter[company] >= Charter.Construction) {
-    /*
-     * The reserve, and why it has to work this way round.
-     *
-     * The first attempt only saved when the target was already within reach —
-     * "if I have a third of the price, stop and save the rest" — and a company
-     * that spends every spare pound on lorries never has a third of the price
-     * of anything, so it never started saving and never bought a road. Rivals
-     * earned construction charters and then bought nothing for a century.
-     *
-     * Reserving against the *cheapest worthwhile* way instead turns it round:
-     * the company keeps that much back from the day it is chartered and buys
-     * lorries out of what is left. It grows more slowly and it eventually owns
-     * something, which is the whole of Act II.
-     */
-    let cheapest = Infinity;
-    const windowsPerYear = TICKS_PER_YEAR / FLOW_WINDOW;
-    for (let a = 0; a < w.assets.count; a++) {
-      if (w.assets.owner[a] === company || w.assets.tiles[a] <= 0) continue;
-      if (w.assets.owner[a] !== AUTHORITY && !w.assets.forSale[a]) continue;
-      const price = w.assets.valuation(a, w.content.balance.valuationPct);
-      if (price <= 0 || price >= cheapest) continue;
-      const earns = w.assets.revenuePrev[a] * windowsPerYear;
-      const own = Math.max(0, w.assets.passesPrev[a] - w.assets.foreignPassesPrev[a]);
-      const saves = own * windowsPerYear * w.assets.charge[a] * (w.assets.tiles[a] / 8);
-      if ((earns + saves) * PAYBACK_YEARS - price > 0) cheapest = price;
-    }
-    if (cheapest !== Infinity) savingFor = cheapest;
-  }
-
   // ---- 4. more vehicles on whatever is working --------------------------
   // What is left after the reserve above. A chartered company buys lorries out
   // of the money it is not putting aside for a road.
-  const forVehicles = spendable - savingFor;
   if (mine.length > 0 && forVehicles > 0) {
     // A service with no vehicles gets one unconditionally. Judging it on its
     // returns first is circular — it cannot earn anything until something runs
@@ -545,6 +555,18 @@ export function stepRival(w: World, company: number, rng: Rng): void {
     const best = bestAssetFor(w, company, spendable);
     if (best.asset !== NONE) {
       issue(Cmd.BuyAsset, best.asset);
+      /*
+       * And price it to keep the traffic, rather than inheriting whatever the
+       * authority was charging.
+       *
+       * A new owner who leaves the posted rate where it was often prices
+       * itself out on the first day: the toll curve is real, the traffic goes
+       * round, and the road earns nothing. Coming in below the public rate and
+       * letting the probing loop below feel its way upward is how a business
+       * finds the top of that curve — and it is the only way rent ever starts,
+       * because rent needs somebody else's lorries still using the road.
+       */
+      issue(Cmd.SetCharge, best.asset, Math.max(2, Math.round(w.assets.charge[best.asset] * 0.6)));
       return;
     }
 
@@ -556,12 +578,20 @@ export function stepRival(w: World, company: number, rng: Rng): void {
       if (w.assets.owner[a] !== company) continue;
       const passes = w.assets.passesPrev[a];
       const charge = w.assets.charge[a];
-      if (passes > 40 && charge < 60 && rng.chance(p.aggression, 300)) {
-        issue(Cmd.SetCharge, a, charge + 3);
+      /*
+       * Probe upward while the traffic holds, and back off quickly when it
+       * does not. The thresholds are lower and the reaction faster than they
+       * were: a road wants eight or ten passes a month to be worth anything,
+       * not forty, and an owner who waits for traffic to fall below six before
+       * cutting has already lost it.
+       */
+      const others = otherUsers(w.assets.usersPrev[a], company);
+      if (passes > 12 && others > 0 && charge < 60 && rng.chance(p.aggression, 300)) {
+        issue(Cmd.SetCharge, a, charge + 2);
         return;
       }
-      if (passes < 6 && charge > 2 && rng.chance(60, 300)) {
-        issue(Cmd.SetCharge, a, Math.max(0, charge - 3));
+      if ((passes < 10 || others === 0) && charge > 2 && rng.chance(120, 300)) {
+        issue(Cmd.SetCharge, a, Math.max(1, charge - 3));
         return;
       }
     }
@@ -572,6 +602,32 @@ export function stepRival(w: World, company: number, rng: Rng): void {
     const found = bestFoundable(w, company, rng);
     if (found) issue(Cmd.FoundIndustry, found.def, found.tile);
   }
+}
+
+/**
+ * Is there a vehicle this company could buy today that carries this cargo?
+ *
+ * Asked before a route is planned rather than after it is opened. Food is
+ * refrigerated and the only road reefer in 1960 costs three thousand eight
+ * hundred pounds, so a company with eleven hundred would open a route from a
+ * food works, find nothing it could buy to serve it, and stop dead — a route
+ * with no vehicle on it is the first thing the fleet logic tries to fix, so it
+ * blocks every other decision behind it for as long as it exists. Two of the
+ * three surviving operators in a region were in exactly that state at year a
+ * hundred, with money in the bank and not a vehicle between them.
+ */
+function canAffordToCarry(w: World, cargo: number, budget: number): boolean {
+  const handling = w.content.cargo[cargo]?.handling;
+  if (!handling) return false;
+  const year = w.year;
+  const era = w.era;
+  for (const v of w.content.vehicles) {
+    if (v.era > era || year >= v.obsoleteYear) continue;
+    if (v.mode !== 'road' && v.mode !== 'rail') continue;
+    if (v.cost > budget) continue;
+    if (v.handling.includes(handling as never)) return true;
+  }
+  return false;
 }
 
 /**
@@ -586,7 +642,7 @@ export function stepRival(w: World, company: number, rng: Rng): void {
  * thirty years running services with eighty-day round trips.
  */
 function bestUnservedPair(
-  w: World, company: number, rng: Rng,
+  w: World, company: number, rng: Rng, budget: number,
 ): { from: number; to: number; toIsTown: boolean; onward: number } | null {
   // Keyed by site *and cargo*, not site alone. A gasworks that already receives
   // coal is the best coke origin on the map precisely because it receives coal,
@@ -595,6 +651,32 @@ function bestUnservedPair(
   // backed up and the lorries queued at a gate that would not open.
   const servedOut = new Set<number>();
   const servedIn = new Set<number>();
+  /*
+   * How many *different* companies already deliver to each town.
+   *
+   * A town several carriers serve is a market, and a market is where a
+   * carrier wants to be — the demand is proven and the road to it is already
+   * made. It is also the only way the ownership spine can ever start: rent
+   * requires somebody else's lorries on your road, and four companies each
+   * working a separate corner of the region never meet. At year a hundred and
+   * twenty a region had sixteen vehicles and three assets in use, each by one
+   * company, and rent had been nought per cent for the whole century.
+   *
+   * This is not a thumb on the scale for the mechanic. Trade concentrates on
+   * market towns because that is what a market town is, and the resulting
+   * shared approach roads are exactly the assets worth owning.
+   */
+  const townCarriers = new Map<number, Set<number>>();
+  for (let s = 0; s < w.services.count; s++) {
+    if (!w.services.active[s]) continue;
+    for (let k = 0; k < w.services.stopCount[s]; k++) {
+      const i = s * MAX_STOPS + k;
+      if (w.services.stopKind[i] !== 1) continue;
+      const t = w.services.stopTarget[i];
+      if (!townCarriers.has(t)) townCarriers.set(t, new Set());
+      townCarriers.get(t)!.add(w.services.company[s]);
+    }
+  }
   const carried = new Float64Array(w.content.cargo.length);
   for (let s = 0; s < w.services.count; s++) {
     if (!w.services.active[s]) continue;
@@ -621,6 +703,19 @@ function bestUnservedPair(
       if (ci === undefined) continue;
       const stock = w.sites.stockOf(a, ci);
       if (stock <= 0) continue;
+      /*
+       * And something this company could actually put on it.
+       *
+       * A route is a plan to carry a particular cargo, and planning one you
+       * have no lorry for is planning nothing. Food is refrigerated and the
+       * only road reefer in 1960 costs three thousand eight hundred pounds,
+       * so a company with eleven hundred would open a route from a food works,
+       * find nothing it could buy to serve it, and stop dead — the route
+       * blocking every other decision it might have made. Two of the three
+       * surviving operators in a region were in that state at year a hundred,
+       * with money in the bank and not a vehicle between them.
+       */
+      if (!canAffordToCarry(w, ci, budget)) continue;
       // A cargo nobody carries is worth more than another lorry-load of the one
       // everybody does — both because the margin is better with no competition
       // and because a region where four companies all haul coal is a duller
@@ -678,7 +773,12 @@ function bestUnservedPair(
           if (w.towns.nodeOf(t, Mode.Road) === NONE) continue;
           const d = Math.hypot(w.sites.x[a] - w.towns.x[t], w.sites.y[a] - w.towns.y[t]);
           if (d < 6 || d > 90) continue;
-          const score = (waiting * 10 + w.towns.population[t] * 0.03) * rarity * chain * fromGround - d
+          // A market town: proven demand, a road already made, and traffic to
+          // share a corridor with.
+          const carriers = townCarriers.get(t)?.size ?? 0;
+          const market = 1 + Math.min(3, carriers) * 0.45;
+          const score = (waiting * 10 + w.towns.population[t] * 0.03)
+            * rarity * chain * fromGround * market - d
             - originPenalty + rng.int(60);
           if (score > bestScore) {
             bestScore = score;
@@ -910,7 +1010,24 @@ function bestAssetFor(
     const earns = w.assets.revenuePrev[a] * windowsPerYear;
     const ownPasses = Math.max(0, w.assets.passesPrev[a] - w.assets.foreignPassesPrev[a]);
     const saves = ownPasses * windowsPerYear * w.assets.charge[a] * (w.assets.tiles[a] / 8);
-    const value = (earns + saves) * PAYBACK_YEARS - price;
+    /*
+     * And what it would earn from everybody else.
+     *
+     * The two terms above are both about this company: what the way already
+     * earns its current owner, and what this company would stop paying to
+     * cross it. Neither says anything about the traffic that would start
+     * paying *this* company if it owned the way, and that is the whole of
+     * rent — so the rivals bought the road they were already on, converted
+     * none of their costs into anybody's income, and the region's rent share
+     * stayed at nought per cent for a century.
+     *
+     * A road several companies need is worth more than a busier road only one
+     * company uses, and this is the term that says so.
+     */
+    const others = otherUsers(w.assets.usersPrev[a], company);
+    const rent = others * w.assets.passesPrev[a] * windowsPerYear
+      * w.assets.charge[a] * (w.assets.tiles[a] / 8) * 0.5;
+    const value = (earns + saves + rent) * PAYBACK_YEARS - price;
     if (value > bestValue) {
       bestValue = value;
       bestAsset = a;

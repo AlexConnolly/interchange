@@ -107,7 +107,16 @@ function runOne(seed: number): RunResult {
     }
   };
 
-  const ticks = TICKS_PER_YEAR * YEARS;
+  /*
+   * Stop a little short of the year boundary.
+   *
+   * closeYear fires exactly on it and zeroes the annual ledger, so a run of a
+   * whole number of years ends on the tick that wipes every figure this sweep
+   * then reads. Rent share, revenue and the income mix all reported zero for
+   * the entire project because of it — the numbers were right and the reading
+   * was taken a moment too late.
+   */
+  const ticks = TICKS_PER_YEAR * YEARS - 400;
   for (let i = 0; i < ticks; i++) {
     w.step();
     if ((i & 8191) === 0) checkReachable();
@@ -162,7 +171,21 @@ function runOne(seed: number): RunResult {
     tonnes: w.stats.tonnesMoved,
     deliveries: w.stats.delivered,
     wealth: Array.from({ length: w.companies.count - 1 }, (_, i) => w.companies.cash[i + 1] - w.companies.debt[i + 1]),
-    rentShare: Array.from({ length: w.companies.count - 1 }, (_, i) => w.companies.rentShare(i + 1)),
+    /*
+     * As a real number, not the integer percentage the interface shows.
+     *
+     * rentShare rounds, so any rent below half a per cent of income reads as
+     * zero — which is exactly the range this has been in while the ownership
+     * spine was starting up, and "0%" and "0.4%" are very different answers to
+     * "is this working at all".
+     */
+    rentShare: Array.from({ length: w.companies.count - 1 }, (_, i) => {
+      const base = (i + 1) * LINE_NAMES.length;
+      const rent = w.companies.ledgerYear[base + Line.AccessCharged];
+      const total = rent + w.companies.ledgerYear[base + Line.Haulage]
+        + w.companies.ledgerYear[base + Line.ContractBonus];
+      return total > 0 ? (rent * 100) / total : 0;
+    }),
     charters: Array.from({ length: w.companies.count - 1 }, (_, i) => w.companies.charter[i + 1]),
     bankrupt: Array.from({ length: w.companies.count - 1 }, (_, i) => w.companies.bankrupt[i + 1]),
     cargoMoved,
@@ -321,7 +344,13 @@ else if (gini < 0.10) console.log('  WARNING: outcomes are nearly identical — 
 // ---- 3. the ownership spine ------------------------------------------
 console.log('\n=== the ownership spine (the two signals that matter) ===');
 const rentShares = results.flatMap((r) => r.rentShare);
-console.log(`  rent share of income: mean ${mean(rentShares).toFixed(1)}%, max ${Math.max(...rentShares)}%`);
+console.log(`  rent share of income: mean ${mean(rentShares).toFixed(2)}%, max ${Math.max(...rentShares).toFixed(2)}%`);
+{
+  // Lifetime rather than this-year, because a company that earned rent for
+  // thirty years and is having a quiet season still proved the spine works.
+  const everRent = results.reduce((n, r) => n + r.rentShare.filter((v) => v > 0).length, 0);
+  console.log(`  companies earning rent right now: ${everRent} of ${results.length * results[0].rentShare.length}`);
+}
 console.log(`  assets in private hands: ${mean(results.map((r) => r.ownedByPlayers)).toFixed(1)} per run`);
 const tollPerPass = mean(results.map((r) => (r.tollPasses > 0 ? r.tollRevenue / r.tollPasses : 0)));
 console.log(`  toll revenue ${money(mean(results.map((r) => r.tollRevenue)))} over ${mean(results.map((r) => r.tollPasses)).toFixed(0)} passes (${(tollPerPass / 100).toFixed(2)} per pass)`);

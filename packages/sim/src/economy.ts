@@ -73,6 +73,19 @@ export class CompanyTable {
   /** Contracts completed and contracts missed, which is the reliability the
    *  contract board weighs bids by. design.md §4.4. */
   readonly delivered = new Int32Array(MAX_COMPANIES);
+  /*
+   * Consecutive days with no fleet and no way to buy one.
+   *
+   * A company can reach a state that is not bankruptcy and is not trading: no
+   * vehicles, no debt, and less cash than the cheapest lorry costs. It earns
+   * nothing, so its cash never rises, so it can never buy a vehicle, and it
+   * sits there for the rest of the century — three of four companies were in
+   * exactly that state by year fifty, and the region's traffic went to nothing
+   * with them. Counted rather than acted on immediately, because a company
+   * that has just sold its last lorry to pay a debt is in the same position
+   * for a week and is not finished.
+   */
+  readonly idleDays = new Int32Array(MAX_COMPANIES);
   readonly missed = new Int32Array(MAX_COMPANIES);
 
   /** ledger[company * LINE_COUNT + line], current month. */
@@ -117,6 +130,7 @@ export class CompanyTable {
     this.charter[id] = Charter.Carrier;
     this.delivered[id] = 0;
     this.missed[id] = 0;
+    this.idleDays[id] = 0;
     const base = id * LINE_COUNT;
     for (let l = 0; l < LINE_COUNT; l++) {
       this.ledger[base + l] = 0;
@@ -552,10 +566,40 @@ export function makeContract(
  * it carried is not an exaggeration for 1860 — it is why railways changed
  * everything, and Act I should feel it.
  */
-export function haulageRate(basePrice: number, distanceTiles: number, weight = 1): number {
+export function haulageRate(
+  basePrice: number, distanceTiles: number, weight = 1, era = 1,
+): number {
   const distanceFactor = 24 + Math.min(900, Math.round(distanceTiles * 9));
-  return Math.round(((HAUL_BASE * distanceFactor) / 100) * weight + basePrice * VALUE_SHARE);
+  const base = ((HAUL_BASE * distanceFactor) / 100) * weight + basePrice * VALUE_SHARE;
+  return Math.round(base * eraRate(era));
 }
+
+/**
+ * What a tonne-mile is worth in each era, in the money of the day.
+ *
+ * The rate was flat across two hundred and forty years while everything it
+ * pays for was not. A horse dray costs a hundred and sixty pounds and eats
+ * twenty-eight pence a day; a nineteen-sixties lorry costs nineteen hundred
+ * and burns two hundred and ninety. Vehicle prices rise roughly tenfold over
+ * the period and running costs with them, so a carrier earning 1860 rates in
+ * 1960 cannot replace a single lorry — and did not. Fleets peaked around
+ * twenty-five vehicles in the first forty years and were gone entirely by the
+ * eightieth, every region in the sweep, because the generation that wore out
+ * could not be afforded.
+ *
+ * This is nominal prices rather than a difficulty knob: freight rates in
+ * pounds went up a great deal between 1860 and 2100, and a game that quotes
+ * both in pounds has to say so somewhere. Compounding is gentler than the cost
+ * curve on purpose, so later eras are a little leaner and a carrier has to be
+ * better at it — which is the pressure design.md 2.4 wants from an era
+ * transition.
+ */
+export function eraRate(era: number): number {
+  return Math.pow(ERA_RATE_GROWTH, Math.max(0, era - 1));
+}
+
+/** Per era. Eight eras, so a rate at the end about ten times the start. */
+export const ERA_RATE_GROWTH = 1.42;
 
 /**
  * What a unit of this cargo is worth carrying, against a tonne of freight.

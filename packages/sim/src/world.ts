@@ -14,7 +14,7 @@ import {
   DIR_OPPOSITE, FLOW_WINDOW, HASH_INTERVAL, MAX_COMPANIES, MAX_VEHICLES,
   MAX_NODES, MODE_COUNT, MODE_NAMES, Mode, PATH_LATENCY_TICKS, SPEED_STEPS, START_YEAR,
   TICKS_PER_DAY, TICKS_PER_YEAR, DAYS_PER_MONTH, DAYS_PER_YEAR, ECONOMY_SCALE, LOAD_PATIENCE_DAYS, LOAD_PATIENCE_SHARE, CONTAINER_ERA, CONTAINER_TRANSFER_GAIN, PUBLIC_STANDARD,
-  ACCESS_SCALE,
+  ACCESS_SCALE, STALLED_DAYS,
 } from './constants.ts';
 import { Cmd, CommandQueue, type Command } from './commands.ts';
 import {
@@ -632,6 +632,7 @@ export class World {
     this.stepContracts();
     this.stepRivals();
     stepFinance(this.companies, b, (c) => this.declareBankrupt(c));
+    this.checkStalled();
 
     if (this.day % b.contractIntervalDays === 0) this.offerContract();
     this.stepObjectives();
@@ -849,6 +850,7 @@ export class World {
     const owner = this.assets.owner[asset];
     const payer = this.vehicles.company[vehicle];
     this.assets.passes[asset]++;
+    if (payer >= 0 && payer < 16) this.assets.users[asset] |= 1 << payer;
     if (owner === payer) return;
     this.assets.foreignPasses[asset]++;
     const tiles = this.graph.linkChainLen[link] - 1;
@@ -1228,7 +1230,7 @@ export class World {
     const dist = Math.max(direct, Math.min(this.vehicles.haulDistance[vehicle], direct * HAUL_ALLOWANCE));
     const boom = ratePercent(this.events, cargo);
     const pence = Math.round(
-      (haulageRate(this.cargoPrice[cargo], dist, this.cargoRateWeight[cargo]) * tonnes * boom) / 100,
+      (haulageRate(this.cargoPrice[cargo], dist, this.cargoRateWeight[cargo], this.era) * tonnes * boom) / 100,
     );
     this.companies.post(company, Line.Haulage, pence);
     this.movedByCargo[company * this.content.cargo.length + cargo] += tonnes;
@@ -2194,6 +2196,56 @@ export class World {
   }
 
   /**
+   * A company that has stopped being a company.
+   *
+   * Not bankrupt — it owes nothing — and not trading either: no vehicles, and
+   * less in hand than the cheapest lorry costs. There is no path out of that
+   * on its own, because earning requires a vehicle and a vehicle requires
+   * earning, so it would sit there until 2100. By year fifty, three of the
+   * four operators in a region were in that state and the traffic had gone
+   * with them.
+   *
+   * Calling it what it is puts it through the ordinary insolvency path, which
+   * puts whatever it owns on the market and brings a new operator to the
+   * region a few years later. design.md 3.8 says insolvency is an event in
+   * the world rather than a game-over screen, and that has to be as true of
+   * the quiet failures as of the loud ones.
+   *
+   * Three years of it before anybody says so. An earlier version acted at
+   * once and killed companies that had merely sold their last lorry to clear a
+   * debt and were about to buy another — bankruptcies went from 0.6 a run to
+   * 2.7.
+   */
+  private checkStalled(): void {
+    let cheapest = Infinity;
+    for (const v of this.content.vehicles) {
+      if (v.era <= this.era && this.year < v.obsoleteYear && v.cost < cheapest) cheapest = v.cost;
+    }
+    if (cheapest === Infinity) return;
+    const fleet = new Int32Array(this.companies.count);
+    for (let v = 0; v < this.vehicles.count; v++) {
+      if (this.vehicles.alive[v]) fleet[this.vehicles.company[v]]++;
+    }
+    for (let c = 1; c < this.companies.count; c++) {
+      if (this.companies.bankrupt[c]) continue;
+      /*
+       * Debt is not part of the test, and leaving it out was the second half
+       * of this fix. A company with no fleet and nothing to buy one with is
+       * finished whether it owes money or not — and the version that required
+       * no debt simply moved the problem, because such a company then sat on
+       * a couple of thousand pounds of borrowings accruing six per cent until
+       * it reached the credit limit, which takes fifty years.
+       */
+      const stalled = fleet[c] === 0 && this.companies.cash[c] < cheapest;
+      if (!stalled) {
+        this.companies.idleDays[c] = 0;
+        continue;
+      }
+      if (++this.companies.idleDays[c] >= STALLED_DAYS) this.declareBankrupt(c);
+    }
+  }
+
+  /**
    * design.md §3.8: insolvency is an event in the world, not a game-over
    * screen. The assets go on the market and everybody else gets to respond.
    */
@@ -2235,11 +2287,27 @@ export class World {
    * too, and that is information rather than a bug.
    */
   private stepEntrants(): void {
-    if (this.entrantDue === 0 || this.tick < this.entrantDue) return;
-    this.entrantDue = 0;
+    /*
+     * Re-arm whenever the region is short of operators, not only on the day
+     * somebody fails.
+     *
+     * A single pending date meant two failures close together produced one
+     * replacement, and after that the region simply had fewer companies in it
+     * for ever. What matters is how many are trading now, so that is what is
+     * checked.
+     */
     let live = 0;
     for (let c = 1; c < this.companies.count; c++) if (!this.companies.bankrupt[c]) live++;
-    if (live >= this.config.companyCount - 1) return;
+    if (live >= this.config.companyCount - 1) {
+      this.entrantDue = 0;
+      return;
+    }
+    if (this.entrantDue === 0) {
+      this.entrantDue = this.tick + (2 + this.rng.int(4)) * TICKS_PER_YEAR;
+      return;
+    }
+    if (this.tick < this.entrantDue) return;
+    this.entrantDue = 0;
 
     // Re-use a failed company's slot: the table is small and fixed, and a
     // region that has seen eight failures has not run out of entrepreneurs.

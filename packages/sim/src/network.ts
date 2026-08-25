@@ -35,6 +35,27 @@ export const NONE = -1;
 export const FORMATION_SHARE = 0.45;
 
 /**
+ * What the authority asks for a road, against what it cost to build.
+ *
+ * A disposal rather than a sale. Low enough that a carrier who has built a
+ * real business can afford a first piece of way — which is what Act II is
+ * waiting for — and high enough that buying the region wholesale is not a
+ * thing anybody can do in an afternoon.
+ */
+export const AUTHORITY_DISPOSAL = 0.25;
+
+/** How many companies used a way, from its bitmask, excluding one of them. */
+export function otherUsers(mask: number, except: number): number {
+  let m = mask & ~(1 << except);
+  let n = 0;
+  while (m) {
+    m &= m - 1;
+    n++;
+  }
+  return n;
+}
+
+/**
  * One mode's tile layer. Separate arrays per mode rather than one tagged
  * layer, because a road and a railway crossing the same tile is normal and a
  * single layer would have to forbid it or encode a combination explosion.
@@ -121,6 +142,18 @@ export class AssetTable {
    */
   readonly foreignPasses = new Int32Array(MAX_ASSETS);
   readonly foreignPassesPrev = new Int32Array(MAX_ASSETS);
+  /*
+   * Which companies drove on this, as a bit per company.
+   *
+   * Counting passes says how busy a way is; it does not say how many
+   * *different* people need it, and those are different questions with
+   * different answers. A road one company runs a hundred lorries down is
+   * worth nothing to anybody else; a road four companies each send one lorry
+   * down is the thing worth owning, because three of them will be paying you.
+   * Sixteen companies fit in a Uint16 and the table only allows nine.
+   */
+  readonly users = new Uint16Array(MAX_ASSETS);
+  readonly usersPrev = new Uint16Array(MAX_ASSETS);
   /** Access-charge revenue, same windowing. */
   readonly revenue = new Float64Array(MAX_ASSETS);
   readonly revenuePrev = new Float64Array(MAX_ASSETS);
@@ -145,6 +178,8 @@ export class AssetTable {
     this.passesPrev[id] = 0;
     this.foreignPasses[id] = 0;
     this.foreignPassesPrev[id] = 0;
+    this.users[id] = 0;
+    this.usersPrev[id] = 0;
     this.revenue[id] = 0;
     this.revenuePrev[id] = 0;
     this.buildCost[id] = 0;
@@ -172,7 +207,25 @@ export class AssetTable {
      */
     const earthworks = this.buildCost[id] * FORMATION_SHARE;
     const surface = (this.buildCost[id] * (1 - FORMATION_SHARE) * this.condition[id]) / 255;
-    const floor = (earthworks + surface) / 2;
+    let floor = (earthworks + surface) / 2;
+    /*
+     * The authority is not trying to get its money back.
+     *
+     * A private owner will not sell below what the thing cost them, and that
+     * floor is what makes buying a rival out expensive. An authority disposing
+     * of a road is doing something different: the road was built out of public
+     * money for public benefit, it has already served its purpose, and what it
+     * wants is somebody to take on the upkeep. Governments have sold
+     * infrastructure at a fraction of its cost for exactly that reason
+     * throughout the period this game covers.
+     *
+     * Without this the spine cannot start at all. Every way in the region is
+     * the authority's in 1860, all of them are priced at construction cost,
+     * and no amount of traffic in a region of thirty vehicles ever justifies
+     * that — so the first purchase never happens, and the whole of Act II
+     * waits on a first purchase.
+     */
+    if (this.owner[id] === AUTHORITY) floor *= AUTHORITY_DISPOSAL;
     return Math.round(Math.max(floor, fromEarnings));
   }
 
@@ -180,6 +233,8 @@ export class AssetTable {
     for (let i = 0; i < this.count; i++) {
       this.passesPrev[i] = this.passes[i];
       this.foreignPassesPrev[i] = this.foreignPasses[i];
+      this.usersPrev[i] = this.users[i];
+      this.users[i] = 0;
       this.revenuePrev[i] = this.revenue[i];
       this.passes[i] = 0;
       this.foreignPasses[i] = 0;
