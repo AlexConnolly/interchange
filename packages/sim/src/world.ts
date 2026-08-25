@@ -398,6 +398,55 @@ export class World {
     return (this.tick / TICKS_PER_DAY) | 0;
   }
 
+  /**
+   * Where in the day the district starts, as a fraction.
+   *
+   * The clock used to live entirely in the client, which was fine for as long as
+   * the time of day was only a thing to *look* at — the sun's angle and when the
+   * windows come on. It is not fine now that it decides who is allowed to drive:
+   * two clocks, one in the renderer and one in the simulation, drifting apart by
+   * whatever offset the client happened to apply, is a bug waiting for someone to
+   * ask why the yard is shut at noon.
+   *
+   * So the world owns it and the client reads it. Set once, at startup.
+   */
+  dayOffset = 0;
+
+  /** How far through the day it is. Zero is six in the morning, as `HOUR` has it. */
+  get dayFraction(): number {
+    const t = (this.tick + TICKS_PER_DAY * this.dayOffset) % TICKS_PER_DAY;
+    return ((t % TICKS_PER_DAY) + TICKS_PER_DAY) % TICKS_PER_DAY / TICKS_PER_DAY;
+  }
+
+  /** The hour on the clock, 0 to 24. */
+  get hourOfDay(): number {
+    return (this.dayFraction * 24 + 6) % 24;
+  }
+
+  /**
+   * Is the fleet parked for the night?
+   *
+   * Haulage is a day job. Lorries ran through the small hours because nothing
+   * had ever said they should not, and it made the night pointless: the one
+   * stretch of the day where the district is supposed to be still had the entire
+   * fleet grinding round it with headlamps on.
+   *
+   * Six to eight, which is a long day and meant to be — this is 1985, before
+   * tachograph enforcement got serious, and a fourteen-hour day was ordinary.
+   * It is also most of the daylight, so what the player watches is a district
+   * that wakes up, works, and goes quiet, rather than one that never stops.
+   *
+   * The cost is real: it removes about two fifths of the running time, and the
+   * haulage rate is raised to match — see `HAUL_BASE`. A rate that pays for a
+   * fourteen-hour day rather than a twenty-four-hour one is the *same* rate in
+   * every sense the player can see, and the ladder is measured in minutes of
+   * play rather than in loads.
+   */
+  get fleetParked(): boolean {
+    const h = this.hourOfDay;
+    return h < 6 || h >= 20;
+  }
+
   get year(): number {
     return START_YEAR + ((this.tick / TICKS_PER_YEAR) | 0);
   }
@@ -911,6 +960,22 @@ export class World {
         v.dwell[id]--;
         continue;
       }
+      /*
+       * And nobody sets off after eight at night.
+       *
+       * Held here, at the point where a vehicle standing at a stop decides on its
+       * next leg, which is the only place in this loop where a journey actually
+       * begins. Everything already travelling has gone past the top of the loop,
+       * so a lorry is never frozen in the middle of a road — it finishes the leg
+       * it is on, arrives, and stays there until six.
+       *
+       * Before the load checks rather than after, and that matters: those are what
+       * accumulate `waited` and eventually lose you the contract for being too
+       * slow to shift anything. A night parked at a depot is not a vehicle failing
+       * to find a load, and charging it as one would make the whole fleet look
+       * unreliable by morning.
+       */
+      if (this.fleetParked) continue;
 
       const svc = v.service[id];
       if (svc === NONE || !svcT.active[svc] || svcT.stopCount[svc] === 0) {

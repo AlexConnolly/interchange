@@ -554,8 +554,22 @@ export const RATE_WEIGHT_BY_TIER: Record<string, number> = { passenger: 0.11 };
  * halving the speed changes the *shape* of the curve as well as its height: fewer
  * deliveries, each worth more, so the cash arrives in bigger steps. One dial
  * cannot hold both, and the rung is the one worth holding.
+ *
+ * Raised again, to 36,000, when the fleet stopped working nights. Same argument
+ * as the speed change and the same measurement: parking every lorry between eight
+ * at night and six in the morning removes two fifths of the running time, and the
+ * probe put the first five minutes at £1,668 against £2,506 and the second van at
+ * sixteen minutes against twelve. Two thirds of the earnings for two thirds of the
+ * day, which is exactly what it should be and exactly why the rate has to move —
+ * the change was made because a district that never sleeps looks wrong at three in
+ * the morning, and that is an argument about the *look* of the place with no
+ * business being an argument about what a load is worth.
+ *
+ * A rate that pays for a fourteen-hour day rather than a twenty-four-hour one is
+ * the same rate in every sense the player can see. They do not count loads; they
+ * watch the money and decide when to buy. The rung is what is being held.
  */
-export const HAUL_BASE = 24000;
+export const HAUL_BASE = 36000;
 
 /**
  * How much dearer a business is than its build cost.

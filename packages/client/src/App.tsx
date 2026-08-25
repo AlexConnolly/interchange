@@ -402,6 +402,7 @@ export function App(): JSX.Element {
     const world = createWorld({
       seed: 1985, size: DISTRICT, townCount: 3, companyCount: 1,
     });
+    world.dayOffset = dayOffset;
     /*
      * Start in spring, not on the first of January.
      *
@@ -1627,8 +1628,9 @@ export function App(): JSX.Element {
        * decision is invisible; the habit of computing a value after its readers
        * is not.
        */
-      src.dayFraction = ((world.tick + TICKS_PER_DAY * dayOffset) % TICKS_PER_DAY)
-        / TICKS_PER_DAY;
+      // The world owns the clock now — it decides who is allowed to drive, and
+      // two of them drifting apart would be a yard shut at noon for no reason.
+      src.dayFraction = world.dayFraction;
 
       // Vehicles, straight out of the traffic table.
       let n = 0;
