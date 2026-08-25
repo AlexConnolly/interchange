@@ -58,6 +58,9 @@ export interface FarmworkWorld {
   work: (tile: number) => void;
   /** Is there a job to do on this tile? Used to choose where to send one. */
   needsWork: (tile: number) => boolean;
+  /** How important a road is, so a tractor knows when to wait at the end of a
+   *  farm lane. `-1` where there is no road. */
+  rank: (tile: number) => number;
 }
 
 type Phase = 'idle' | 'out' | 'entering' | 'working' | 'leaving' | 'home';
@@ -375,14 +378,41 @@ export class Farmwork {
            * and a tractor that stopped for its neighbour two furrows over would
            * never finish a pass.
            */
+          const fwdX = tx / tl;
+          const fwdZ = tz / tl;
+          // Where it is about to be, for the give-way test below.
+          const peekX = t.x + fwdX * 0.85;
+          const peekZ = t.z + fwdZ * 0.85;
+          const myRank = this.world.rank(here);
+          // Only when actually joining a better road — see the note in
+          // `ambient.ts`. A lane running alongside a trunk road is not a
+          // junction, and treating it as one makes a vehicle stutter the whole
+          // way down it.
+          const joining = this.world.rank(t.path[leg + 1]) > myRank;
           t.hold = false;
           for (let k = 0; k < n; k++) {
             const gx = vx[k] - t.x;
             const gz = vz[k] - t.z;
-            if (gx * gx + gz * gz > 0.7 * 0.7) continue;
-            if (gx * (tx / tl) + gz * (tz / tl) <= 0.08) continue;
-            t.hold = true;
-            break;
+            const infront = gx * fwdX + gz * fwdZ;
+            if (gx * gx + gz * gz <= 0.7 * 0.7 && infront > 0.08) {
+              t.hold = true;
+              break;
+            }
+            /*
+             * And it waits at the end of the farm lane.
+             *
+             * The one place a tractor genuinely holds up the traffic of England,
+             * and the one place it should not: pulling out of a track onto a
+             * road without looking. Same rank test the cars use.
+             */
+            const theirs = this.world.rank(
+              ((vz[k] | 0) * size + (vx[k] | 0)) | 0,
+            );
+            if (joining && theirs > myRank) {
+              const jx = vx[k] - peekX;
+              const jz = vz[k] - peekZ;
+              if (jx * jx + jz * jz <= 0.95 * 0.95) { t.hold = true; break; }
+            }
           }
           break;
         }

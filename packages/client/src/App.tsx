@@ -752,6 +752,7 @@ export function App(): JSX.Element {
       route: (from, to) => world.roadRoute(from, to),
       work: (tile) => world.workField(tile),
       needsWork: (tile) => world.fieldNeedsWork(tile),
+      rank: (t) => (t >= 0 && t < roadClass.length ? roadClass[t] : -1),
       farms: () => {
         const out: { tile: number; x: number; z: number }[] = [];
         for (let i = 0; i < world.sites.count; i++) {
@@ -968,6 +969,7 @@ export function App(): JSX.Element {
     const ambient = new Ambient({
       size: DISTRICT,
       isRoad: (t) => roadClass[t] >= 0,
+      rank: (t) => (t >= 0 && t < roadClass.length ? roadClass[t] : -1),
       usable: (t) => world.influence.usable(t),
       // The same road A* the route preview uses. Traffic that routes rather than
       // wanders is the whole difference between going somewhere and milling

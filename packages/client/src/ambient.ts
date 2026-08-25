@@ -79,6 +79,20 @@ export function areaDemand(
 const GAP = 0.7;
 const PATIENCE = 3.5;
 
+/**
+ * How far ahead a vehicle looks for the junction it is about to enter, and how
+ * wide a berth it gives traffic already there.
+ *
+ * Bigger than `GAP`, because giving way is not the same as not running into the
+ * back of something: you have to stop *before* the junction, which means noticing
+ * the car on the main road while there is still road left to stop on.
+ */
+const LOOK_AHEAD = 0.85;
+const JUNCTION_BERTH = 0.95;
+
+/** How much faster a car drives when a lorry is filling its mirrors. */
+const CHASED = 1.85;
+
 interface Wanderer {
   /** The route it is driving, as tiles, and how far along it is. */
   path: number[];
@@ -101,6 +115,8 @@ interface Wanderer {
    */
   hold: boolean;
   held: number;
+  /** A fleet lorry is close behind, so put your foot down. */
+  chased: boolean;
   model: number;
   livery: number;
   /** Ticks to wait before setting off again, so arrivals pause like deliveries
@@ -112,6 +128,17 @@ export interface AmbientRoads {
   size: number;
   /** True where a vehicle may drive. */
   isRoad: (tile: number) => boolean;
+  /**
+   * How important this road is. Higher gives way to nobody, lower gives way to
+   * higher. `-1` where there is no road at all.
+   *
+   * This is the whole of the junction model, and it is the real English rule: at
+   * an unmarked country crossroads nobody has priority by law, but a lane meeting
+   * a B road has a give-way line across it, and every driver in the country
+   * behaves accordingly. The road classes already exist, so the rule costs a
+   * lookup.
+   */
+  rank: (tile: number) => number;
   /** False beyond the player's influence, where nothing is drawn. */
   usable: (tile: number) => boolean;
   /** A route along the roads between two tiles, or empty if there is none. */
@@ -226,7 +253,7 @@ export class Ambient {
     while (this.cars.length < AMBIENT_COUNT) {
       this.cars.push({
         path: [], leg: 0, t: 0, speed: 2, model: 0, livery: 0, dwell: 0,
-        hold: false, held: 0,
+        hold: false, held: 0, chased: false,
       });
     }
 
@@ -247,7 +274,18 @@ export class Ambient {
         w.dwell -= dt;
       } else {
         w.held = 0;
-        w.t += dt * w.speed;
+        /*
+         * Get a move on when a lorry is right behind.
+         *
+         * The fleet cannot be asked to give way. It is simulated on a graph whose
+         * state is hashed and covered by a determinism test, and feeding it the
+         * positions of client-side scenery would make the simulation depend on
+         * what is being drawn — which is the one coupling this codebase does not
+         * allow anywhere. So the yielding is all on this side: hold when the
+         * fleet is in front, and pull away when it is behind. Between the two
+         * there is very little left for a lorry to drive into.
+         */
+        w.t += dt * w.speed * (w.chased ? CHASED : 1);
         while (w.t >= 1) {
           w.t -= 1;
           w.leg++;
@@ -341,14 +379,58 @@ export class Ambient {
        * overtaken, and for the one coming the other way on the far side of the
        * lane.
        */
+      const fx = tx / tl;
+      const fz = tz / tl;
+      // The point it is about to drive into, which is where a give-way decision
+      // has to be made rather than at the bumper.
+      const aheadX = atX + fx * LOOK_AHEAD;
+      const aheadZ = atZ + fz * LOOK_AHEAD;
+      const mine = this.roads.rank(here);
+      /*
+       * Only give way when actually joining a better road.
+       *
+       * Without this the test fires on any vehicle that happens to be within a
+       * tile of the look-ahead point — including one on a trunk road running
+       * *parallel* to the lane, a tile away, which is not a junction and never
+       * requires anybody to stop. The result would be a car that halts, waits out
+       * its patience, drives on, halts again: a stutter all the way down the
+       * road, caused by a rule that was right about priority and wrong about
+       * where priority applies.
+       */
+      const joining = this.roads.rank(w.path[leg + 1]) > mine;
       w.hold = false;
+      w.chased = false;
       for (let k = 0; k < n; k++) {
         const gx = vx[k] - atX;
         const gz = vz[k] - atZ;
-        if (gx * gx + gz * gz > GAP * GAP) continue;
-        if (gx * (tx / tl) + gz * (tz / tl) <= 0.08) continue;
-        w.hold = true;
-        break;
+        const near = gx * gx + gz * gz;
+        const infront = gx * fx + gz * fz;
+        // Something close in front: stop behind it.
+        if (near <= GAP * GAP && infront > 0.08) { w.hold = true; break; }
+        /*
+         * Give way to the major road.
+         *
+         * Applied regardless of who was written first, which the plain
+         * following rule above deliberately is not: a lane must always wait for
+         * the B road, not merely when the index order happens to fall that way.
+         * It cannot deadlock, because the test is strictly asymmetric — only the
+         * lower-ranked vehicle ever holds.
+         */
+        const theirs = this.roads.rank(
+          ((vz[k] | 0) * size + (vx[k] | 0)) | 0,
+        );
+        if (joining && theirs > mine) {
+          const jx = vx[k] - aheadX;
+          const jz = vz[k] - aheadZ;
+          if (jx * jx + jz * jz <= JUNCTION_BERTH * JUNCTION_BERTH) {
+            w.hold = true;
+            break;
+          }
+        }
+        // A lorry closing from behind. Not a reason to stop — a reason to move.
+        if (near <= GAP * GAP * 2.6 && infront < -0.08 && vId[k] >= 0) {
+          w.chased = true;
+        }
       }
       vx[n] = atX;
       vz[n] = atZ;

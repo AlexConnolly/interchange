@@ -36,6 +36,10 @@ function district(worked?: Set<number>): Farmwork {
     route: (from) => (from === t(4, 10) ? [...LANE] : [...LANE].reverse()),
     work: (tile) => { worked?.add(tile); },
     needsWork: () => true,
+    // One class of road everywhere, so nothing outranks anything and the
+    // give-way rule never fires. The following rule is what these tests are
+    // about; priority has its own test below.
+    rank: () => 1,
   });
 }
 
@@ -104,5 +108,61 @@ describe('tractors', () => {
     const zs = inside.map((p) => p.z);
     expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(4);
     expect(Math.max(...zs) - Math.min(...zs)).toBeGreaterThan(1);
+  });
+});
+
+
+/**
+ * Waiting at the end of the farm lane.
+ *
+ * A tractor pulling out of a track onto a road without looking is the one place
+ * it genuinely holds up the traffic of England, and the one place it should not.
+ * The rule is the road class: a lane gives way to anything on a better road.
+ */
+describe('a tractor at a junction', () => {
+  it('holds for a vehicle on a more important road, and not for one on its own', () => {
+    const cap = 64;
+    const vx = new Float32Array(cap);
+    const vz = new Float32Array(cap);
+    const vh = new Float32Array(cap);
+    const vl = new Uint8Array(cap);
+    const vm = new Uint8Array(cap);
+    const vi = new Int32Array(cap);
+
+    // One vehicle already in the arrays, sitting on the lane a little ahead of
+    // where a tractor leaving the farm will be.
+    const run = (laneRank: number, otherRank: number): number => {
+      const farm = new Farmwork({
+        size: SIZE,
+        farms: () => [{ tile: t(4, 10), x: 4.5, z: 10.5 }],
+        fields: () => [FIELD],
+        usable: () => true,
+        route: (from) => (from === t(4, 10) ? [...LANE] : [...LANE].reverse()),
+        work: () => {},
+        needsWork: () => true,
+        rank: (tile) => (tile === t(7, 10) ? otherRank : laneRank),
+      });
+      let moved = 0;
+      let last = -1;
+      for (let s = 0; s < 400; s++) {
+        // A parked obstruction on tile (7,10), written before the tractors.
+        vx[0] = 7.5;
+        vz[0] = 10.5;
+        vi[0] = 99;
+        const n = farm.step(1 / 30, 3, 1, vx, vz, vh, vl, vm, vi);
+        for (let k = 1; k < n; k++) {
+          if (vi[k] !== -1000) continue;
+          if (last >= 0 && Math.abs(vx[k] - last) > 1e-4) moved++;
+          last = vx[k];
+        }
+      }
+      return moved;
+    };
+
+    // On a better road, the obstruction is given way to and the first tractor
+    // spends far more of its time standing still than when it outranks it.
+    const yielding = run(1, 3);
+    const equal = run(1, 1);
+    expect(yielding).toBeLessThan(equal);
   });
 });
