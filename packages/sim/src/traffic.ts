@@ -623,6 +623,10 @@ export function stepTraffic(
  * vehicle's xy, only its cell. Running it separately also means a dropped
  * frame costs a projection and never a tick.
  */
+/** Half a tile, and a sixth of one. Both in Q16.16. */
+const HALF_TILE = Math.round(0.5 * FX_ONE);
+const LANE_OFFSET = Math.round(0.16 * FX_ONE);
+
 export function projectVehicles(g: Graph, v: VehicleTable, size: number): void {
   for (let id = 0; id < v.count; id++) {
     if (!v.alive[id]) continue;
@@ -642,8 +646,26 @@ export function projectVehicles(g: Graph, v: VehicleTable, size: number): void {
     const ay = ((a / size) | 0) * FX_ONE;
     const bx = (b % size) * FX_ONE;
     const by = ((b / size) | 0) * FX_ONE;
-    v.x[id] = (ax + fxMul((bx - ax) | 0, frac)) | 0;
-    v.y[id] = (ay + fxMul((by - ay) | 0, frac)) | 0;
+    /*
+     * Down the middle of the lane, and on the left of it.
+     *
+     * A tile index converts to the tile's *corner*, and the road surface is
+     * drawn from that corner to the next one with its centreline at plus a half
+     * — so a projection that stopped at `ax` put every lorry in the game half a
+     * tile up and half a tile left of the road it was supposedly on. On a lane
+     * beside a farmhouse, half a tile is inside the farmhouse. Reported as
+     * "vehicles are driving through buildings", and they were.
+     *
+     * The lane offset is the same sixth of a tile the ambient traffic has always
+     * used, and it earns its place twice: it is 1985 in England, and it means two
+     * lorries meeting on a lane pass on the correct sides instead of through each
+     * other. Adjacent tiles, so the direction is axis-aligned and its left-hand
+     * normal is `(-dz, dx)` with no trigonometry.
+     */
+    const dirX = Math.sign(bx - ax);
+    const dirZ = Math.sign(by - ay);
+    v.x[id] = (ax + fxMul((bx - ax) | 0, frac) + HALF_TILE - dirZ * LANE_OFFSET) | 0;
+    v.y[id] = (ay + fxMul((by - ay) | 0, frac) + HALF_TILE + dirX * LANE_OFFSET) | 0;
     v.heading[id] = bearing(size, a, b);
     void cellsPerLink;
   }

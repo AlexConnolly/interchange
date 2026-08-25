@@ -81,6 +81,9 @@ interface Tractor {
   lengthwise: boolean;
   /** The last tile it turned over, so it is not asked again every frame. */
   lastTile: number;
+  /** Held up behind something on the lane, and for how long. */
+  hold: boolean;
+  waited: number;
   /** Where it is and which way it faces, so a phase change does not teleport. */
   x: number;
   z: number;
@@ -151,6 +154,18 @@ export class Farmwork {
     if (path.length < 3) return false;
 
     t.farmTile = farm.tile;
+    /*
+     * It starts at the farm, and saying so matters.
+     *
+     * A tractor that is held up on the very first frame of its journey never
+     * reaches the code that computes a position, so whatever was in `x` and `z`
+     * is what gets drawn — and for a tractor that has never moved that is the
+     * corner of the map.
+     */
+    t.x = farm.x;
+    t.z = farm.z;
+    t.hold = false;
+    t.waited = 0;
     t.field = field;
     t.path = path;
     t.leg = 1;
@@ -250,7 +265,8 @@ export class Farmwork {
          */
         phase: 'idle', wait: this.rnd() * 1.5, path: [], leg: 1, t: 0,
         field: null, farmTile: -1, pass: 0, passes: 4, along: 0,
-        lengthwise: true, lastTile: -1, x: 0, z: 0, heading: 0, speed: 0.6,
+        lengthwise: true, lastTile: -1, hold: false, waited: 0,
+        x: 0, z: 0, heading: 0, speed: 0.6,
       });
     }
 
@@ -277,6 +293,18 @@ export class Farmwork {
         case 'out':
         case 'home': {
           if (t.path.length < 3) { t.phase = 'idle'; t.wait = 8; continue; }
+          /*
+           * Held up behind something. Redraw where it already is, and give up
+           * after a few seconds — a lorry loading at a farm gate stands on the
+           * lane indefinitely, and a tractor that waited for it forever would be
+           * a permanent obstruction of its own.
+           */
+          if (t.hold) {
+            t.waited += dt;
+            if (t.waited > 3.5) { t.hold = false; t.waited = 0; }
+            break;
+          }
+          t.waited = 0;
           t.t += dt * t.speed * 1.6;
           while (t.t >= 1) {
             t.t -= 1;
@@ -328,6 +356,34 @@ export class Farmwork {
           t.x = bx + (-tz / tl) * 0.16;
           t.z = bz + (tx / tl) * 0.16;
           t.heading = (Math.atan2(tx / tl, -tz / tl) / (Math.PI * 2) + 1) % 1;
+          /*
+           * A tractor on a lane gives way to everything.
+           *
+           * Same rule as the ambient traffic and for the same reason, except that
+           * a tractor is the slowest thing on the road and is written into these
+           * arrays last — so it yields to the fleet, to the cars and to the other
+           * tractors, and nothing yields to it. Which is both convenient and true.
+           *
+           * Decided *after* moving and acted on next frame, exactly as the ambient
+           * traffic does it. The first attempt tried to undo the advance once it
+           * had found something in the way, and that is not a rollback: the same
+           * advance may already have stepped `leg` on to the next tile of the
+           * path, and putting `t` back leaves the two disagreeing. A flag read at
+           * the top of the next frame has no such halfway state.
+           *
+           * Only while it is on the road. In a field it is the only thing there,
+           * and a tractor that stopped for its neighbour two furrows over would
+           * never finish a pass.
+           */
+          t.hold = false;
+          for (let k = 0; k < n; k++) {
+            const gx = vx[k] - t.x;
+            const gz = vz[k] - t.z;
+            if (gx * gx + gz * gz > 0.7 * 0.7) continue;
+            if (gx * (tx / tl) + gz * (tz / tl) <= 0.08) continue;
+            t.hold = true;
+            break;
+          }
           break;
         }
 

@@ -69,6 +69,16 @@ export function areaDemand(
   return Math.max(0.12, Math.min(1, people / 2600));
 }
 
+/**
+ * How close is too close, in tiles, and how long a car will wait.
+ *
+ * A vehicle is about four tenths of a tile long, so seven tenths leaves a small
+ * gap rather than a nose-to-tail queue — which at this zoom is the difference
+ * between traffic and a car park.
+ */
+const GAP = 0.7;
+const PATIENCE = 3.5;
+
 interface Wanderer {
   /** The route it is driving, as tiles, and how far along it is. */
   path: number[];
@@ -78,6 +88,19 @@ interface Wanderer {
   t: number;
   /** Tiles a second. Per vehicle, so a line of them is not a rigid comb. */
   speed: number;
+  /**
+   * Standing behind something, and for how long.
+   *
+   * Ambient traffic had no idea the other vehicles existed, so it drove through
+   * them — most visibly at junctions, where two cars would occupy the same
+   * square yard of tarmac. The timer is the important half: a lorry loading at a
+   * farm gate sits on the lane indefinitely, and a car that yielded to it
+   * forever would be a permanent jam in the middle of the district. After a few
+   * seconds it squeezes past, which is worse than a traffic model and far better
+   * than a queue that never moves.
+   */
+  hold: boolean;
+  held: number;
   model: number;
   livery: number;
   /** Ticks to wait before setting off again, so arrivals pause like deliveries
@@ -201,7 +224,10 @@ export class Ambient {
     // How many the area justifies right now, not a constant.
     const want = Math.max(2, Math.round(AMBIENT_COUNT * this.demand));
     while (this.cars.length < AMBIENT_COUNT) {
-      this.cars.push({ path: [], leg: 0, t: 0, speed: 2, model: 0, livery: 0, dwell: 0 });
+      this.cars.push({
+        path: [], leg: 0, t: 0, speed: 2, model: 0, livery: 0, dwell: 0,
+        hold: false, held: 0,
+      });
     }
 
     for (let i = 0; i < this.cars.length; i++) {
@@ -211,9 +237,16 @@ export class Ambient {
       const w = this.cars[i];
       if (w.path.length < 2 && !this.spawn(w)) continue;
 
-      if (w.dwell > 0) {
+      if (w.hold) {
+        // Held up behind whatever is in front. Nothing else changes: the
+        // position below is recomputed from an unchanged `t`, so it stands
+        // exactly still rather than creeping.
+        w.held += dt;
+        if (w.held > PATIENCE) { w.hold = false; w.held = 0; }
+      } else if (w.dwell > 0) {
         w.dwell -= dt;
       } else {
+        w.held = 0;
         w.t += dt * w.speed;
         while (w.t >= 1) {
           w.t -= 1;
@@ -291,8 +324,34 @@ export class Ambient {
        * the edge direction, so the offset follows the vehicle round the bend
        * instead of jumping sides at the apex.
        */
-      vx[n] = bx + (-tz / tl) * 0.16;
-      vz[n] = bz + (tx / tl) * 0.16;
+      const atX = bx + (-tz / tl) * 0.16;
+      const atZ = bz + (tx / tl) * 0.16;
+      /*
+       * Anything close in front? Then stop, next frame.
+       *
+       * Only the vehicles already written this frame are visible here — the
+       * fleet, and the ambient cars with a lower index — which is exactly the
+       * right asymmetry: the one behind gives way and the one in front carries
+       * on, and two cars can never both yield to each other and deadlock. It
+       * also means scenery yields to the player's lorries rather than the other
+       * way round, which is the correct order of precedence for scenery.
+       *
+       * "In front" is a dot product against the direction of travel, not a plain
+       * distance. Without it a car would brake for the vehicle it had just
+       * overtaken, and for the one coming the other way on the far side of the
+       * lane.
+       */
+      w.hold = false;
+      for (let k = 0; k < n; k++) {
+        const gx = vx[k] - atX;
+        const gz = vz[k] - atZ;
+        if (gx * gx + gz * gz > GAP * GAP) continue;
+        if (gx * (tx / tl) + gz * (tz / tl) <= 0.08) continue;
+        w.hold = true;
+        break;
+      }
+      vx[n] = atX;
+      vz[n] = atZ;
       // Heading in turns, matching the simulation: 0 is north (-Z), increasing
       // clockwise. From the curve's own tangent, so the two cannot disagree.
       vHeading[n] = (Math.atan2(tx / tl, -tz / tl) / (Math.PI * 2) + 1) % 1;
