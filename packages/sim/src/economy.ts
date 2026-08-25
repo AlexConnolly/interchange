@@ -102,6 +102,28 @@ export class CompanyTable {
     return id;
   }
 
+  /**
+   * Put a failed company's slot back into use under a new name.
+   *
+   * Everything that made the old company what it was has to go, or the new
+   * operator inherits its reputation, its yearly figures, and — worst — its
+   * charter, and arrives able to build roads on its first day.
+   */
+  revive(id: number, name: string, cash: number): void {
+    this.names[id] = name;
+    this.cash[id] = cash;
+    this.debt[id] = 0;
+    this.bankrupt[id] = 0;
+    this.charter[id] = Charter.Carrier;
+    this.delivered[id] = 0;
+    this.missed[id] = 0;
+    const base = id * LINE_COUNT;
+    for (let l = 0; l < LINE_COUNT; l++) {
+      this.ledger[base + l] = 0;
+      this.ledgerYear[base + l] = 0;
+    }
+  }
+
   post(company: number, line: Line, amount: number): void {
     const i = company * LINE_COUNT + line;
     this.ledger[i] += amount;
@@ -185,6 +207,19 @@ export const CHARTER_REQUIREMENTS = {
   /** Extraction -> Land: you may deal in land itself. */
   land: { revenue: 2500000, sites: 2 },
 } as const;
+
+/** Names for operators that set up after somebody else has failed. The region
+ *  does not run out of people willing to try. */
+export const ENTRANT_NAMES = [
+  'Garrow & Peel',
+  'The Vale Carrying Company',
+  'Hesketh Brothers',
+  'Ravensworth Transport',
+  'Linmoor Haulage',
+  'Sable & Co.',
+  'The Fell Line',
+  'Duncastle Freight',
+];
 
 export const ContractState = {
   Offered: 0,

@@ -110,11 +110,15 @@ describe('remediation', () => {
      * monthly pass is right to hold such a cell down — so the test has to
      * find somewhere the field is quiet, or it is testing the wrong claim.
      */
+    // The quietest good ground in the region. A mature region has industry
+    // almost everywhere, so this looks for the least-penalised cell rather
+    // than an untouched one — restoration only has to beat nature, and it
+    // cannot beat a works that is still running.
     let cell = -1;
-    let best = -1;
+    let best = -Infinity;
     for (let i = 0; i < w.amenity.current.length; i++) {
-      if (w.amenity.penalty[i] > 0.001) continue;
-      if (w.amenity.potential[i] > best) { best = w.amenity.potential[i]; cell = i; }
+      const headroom = w.amenity.potential[i] - w.amenity.penalty[i];
+      if (headroom > best) { best = headroom; cell = i; }
     }
     expect(cell).toBeGreaterThanOrEqual(0);
     expect(best).toBeGreaterThan(30);
@@ -142,13 +146,11 @@ describe('remediation', () => {
     while (w.year < era + 2 && w.era < REMEDIATION_FROM_ERA) w.step();
     if (w.era < REMEDIATION_FROM_ERA) return;
 
-    let cell = -1;
-    for (let i = 0; i < w.amenity.current.length; i++) {
-      if (w.amenity.current[i] === w.amenity.potential[i] && w.amenity.potential[i] > 40) { cell = i; break; }
-    }
-    expect(cell).toBeGreaterThanOrEqual(0);
-    const x = (cell % w.amenity.cols) * 4;
-    const y = ((cell / w.amenity.cols) | 0) * 4;
-    expect(w.remediate(w.player, y * 128 + x, 0)).toBe(false);
+    // Ground already at its potential. Made so by hand rather than searched
+    // for, because in a mature region there may be none left.
+    const cell = w.amenity.cellOf(40, 40);
+    w.amenity.potential[cell] = w.amenity.current[cell];
+    w.amenity.restored[cell] = 0;
+    expect(w.remediate(w.player, 40 * 128 + 40, 0)).toBe(false);
   });
 });

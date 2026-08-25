@@ -439,6 +439,10 @@ export function stepTowns(
   demandPerThousand: Float64Array,
   producePerThousand: Float64Array,
   growthPerDay: number,
+  /** Multiplier on any seasonal cargo, and which cargo that is. Tourism is
+   *  the whole of it: nobody takes a holiday in a wet February, and a model
+   *  that ignores that is not modelling tourism. */
+  seasonal: { cargo: number; multiplier: number },
 ): void {
   const cargoCount = towns.cargoCount;
   for (let t = 0; t < towns.count; t++) {
@@ -478,7 +482,7 @@ export function stepTowns(
       // Fractional on purpose. Rounding each cargo up to a whole tonne a day
       // put a floor under a small town's basket that was larger than the
       // basket, so every town wanted a dozen tonnes a day whatever its size.
-      const need = (per * pop) / 1000;
+      const need = ((per * pop) / 1000) * (c === seasonal.cargo ? seasonal.multiplier : 1);
       const i = t * cargoCount + c;
       towns.demand[i] = Math.max(1, Math.ceil(need));
       wanted += need;

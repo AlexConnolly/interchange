@@ -18,7 +18,7 @@ import {
 import { Cmd, CommandQueue, type Command } from './commands.ts';
 import {
   CompanyTable, ContractState, ContractTable, Charter, Line, LINE_COUNT,
-  ServiceTable, StopAction, MAX_STOPS, hashEconomy, haulageRate, HAUL_ALLOWANCE, RATE_WEIGHT_BY_TIER, CHARTER_REQUIREMENTS, makeContract, stepFinance,
+  ServiceTable, StopAction, MAX_STOPS, ENTRANT_NAMES, hashEconomy, haulageRate, HAUL_ALLOWANCE, RATE_WEIGHT_BY_TIER, CHARTER_REQUIREMENTS, makeContract, stepFinance,
 } from './economy.ts';
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
 import { Hasher } from './hash.ts';
@@ -138,12 +138,14 @@ export class World {
   readonly climate = new Climate();
   readonly events = new EventTable();
   private lastEra = 0;
+  private entrantDue = 0;
   private airLaid = false;
   private cargoRateWeight = new Float64Array(256).fill(1);
   private townDemandPerThousand: Float64Array;
   private townWant: Record<string, number> = {};
   private townSend: Record<string, number> = {};
   private basketEra = 0;
+  private touristCargo = -1;
   private townProducePerThousand: Float64Array;
   private routeCosts: RouteCosts;
 
@@ -291,10 +293,15 @@ export class World {
     this.townWant = {
       goods: 6, food: 8, coal: 5, textiles: 2, planks: 2, cement: 2,
       paper: 1, glass: 1, fuel: 2, electronics: 1, luxury: 1, retail: 3,
+      // Visitors, which a town wants far more of in August than in February.
+      // Seasonally scaled where the basket is consumed rather than here, so
+      // the number in this table stays a plain annual average.
+      tourists: 4,
     };
     this.townSend = { passengers: 9, mail: 2 };
     this.townDemandPerThousand = new Float64Array(content.cargo.length);
     this.townProducePerThousand = new Float64Array(content.cargo.length);
+    this.touristCargo = content.cargoIndex.get('tourists') ?? -1;
     this.rebuildTownBasket(1);
 
     this.routeCosts = { speedLimit: this.waySpeed, valueOfTime: content.balance.valueOfTime };
@@ -563,7 +570,10 @@ export class World {
     this.stepUtilities();
     stepSiteDecay(this.sites, b);
     this.rebuildTownBasket(this.era);
-    stepTowns(this.towns, this.townDemandPerThousand, this.townProducePerThousand, b.townGrowthPerDay);
+    stepTowns(
+      this.towns, this.townDemandPerThousand, this.townProducePerThousand, b.townGrowthPerDay,
+      { cargo: this.touristCargo, multiplier: this.climate.tourismMultiplier(this.day) },
+    );
     this.stepConveyors();
     this.stepContracts();
     this.stepRivals();
@@ -577,6 +587,7 @@ export class World {
     if (this.dayOfMonth === 0) this.stepAmenityField();
     this.stepRegulation();
     if (this.day % DAYS_PER_YEAR === 0 && this.day > 0) this.stepPublicWorks();
+    this.stepEntrants();
     this.checkCharters();
   }
 
@@ -1492,6 +1503,8 @@ export class World {
     this.lastEra = era;
     if (was === 0) return;
 
+    this.openNewIndustries(era);
+
     const airCls = this.content.wayIndex.get('airway');
     if (airCls !== undefined && this.content.ways[airCls].era <= era && !this.airLaid) {
       // The four largest towns get an aerodrome. Fewer and there is no network;
@@ -1694,6 +1707,186 @@ export class World {
     return true;
   }
 
+  /**
+   * The region gains industry as the century turns.
+   *
+   * Worldgen places the extraction sites the 1860s had and nothing else, and
+   * nothing ever added to them — so a game run to 2100 had exactly the same
+   * industries in it as a game run to 1861. A refinery, an aluminium smelter,
+   * a resort: all in the content, all reachable in principle by a player with
+   * an extraction charter, and in practice never present anywhere. Half the
+   * cargo table could not move because nothing in the region made it.
+   *
+   * These are founded by the authority rather than by anybody, which is the
+   * right reading of what they are: the region developing, not a competitor
+   * expanding. They are a thing to serve, and whoever serves them first has
+   * found the opportunity the new era opened. That is the era transition
+   * doing what design.md 2.4 says it should — inverting the optimum — rather
+   * than merely retiring some lorries.
+   */
+  private openNewIndustries(era: number): void {
+    /*
+     * Each of this era's new industries first, then anything older that now
+     * has somebody to trade with.
+     *
+     * Drawing at random until a quota filled meant an era's rarer works
+     * simply never happened: era three brings the oil rig, the smelter and
+     * the refinery, and a quota of four filled with refineries — which are
+     * easy to site — before an oil rig was ever drawn. Crude oil existed in
+     * the content, had a producer and a consumer, and was never once made
+     * anywhere. An era ought to visibly bring the things it is the era of.
+     */
+    let founded = 0;
+    for (let defIndex = 0; defIndex < this.content.industries.length; defIndex++) {
+      if (this.content.industries[defIndex].fromEra !== era) continue;
+      const copies = 1 + this.rng.int(2);
+      for (let n = 0; n < copies; n++) {
+        const tile = this.pickSiteFor(defIndex);
+        if (tile === NONE) break;
+        if (this.foundIndustryAsAuthority(defIndex, tile) !== NONE) founded++;
+      }
+    }
+
+    // And the backlog: anything from an earlier era that this one has finally
+    // given a partner. A retail park is no use until something makes retail
+    // stock, and the thing that makes it arrives an era later than it does.
+    const backlog = 2 + this.rng.int(3);
+    let filled = 0;
+    for (let attempt = 0; attempt < 300 && filled < backlog; attempt++) {
+      const defIndex = this.rng.int(this.content.industries.length);
+      const def = this.content.industries[defIndex];
+      if (def.fromEra >= era) continue;
+      if (!this.completesAChain(defIndex)) continue;
+      const tile = this.pickSiteFor(defIndex);
+      if (tile === NONE) continue;
+      if (this.foundIndustryAsAuthority(defIndex, tile) !== NONE) { founded++; filled++; }
+    }
+
+    if (founded > 0) {
+      this.onEvent?.('era', `New industry has come to the region: ${founded} works opened this decade.`);
+    }
+  }
+
+  /** Does the region already make what this works takes, or take what it
+   *  makes? Either way it has somebody to trade with. */
+  private completesAChain(defIndex: number): boolean {
+    const recipe = this.content.industries[defIndex].recipe;
+    const wants = Object.keys(recipe.inputs);
+    const gives = Object.keys(recipe.outputs);
+    for (let s = 0; s < this.sites.count; s++) {
+      if (this.sites.state[s] === SiteState.Dead) continue;
+      const other = this.content.industries[this.sites.def[s]].recipe;
+      for (const id of wants) if (other.outputs[id] !== undefined) return true;
+      for (const id of gives) if (other.inputs[id] !== undefined) return true;
+    }
+    for (const id of gives) {
+      const ci = this.content.cargoIndex.get(id);
+      if (ci !== undefined && this.townDemandFor(ci) > 0) return true;
+    }
+    return false;
+  }
+
+  /** Somewhere an industry of this kind could actually stand. */
+  private pickSiteFor(defIndex: number): number {
+    const def = this.content.industries[defIndex];
+    const size = this.config.size;
+    for (let attempt = 0; attempt < 220; attempt++) {
+      let tile: number;
+      if (def.deposit > 0) {
+        /*
+         * Deposit-bound, so go to the deposits.
+         *
+         * This threw random tiles at the map hoping to land on the right
+         * ground. There are five oil deposits in a region of a hundred and
+         * fifty thousand tiles, so two hundred attempts found one about once
+         * in a hundred and fifty games: the oil rig, and with it crude oil and
+         * everything downstream of it, effectively did not exist. The terrain
+         * already keeps the list.
+         */
+        const seams: number[] = [];
+        for (const d of this.terrain.deposits) {
+          if (d.kind === def.deposit) seams.push(d.y * size + d.x);
+        }
+        if (seams.length === 0) return NONE;
+        tile = seams[this.rng.int(seams.length)];
+      } else {
+        /*
+         * Everything else wants to be near a town — that is where the labour
+         * is, and computeLabour will otherwise leave it permanently unstaffed
+         * and it will decay without ever having produced anything.
+         */
+        const t = this.rng.int(Math.max(1, this.towns.count));
+        const r = 6 + this.rng.int(26);
+        const x = this.towns.x[t] + this.rng.int(r * 2 + 1) - r;
+        const y = this.towns.y[t] + this.rng.int(r * 2 + 1) - r;
+        if (x < 2 || y < 2 || x >= size - 2 || y >= size - 2) continue;
+        tile = y * size + x;
+      }
+      if (this.canFound(AUTHORITY, defIndex, tile)) continue;
+      // Not on top of something else.
+      let clash = false;
+      for (let s = 0; s < this.sites.count; s++) {
+        const dx = this.sites.x[s] - (tile % size);
+        const dy = this.sites.y[s] - ((tile / size) | 0);
+        if (dx * dx + dy * dy < 36) { clash = true; break; }
+      }
+      if (clash) continue;
+      return tile;
+    }
+    return NONE;
+  }
+
+  /** Found without the charter and cash checks a company faces. The region
+   *  developing is not a company expanding. */
+  private foundIndustryAsAuthority(defIndex: number, tile: number): number {
+    const site = this.foundIndustry(AUTHORITY, defIndex, tile);
+    // It needs a road, or nobody can reach it and it will decay to nothing
+    // without ever having produced a tonne.
+    if (site !== NONE) this.connectSiteToRoad(site);
+    return site;
+  }
+
+  /**
+   * A spur from a new site to the nearest road.
+   *
+   * Without one the works stands in a field: not connected, so no service can
+   * collect from it, so it never sells a tonne and decays to nothing having
+   * never produced anything. Worldgen does this for every site it places and
+   * the same has to be true of every site placed later.
+   */
+  private connectSiteToRoad(site: number): void {
+    const layer = this.layers[Mode.Road];
+    const tile = this.sites.tile[site];
+    if (layer.cls[tile] !== 255) {
+      layer.terminal[tile] = 1;
+      this.rebuild();
+      return;
+    }
+    const size = this.config.size;
+    let nearest = NONE;
+    let nearestD = Infinity;
+    const sx = tile % size;
+    const sy = (tile / size) | 0;
+    // The nearest existing road tile within a reasonable haul. Scanned rather
+    // than searched outward because this happens a handful of times a century.
+    for (let t = 0; t < layer.cls.length; t++) {
+      if (layer.cls[t] === 255) continue;
+      const dx = (t % size) - sx;
+      const dy = ((t / size) | 0) - sy;
+      const d = dx * dx + dy * dy;
+      if (d < nearestD) { nearestD = d; nearest = t; }
+    }
+    if (nearest === NONE || nearestD > 120 * 120) return;
+    const path = this.tileRouter.route(tile, nearest);
+    if (!path || path.length < 2) return;
+    const cls = this.publicRoadClass();
+    if (cls < 0) return;
+    const way = this.content.ways[cls];
+    this.layPublicWay(Mode.Road, cls, path, way.publicCharge, way.buildCost);
+    layer.terminal[tile] = 1;
+    this.rebuild();
+  }
+
   /** The best road the authority would build this era. */
   private publicRoadClass(): number {
     let best = -1;
@@ -1833,6 +2026,49 @@ export class World {
       if (this.vehicles.alive[id] && this.vehicles.company[id] === company) this.sellVehicle(id, false);
     }
     this.onEvent?.('bankruptcy', `${this.companies.names[company]} has gone into administration. Its assets are for sale.`);
+    // Somebody will take the yard on. See newEntrant below.
+    this.entrantDue = this.tick + (2 + this.rng.int(4)) * TICKS_PER_YEAR;
+  }
+
+  /**
+   * A new operator sets up, some years after somebody else failed.
+   *
+   * design.md 3.8 says insolvency is an event in the world rather than a
+   * game-over screen, and the same ought to be true of the region as a whole:
+   * a failed carrier leaves a yard, a route somebody knows is viable, and a
+   * gap in the market. Without this the region only ever loses companies —
+   * across a sixty-year sweep three of the four rivals were gone by the end
+   * and the last decades had nobody in them to compete with, buy from, or be
+   * regulated against. Every mechanism in the ownership spine needs somebody
+   * on the other side of it.
+   *
+   * They arrive on the same terms anybody else did, which is what stops this
+   * being a difficulty knob: the same starting capital, a fresh personality,
+   * and no charter. If the region is genuinely unprofitable they will fail
+   * too, and that is information rather than a bug.
+   */
+  private stepEntrants(): void {
+    if (this.entrantDue === 0 || this.tick < this.entrantDue) return;
+    this.entrantDue = 0;
+    let live = 0;
+    for (let c = 1; c < this.companies.count; c++) if (!this.companies.bankrupt[c]) live++;
+    if (live >= this.config.companyCount - 1) return;
+
+    // Re-use a failed company's slot: the table is small and fixed, and a
+    // region that has seen eight failures has not run out of entrepreneurs.
+    let slot = NONE;
+    for (let c = 1; c < this.companies.count; c++) {
+      if (c !== this.player && this.companies.bankrupt[c]) { slot = c; break; }
+    }
+    if (slot === NONE) return;
+
+    const name = ENTRANT_NAMES[this.rng.int(ENTRANT_NAMES.length)];
+    this.companies.revive(slot, name, this.content.balance.startingCash);
+    this.companies.isAi[slot] = 1;
+    this.companies.aggression[slot] = 30 + this.rng.int(60);
+    this.companies.horizon[slot] = 25 + this.rng.int(65);
+    this.companies.thrift[slot] = 25 + this.rng.int(65);
+    this.onEvent?.('entrant', `${name} has set up in the region.`);
   }
 
   // ------------------------------------------------------------- commands
@@ -2109,15 +2345,32 @@ export class World {
     const needed = def.kind === 'extraction' || def.kind === 'processing' || def.kind === 'utility'
       ? Charter.Extraction
       : Charter.Land;
-    if (this.companies.charter[company] < needed) {
+    // The authority is the region. It does not hold a charter from itself,
+    // and requiring one meant the region could never gain an industry after
+    // 1860: a game run to 2100 had exactly the same works in it as a game run
+    // to 1861, and half the cargo table had nothing anywhere that made it.
+    if (company !== AUTHORITY && this.companies.charter[company] < needed) {
       return needed === Charter.Extraction
         ? 'You have no extraction charter. You may haul and you may build, but you may not dig.'
         : 'You have no land charter.';
     }
     const x = tile % this.config.size;
     const y = (tile / this.config.size) | 0;
-    if (!this.terrain.isLand(x, y)) return 'That is water.';
-    if ((this.terrain.flags[tile] & TileFlag.Buildable) === 0) return 'The ground is too steep.';
+    /*
+     * Water is a refusal unless the ground you need is under it.
+     *
+     * An oil rig wants an oil deposit, every oil deposit the generator places
+     * is on the sea bed, and this line refused every one of them — so the rig
+     * could not be founded anywhere in any region, and crude oil, refined fuel
+     * and chemicals were unreachable content for the whole project. The
+     * deposit rules already decide where an industry belongs; this check is
+     * about not building a colliery in the sea, which they also decide.
+     */
+    const wantsWater = def.deposit > 0 && this.terrain.deposit[tile] === def.deposit;
+    if (!wantsWater && !this.terrain.isLand(x, y)) return 'That is water.';
+    if (!wantsWater && (this.terrain.flags[tile] & TileFlag.Buildable) === 0) {
+      return 'The ground is too steep.';
+    }
     if (def.deposit > 0 && this.terrain.deposit[tile] !== def.deposit) {
       const names = DEPOSIT_NAMES[def.deposit] ?? 'the right ground';
       return `A ${def.name.toLowerCase()} needs ${names}. There is none here.`;
@@ -2127,7 +2380,8 @@ export class World {
       const dy = this.sites.y[s] - y;
       if (dx * dx + dy * dy < 25) return 'Too close to another site.';
     }
-    if (this.companies.cash[company] < def.foundCost) {
+    // The authority does not buy land from itself either.
+    if (company !== AUTHORITY && this.companies.cash[company] < def.foundCost) {
       return `Not enough cash: ${def.name} costs ${Math.round(def.foundCost / 100)}.`;
     }
     return '';
@@ -2156,7 +2410,7 @@ export class World {
       if (ci !== undefined) this.sites.capacity[site * cargoCount + ci] = amount * 40;
     }
     this.siteAccessTile[site] = tile;
-    this.companies.post(company, Line.Construction, def.foundCost);
+    if (company !== AUTHORITY) this.companies.post(company, Line.Construction, def.foundCost);
     this.rebuild();
     this.onEvent?.('founded', `${def.name} founded.`);
     return site;

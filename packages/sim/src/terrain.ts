@@ -687,7 +687,10 @@ function placeDeposits(t: Terrain, rng: Rng): DepositSeed[] {
       },
     },
     { kind: Deposit.Farm, weight: 20, test: (x, y) => t.biome[t.idx(x, y)] === Biome.Farmland },
-    { kind: Deposit.Sand, weight: 6, test: (x, y) => t.biome[t.idx(x, y)] === Biome.Beach },
+    // Beaches are a thin strip and the spacing rule thins them further, so the
+    // weight is high relative to how much sand a region needs: without a sand
+    // pit somewhere there is no glass anywhere.
+    { kind: Deposit.Sand, weight: 14, test: (x, y) => t.biome[t.idx(x, y)] === Biome.Beach },
     {
       kind: Deposit.Bauxite,
       weight: 5,
@@ -719,22 +722,51 @@ function placeDeposits(t: Terrain, rng: Rng): DepositSeed[] {
     },
   ];
 
-  const totalWeight = rules.reduce((a, r) => a + r.weight, 0);
+  /*
+   * Sample from the tiles that qualify, not from the whole map.
+   *
+   * This was rejection sampling: pick a rule by weight, pick a tile at random,
+   * and try again if the tile does not suit. That works for coal, which can be
+   * almost anywhere, and fails completely for anything whose ground is rare. A
+   * sand pit wants a beach and a lithium works wants high moor, and both are a
+   * thin fraction of the region, so a random tile essentially never landed on
+   * one: across four seeds the generator placed forty-four coal deposits, zero
+   * sand and zero lithium. Two industries in the content could therefore never
+   * exist in any region, and the two cargoes they make could never move.
+   *
+   * Building the candidate list first costs one sweep of the map at worldgen
+   * and makes every rule that has anywhere to go actually go there.
+   */
+  const candidates: number[][] = rules.map(() => []);
+  for (let y = 3; y < size - 4; y++) {
+    for (let x = 3; x < size - 4; x++) {
+      for (let r = 0; r < rules.length; r++) {
+        if (rules[r].test(x, y)) candidates[r].push(y * size + x);
+      }
+    }
+  }
+
+  // A rule with nowhere to go cannot take its share of the region, so its
+  // weight goes back into the pool rather than producing empty draws.
+  let totalWeight = 0;
+  for (let r = 0; r < rules.length; r++) if (candidates[r].length > 0) totalWeight += rules[r].weight;
+  if (totalWeight === 0) return out;
+
   let guard = 0;
-  while (out.length < target && guard < target * 500) {
+  while (out.length < target && guard < target * 60) {
     guard++;
     let w = rng.int(totalWeight);
-    let rule = rules[0];
-    for (const r of rules) {
-      if (w < r.weight) {
-        rule = r;
-        break;
-      }
-      w -= r.weight;
+    let pick = -1;
+    for (let r = 0; r < rules.length; r++) {
+      if (candidates[r].length === 0) continue;
+      if (w < rules[r].weight) { pick = r; break; }
+      w -= rules[r].weight;
     }
-    const x = rng.range(3, size - 4);
-    const y = rng.range(3, size - 4);
-    if (!rule.test(x, y)) continue;
+    if (pick < 0) continue;
+    const list = candidates[pick];
+    const tile = list[rng.int(list.length)];
+    const x = tile % size;
+    const y = (tile / size) | 0;
     let tooClose = false;
     for (const o of out) {
       const dx = o.x - x;
@@ -745,8 +777,8 @@ function placeDeposits(t: Terrain, rng: Rng): DepositSeed[] {
       }
     }
     if (tooClose) continue;
-    out.push({ x, y, kind: rule.kind, richness: 40 + rng.int(61) });
-    t.deposit[t.idx(x, y)] = rule.kind;
+    out.push({ x, y, kind: rules[pick].kind, richness: 40 + rng.int(61) });
+    t.deposit[t.idx(x, y)] = rules[pick].kind;
   }
   out.sort((a, b) => a.y - b.y || a.x - b.x);
   return out;

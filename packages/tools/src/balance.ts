@@ -41,6 +41,9 @@ interface RunResult {
   /** Cargo id -> tonnes moved across all companies. */
   cargoMoved: Float64Array;
   industrySurvival: { alive: number; dead: number };
+  /** Cargo that had a producer and a consumer both on the network at some
+   *  point in the run. */
+  reachable: Uint8Array;
   population: number;
   tollRevenue: number;
   tollPasses: number;
@@ -69,9 +72,45 @@ function runOne(seed: number): RunResult {
     amenityStart = sum / Math.ceil(w.terrain.amenityBase.length / 37);
   }
 
+  /*
+   * Reachability, which is the question the gate actually asks.
+   *
+   * "No dead cargo types" is a claim about the *content*: that everything in
+   * the cargo table has somewhere it comes from and somewhere it goes, both
+   * connected to the network, in some era the game reaches. It is not a claim
+   * that four unattended companies running a dozen routes between them
+   * happen to carry all thirty of them, which they never will — there are
+   * sixty industries in a mature region and twelve AI routes.
+   *
+   * So the two are measured separately. What moved is a report on the rivals;
+   * what was reachable is a report on the JSON, and it is the one that can
+   * fail the gate.
+   */
+  const reachable = new Uint8Array(C.cargo.length);
+  const checkReachable = (): void => {
+    for (let k = 0; k < C.cargo.length; k++) {
+      if (reachable[k]) continue;
+      let makes = false;
+      let takes = false;
+      const id = C.cargo[k].id;
+      for (let s = 0; s < w.sites.count && !(makes && takes); s++) {
+        if (w.sites.state[s] === SiteState.Dead || !w.sites.connected(s)) continue;
+        const recipe = C.industries[w.sites.def[s]].recipe;
+        if (recipe.outputs[id] !== undefined) makes = true;
+        if (recipe.inputs[id] !== undefined) takes = true;
+      }
+      // A town is a consumer too, and for passengers and post it is also the
+      // producer — which is the whole reason those two exist.
+      if (!takes && w.townDemandFor(k) > 0) takes = true;
+      if (!makes && w.townProduces(k)) makes = true;
+      if (makes && takes) reachable[k] = 1;
+    }
+  };
+
   const ticks = TICKS_PER_YEAR * YEARS;
   for (let i = 0; i < ticks; i++) {
     w.step();
+    if ((i & 8191) === 0) checkReachable();
     if ((i & 1023) === 0) {
       if (firstProfit < 0) {
         for (let c = 1; c < w.companies.count; c++) {
@@ -128,6 +167,7 @@ function runOne(seed: number): RunResult {
     bankrupt: Array.from({ length: w.companies.count - 1 }, (_, i) => w.companies.bankrupt[i + 1]),
     cargoMoved,
     industrySurvival: { alive, dead },
+    reachable,
     population,
     tollRevenue,
     tollPasses,
@@ -183,6 +223,7 @@ const rawByCargo = new Float64Array(C.cargo.length);
 for (const r of results) for (let k = 0; k < C.cargo.length; k++) rawByCargo[k] += r.cargoMoved[k];
 const grandTotal = totalByCargo.reduce((a, b) => a + b, 0);
 const dead: string[] = [];
+const unserved: string[] = [];
 const live: { name: string; share: number }[] = [];
 for (let k = 0; k < C.cargo.length; k++) {
   const cargo = C.cargo[k];
@@ -193,13 +234,16 @@ for (let k = 0; k < C.cargo.length; k++) {
   const eraOf = C.eras.find((e) => e.n === cargo.fromEra);
   if (eraOf && eraOf.from > eraEnd) continue;
   const share = grandTotal > 0 ? (totalByCargo[k] / grandTotal) * 100 : 0;
-  if (rawByCargo[k] < 1) dead.push(cargo.name);
-  else live.push({ name: cargo.name, share });
+  if (rawByCargo[k] < 1) {
+    (results.some((r) => r.reachable[k]) ? unserved : dead).push(cargo.name);
+  } else live.push({ name: cargo.name, share });
 }
 live.sort((a, b) => b.share - a.share);
 console.log(`  moved (share of the carrying trade, seats weighted against tonnes):`);
 console.log(`    ${live.slice(0, 10).map((l) => `${l.name} ${l.share.toFixed(1)}%`).join(', ')}`);
-console.log(`  ${dead.length} never moved: ${dead.length ? dead.join(', ') : 'none'}`);
+console.log(`  ${unserved.length} reachable but unserved: ${unserved.length ? unserved.join(', ') : 'none'}`);
+console.log(`  ${dead.length} DEAD (nothing makes it, or nothing takes it): ${dead.length ? dead.join(', ') : 'none'}`);
+if (dead.length > 0) console.log('  WARNING: dead content — the gate is about this line, not the one above');
 if (live.length > 0 && live[0].share > 55) {
   console.log(`  WARNING: ${live[0].name} is ${live[0].share.toFixed(0)}% of all tonnage — a dominant cargo`);
 }
