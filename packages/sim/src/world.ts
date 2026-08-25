@@ -25,6 +25,9 @@ import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
 import { Hasher } from './hash.ts';
 import { ContractBoard, ContractState, offerContracts } from './contracts.ts';
 import { InfluenceField, type InfluenceSource } from './influence.ts';
+import {
+  Facility, FACILITY_COST, YardTable, canBase, facilitiesFor, refusalText,
+} from './yards.ts';
 import { AmenityField, stepAmenity, REMEDIATION_PRICE, REMEDIATION_FROM_ERA } from './amenity.ts';
 import {
   AssetTable, Graph, NONE, NO_WAY, WayLayer, hashNetwork, rebuildGraph,
@@ -132,6 +135,11 @@ export class World {
 
   /** What you can see, and therefore what you can work in. influence.ts. */
   readonly influence: InfluenceField;
+
+  /** Yards you own, and what each one can take. yards.ts. */
+  readonly yards = new YardTable();
+  /** Which yard each vehicle is based at. */
+  readonly vehicleYard = new Int16Array(4096).fill(-1);
   /** What the region is like to be in, and what industry has done to it.
    *  design.md 2.3. */
   readonly amenity: AmenityField;
@@ -2220,6 +2228,93 @@ export class World {
     return true;
   }
 
+  // --------------------------------------------------------------- yards
+
+  /** How many vehicles are based at a yard right now. */
+  basedAt(yard: number): number {
+    let n = 0;
+    for (let v = 0; v < this.vehicles.count; v++) {
+      if (this.vehicles.alive[v] && this.vehicleYard[v] === yard) n++;
+    }
+    return n;
+  }
+
+  /**
+   * Where could this vehicle go, and if nowhere, why not?
+   *
+   * Answers for the whole fleet at once because that is the question the
+   * Vehicles screen asks: not "can yard three take a tanker" but "can I buy a
+   * tanker at all, and if not, what is stopping me". The answer is a yard or a
+   * sentence.
+   */
+  yardFor(typeIndex: number): { yard: number; reason: string } {
+    const def = this.content.vehicles[typeIndex];
+    if (!def) return { yard: NONE, reason: 'No such vehicle.' };
+    const needs = { handling: def.handling as readonly string[], cls: def.class };
+    let firstReason = 'You have no yard.';
+    for (let y = 0; y < this.yards.count; y++) {
+      if (this.yards.owner[y] !== this.player) continue;
+      const verdict = canBase(this.yards, y, needs, this.basedAt(y));
+      if (verdict.ok) return { yard: y, reason: '' };
+      const text = refusalText(this.yards, y, verdict);
+      if (firstReason === 'You have no yard.') firstReason = text;
+    }
+    return { yard: NONE, reason: firstReason };
+  }
+
+  /**
+   * Buy a vehicle, at a yard that can take it.
+   *
+   * The whole point of the facilities rule lives in the return value: NONE plus
+   * a reason, rather than a silent refusal. A purchase that fails without saying
+   * why is the difference between a constraint and a bug.
+   */
+  buyVehicleAtYard(typeIndex: number): { vehicle: number; reason: string } {
+    const def = this.content.vehicles[typeIndex];
+    if (!def) return { vehicle: NONE, reason: 'No such vehicle.' };
+    if (this.companies.cash[this.player] < def.cost) {
+      return { vehicle: NONE, reason: 'Not enough in the bank.' };
+    }
+    const { yard, reason } = this.yardFor(typeIndex);
+    if (yard === NONE) return { vehicle: NONE, reason };
+
+    // Park it at the nearest site to the yard, because a vehicle has to start
+    // somewhere on the network and the yard is not a graph node yet.
+    let nearest = NONE;
+    let best = Infinity;
+    for (let s = 0; s < this.sites.count; s++) {
+      if (this.siteAccessTile[s] === NONE) continue;
+      const dx = this.sites.x[s] - this.yards.x[yard];
+      const dy = this.sites.y[s] - this.yards.y[yard];
+      const d = dx * dx + dy * dy;
+      if (d < best) { best = d; nearest = s; }
+    }
+    const id = this.buyVehicle(this.player, typeIndex, nearest);
+    if (id === NONE) return { vehicle: NONE, reason: 'Could not put it on the road.' };
+    this.vehicleYard[id] = yard;
+    return { vehicle: id, reason: '' };
+  }
+
+  /** Put a facility into a yard. */
+  addFacility(yard: number, facility: number): boolean {
+    if (yard < 0 || yard >= this.yards.count) return false;
+    if (this.yards.owner[yard] !== this.player) return false;
+    if (this.yards.has(yard, facility)) return false;
+    const cost = FACILITY_COST[facility] ?? 0;
+    if (this.companies.cash[this.player] < cost) return false;
+    this.companies.post(this.player, Line.Construction, cost);
+    this.yards.add(yard, facility);
+    return true;
+  }
+
+  /** Found the starting yard. Called once, at the beginning. */
+  foundYard(x: number, y: number, name: string): number {
+    const tile = y * this.config.size + x;
+    const id = this.yards.alloc(x, y, tile, this.player, name);
+    if (id !== NONE) this.refreshInfluence();
+    return id;
+  }
+
   // ----------------------------------------------------------- contracts
 
   /**
@@ -2348,6 +2443,12 @@ export class World {
   /** Rebuild the influence area from the yards and places you hold. */
   refreshInfluence(extra: InfluenceSource[] = []): void {
     const sources: InfluenceSource[] = [...extra];
+    // A yard is a presence: it is where your lorries sleep and your name is
+    // known, so it reaches further than a works you merely own.
+    for (let y = 0; y < this.yards.count; y++) {
+      if (this.yards.owner[y] !== this.player) continue;
+      sources.push({ x: this.yards.x[y], y: this.yards.y[y], strength: 2.4 });
+    }
     for (let s = 0; s < this.sites.count; s++) {
       if (this.sites.owner[s] !== this.player) continue;
       sources.push({ x: this.sites.x[s], y: this.sites.y[s], strength: 1.5 });

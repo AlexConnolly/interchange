@@ -14,11 +14,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  createWorld, Mode, NO_WAY, TICKS_PER_DAY, SPEED_STEPS, type World,
+  createWorld, Facility, Mode, NO_WAY, TICKS_PER_DAY, SPEED_STEPS, type World,
 } from '@interchange/sim';
 import { loadContent } from '@interchange/data';
 import { Renderer, RoadClass, TILES_ACROSS_DEFAULT, type RenderSource } from '@interchange/render';
 import { ContractPanel, Pins, money } from './Pins.tsx';
+import { Vehicles, Yard } from './Fleet.tsx';
 import './style.css';
 
 loadContent();
@@ -46,15 +47,28 @@ export function App(): JSX.Element {
   const [hud, setHud] = useState({ date: '', vehicles: 0, fps: 0, tris: 0, cash: 0, free: 0 });
   const [live, setLive] = useState<{ world: World; renderer: Renderer } | null>(null);
   const [open, setOpen] = useState(-1);
+  const [screen, setScreen] = useState<'none' | 'vehicles' | 'yard'>('none');
   const [revision, setRevision] = useState(0);
+  const bump = useCallback(() => setRevision((r) => r + 1), []);
 
   const accept = useCallback((id: number): void => {
     if (!live) return;
     if (live.world.acceptContract(id, live.world.player)) {
       setOpen(-1);
-      setRevision((r) => r + 1);
+      bump();
     }
-  }, [live]);
+  }, [live, bump]);
+
+  const buy = useCallback((typeIndex: number): void => {
+    if (!live) return;
+    const r = live.world.buyVehicleAtYard(typeIndex);
+    if (r.vehicle >= 0) bump();
+  }, [live, bump]);
+
+  const addFacility = useCallback((yard: number, facility: number): void => {
+    if (!live) return;
+    if (live.world.addFacility(yard, facility)) bump();
+  }, [live, bump]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -146,7 +160,19 @@ export function App(): JSX.Element {
         if (d < best) { best = d; nearest = i; }
       }
       world.companies.cash[world.player] = world.content.balance.startingCash;
-      if (vanIndex >= 0) world.buyVehicle(world.player, vanIndex, nearest);
+
+      /*
+       * The yard, then the truck in it.
+       *
+       * A chiller from the start, because the opening job is a milk run and a
+       * yard that cannot take the only truck that can do the only job is not a
+       * constraint, it is a dead end. Everything else is bought.
+       */
+      const yard = world.foundYard(Math.round(renderer.camX), Math.round(renderer.camZ), 'Marchford Yard');
+      if (yard >= 0) world.yards.add(yard, Facility.Chiller);
+      const bought = vanIndex >= 0 ? world.buyVehicleAtYard(vanIndex) : { vehicle: -1 };
+      void bought;
+      void nearest;
       // And work to do, straight away.
       world.offerWorkNow();
     }
@@ -300,12 +326,25 @@ export function App(): JSX.Element {
           onAccept={accept}
         />
       )}
+      {live && screen === 'vehicles' && (
+        <Vehicles world={live.world} onBuy={buy} onClose={() => setScreen('none')} />
+      )}
+      {live && screen === 'yard' && (
+        <Yard world={live.world} yard={0} onAdd={addFacility} onClose={() => setScreen('none')} />
+      )}
       <div className="hud">
         <span className="brand">Interchange</span>
         <span className="money">{money(hud.cash)}</span>
         <span>{hud.date}</span>
         <span className="dim">{hud.vehicles} out · {hud.free} idle</span>
-        <span className="dim">{hud.fps} fps</span>
+        <button
+          className="hud-btn"
+          onClick={() => setScreen(screen === 'yard' ? 'none' : 'yard')}
+        >Yard</button>
+        <button
+          className="hud-btn"
+          onClick={() => setScreen(screen === 'vehicles' ? 'none' : 'vehicles')}
+        >Vehicles</button>
       </div>
       {!ready && <div className="loading">Surveying the district…</div>}
     </div>
