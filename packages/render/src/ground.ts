@@ -137,8 +137,8 @@ function buildHedges(
 ): void {
   const s = src.size;
   /** Thin. A hedge wants to be a line, and the strongest lines in the frame. */
-  const T = 0.13;
-  const H = 0.40;
+  const T = 0.11;
+  const H = 0.30;
   const TAPER = 0.80;
 
   const wants = (a: number, b: number): boolean => {

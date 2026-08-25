@@ -39,7 +39,7 @@ export const CROP: RGB[] = [
   hex('#d8c05e'), // wheat
   hex('#e0cb70'), // wheat, ripe
   hex('#8c6a4c'), // ploughed
-  hex('#8b9a72'), // rough grazing — unenclosed, so no hedge round it
+  hex('#8a9c68'), // rough grazing — unenclosed, so no hedge round it
 ];
 
 export const LAND = {
@@ -70,13 +70,13 @@ export const TREE = {
 // ------------------------------------------------------------------ the road
 
 export const ROAD = {
-  verge: hex('#6f8f42'),
+  verge: hex('#6a8a3e'),
   /** Three grades, because a hierarchy you can see is the difference between a
    *  network and a spiderweb. */
-  spine: hex('#5d5f63'),
-  lane: hex('#63656a'),
-  track: hex('#7d7361'),
-  worn: hex('#6e7176'),
+  spine: hex('#4e5257'),
+  lane: hex('#55585d'),
+  track: hex('#6d6350'),
+  worn: hex('#63666b'),
   line: hex('#dcdcd2'),
 };
 

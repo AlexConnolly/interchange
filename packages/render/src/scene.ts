@@ -28,9 +28,10 @@
  */
 
 import {
-  AmbientLight, Color, DirectionalLight, Group, InstancedMesh,
-  MeshLambertMaterial, Object3D, OrthographicCamera, PCFSoftShadowMap,
-  Scene as ThreeScene, Vector3, WebGLRenderer, type BufferGeometry,
+  BackSide, Color, DirectionalLight, DoubleSide, Group,
+  InstancedMesh, MeshLambertMaterial, Object3D, OrthographicCamera,
+  HemisphereLight, PCFSoftShadowMap, Scene as ThreeScene, Vector3, WebGLRenderer,
+  type BufferGeometry,
 } from 'three';
 import { buildGround, toMesh, HEIGHT_TO_WORLD, type GroundSource } from './ground.ts';
 import { buildRoads, type RoadSource } from './roads.ts';
@@ -75,7 +76,7 @@ export class Renderer {
   private readonly camera: OrthographicCamera;
   private readonly material: MeshLambertMaterial;
   private readonly sun: DirectionalLight;
-  private readonly fill: AmbientLight;
+  private readonly fill: HemisphereLight;
   private readonly chunks = new Map<number, Chunk>();
   private readonly fleet = new Group();
   private batches: (InstancedMesh | null)[] = [];
@@ -85,6 +86,9 @@ export class Renderer {
   /** Where the camera is looking, in tiles, and how much it shows. */
   camX = 0;
   camZ = 0;
+  /** The height of the ground under the camera's target, so the view is framed
+   *  on the land rather than on the origin plane. */
+  camY = 0;
   tilesAcross = TILES_ACROSS_DEFAULT;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -105,7 +109,23 @@ export class Renderer {
     this.renderer.setClearColor(new Color(...SKY.horizon));
 
     this.camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
-    this.material = new MeshLambertMaterial({ vertexColors: true });
+    /*
+     * Double-sided, and it is not laziness.
+     *
+     * `geometry.ts`'s `tri` emits its vertices a, c, b — reversed winding —
+     * which the old renderer never noticed because its material was
+     * double-sided too. Switching to a front-facing material made every ground
+     * triangle in the district invisible and left a screen showing nothing but
+     * the hedges, which was a good five minutes.
+     *
+     * Fixing the winding would mean re-deriving every call site in the mesh
+     * builder and in the Blender export path, for a saving in fill rate that
+     * this scene does not need. The convention is reversed; the material is
+     * told so; the shadow side is set to back so a double-sided surface does
+     * not shadow-acne against itself.
+     */
+    this.material = new MeshLambertMaterial({ vertexColors: true, side: DoubleSide });
+    this.material.shadowSide = BackSide;
 
     this.sun = new DirectionalLight(new Color(...SKY.sun), 2.1);
     this.sun.castShadow = true;
@@ -116,9 +136,20 @@ export class Renderer {
     this.sun.shadow.bias = -0.0006;
     this.scene.add(this.sun, this.sun.target);
 
-    // Sky and bounce, as one ambient term. Two lights is enough when the
-    // facets are doing the describing.
-    this.fill = new AmbientLight(new Color(...SKY.zenith), 1.35);
+    /*
+     * A hemisphere, not a flat ambient.
+     *
+     * An AmbientLight adds the same amount to every surface whatever way it
+     * faces, so it does not describe form — it only reduces contrast, and at
+     * the intensity needed to lift the shadows it put a blue-grey wash over the
+     * whole district. A hemisphere light is sky from above and bounce from
+     * below, which lifts the shadows *and* keeps an upward face brighter than a
+     * vertical one. That difference is most of what makes a hedge read as
+     * standing up.
+     */
+    this.fill = new HemisphereLight(
+      new Color(...SKY.zenith), new Color(...SKY.ground), 0.78,
+    );
     this.scene.add(this.fill);
     this.scene.add(this.fleet);
   }
@@ -146,7 +177,15 @@ export class Renderer {
     const el = (38 * Math.PI) / 180;
     const az = (-32 * Math.PI) / 180;
     const d = 120;
-    const target = new Vector3(this.camX, 0, this.camZ);
+    /*
+     * Aim at the ground, not at y = 0.
+     *
+     * The district's surface is tens of world units above zero wherever there
+     * are hills, so a camera aimed at the origin plane puts the land in the
+     * bottom corner and half a screen of sky above it. Which is exactly what it
+     * did.
+     */
+    const target = new Vector3(this.camX, this.camY, this.camZ);
     this.camera.position.set(
       target.x + Math.sin(az) * Math.cos(el) * d,
       target.y + Math.sin(el) * d,
@@ -163,6 +202,15 @@ export class Renderer {
    * tight around what is on screen, which is how a 2048 map produces sharp
    * shadows over a 26-tile frame.
    */
+  /** Sample the ground under the camera so the view stays framed as it pans. */
+  private followGround(src: RenderSource): void {
+    const x = Math.max(0, Math.min(src.size - 1, Math.round(this.camX)));
+    const z = Math.max(0, Math.min(src.size - 1, Math.round(this.camZ)));
+    const h = HEIGHT_TO_WORLD(Math.max(0, src.height[z * src.size + x] ?? 0));
+    // Eased, so panning across a ridge is a drift rather than a lurch.
+    this.camY += (h - this.camY) * 0.12;
+  }
+
   private placeSun(dayFraction: number): void {
     // Late afternoon at the reference, swinging through the day but never
     // straight overhead — a high sun kills every shadow and the shadows are
@@ -172,10 +220,10 @@ export class Renderer {
     const elevation = Math.max(0.28, Math.sin(angle) * 0.75 + 0.30);
     const azimuth = 0.7 + t * 1.6;
     const d = 70;
-    this.sun.target.position.set(this.camX, 0, this.camZ);
+    this.sun.target.position.set(this.camX, this.camY, this.camZ);
     this.sun.position.set(
       this.camX + Math.cos(azimuth) * d * (1 - elevation * 0.5),
-      elevation * d,
+      this.camY + elevation * d,
       this.camZ + Math.sin(azimuth) * d * (1 - elevation * 0.5),
     );
     const c = this.sun.shadow.camera;
@@ -191,8 +239,11 @@ export class Renderer {
     this.sun.color.setRGB(
       SKY.sun[0], SKY.sun[1] * (0.94 + warm * 0.06), SKY.sun[2] * (0.82 + warm * 0.18),
     );
-    this.sun.intensity = 1.7 + elevation * 0.7;
-    this.fill.intensity = 1.15 + (1 - elevation) * 0.35;
+    // The sun does the describing and the fill only stops the shadows going
+    // black. Getting that ratio the wrong way round is what washed the first
+    // build out.
+    this.sun.intensity = 2.5 + elevation * 0.5;
+    this.fill.intensity = 0.62 + (1 - elevation) * 0.22;
   }
 
   /** Stream the chunks around the camera, building what has come into view. */
@@ -262,7 +313,8 @@ export class Renderer {
       }
     }
     this.batches = LIVERY.map((liv) => {
-      const mat = new MeshLambertMaterial({ vertexColors: true });
+      const mat = new MeshLambertMaterial({ vertexColors: true, side: DoubleSide });
+      mat.shadowSide = BackSide;
       const mesh = new InstancedMesh(geometry, mat, capacity);
       mesh.castShadow = true;
       mesh.receiveShadow = false;
@@ -306,6 +358,7 @@ export class Renderer {
   }
 
   render(src: RenderSource): void {
+    this.followGround(src);
     this.streamChunks(src);
     this.updateFleet(src);
     this.placeSun(src.dayFraction);

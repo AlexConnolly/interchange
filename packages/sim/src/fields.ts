@@ -73,10 +73,18 @@ export interface FieldSettings {
 }
 
 export const DEFAULT_FIELDS: FieldSettings = {
-  minSide: 5,
-  maxSide: 13,
-  stopEarly: 0.10,
-  maxSlope: 26,
+  minSide: 6,
+  maxSide: 15,
+  stopEarly: 0.16,
+  /*
+   * Generous, because the first pass left too much unenclosed.
+   *
+   * At 26 the pale unenclosed grazing covered most of the district and the
+   * fields read as islands in it. Real farmland goes a long way up a hill; only
+   * genuine crag is left open. Raising this and requiring less of a parcel to be
+   * land is what turns the ground from patches into countryside.
+   */
+  maxSlope: 52,
 };
 
 export interface FieldMap {
@@ -157,7 +165,7 @@ export function generateFields(
         slope += slopeAt(t);
       }
     }
-    if (tiles === 0 || land / tiles < 0.62) continue;
+    if (tiles === 0 || land / tiles < 0.45) continue;
     const meanSlope = slope / Math.max(1, land);
     // Flat ground gets arable, slopes get grass, and anything steeper than the
     // threshold is left unenclosed.

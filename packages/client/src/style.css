@@ -1,527 +1,73 @@
 /*
- * The overlay's visual language is the drafting language: hairline rules, mono
- * for data, tabular figures. art-direction.md §14 asks that the world and the
- * UI read as one designed object rather than as a game with a website on top,
- * and the way to get that is to make the panel look like the drawing the world
- * is pretending to be.
+ * The whole stylesheet, and it should stay short.
  *
- * Nothing here is decorative. Every rule either separates two things that must
- * be told apart or aligns two things that must be compared.
+ * design.md: icons and short text, never more than eight controls on screen.
+ * The old build's stylesheet had a class for each of twenty overlay legends.
  */
-
 :root {
-  --ink: #e8e6df;
-  --ink-dim: #9aa0a6;
-  --ink-faint: #666c72;
-  --panel: rgba(14, 17, 22, 0.90);
-  --panel-solid: #0e1116;
-  --panel-raised: rgba(26, 31, 38, 0.94);
-  --rule: rgba(232, 230, 223, 0.14);
-  --rule-strong: rgba(232, 230, 223, 0.28);
-
-  /* Semantic set. Reserved: these hues appear nowhere else. */
-  --good: #4fb477;
-  --busy: #e0b040;
-  --warn: #d4832f;
-  --bad: #c8453c;
-  --accent: #c8a13a;
-  --owned: #4fb477;
-  --rival: #c85a3c;
-  --public: #7c8288;
-
-  --mono: 'SF Mono', 'Cascadia Mono', 'JetBrains Mono', 'Roboto Mono', ui-monospace, monospace;
-  --sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --ink: #2c2a26;
+  --ink-dim: #6d675c;
+  --paper: #f6f1e6;
+  --edge: rgba(44, 42, 38, 0.12);
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
 * { box-sizing: border-box; }
 
-html, body, #root {
+html, body, #root, .app {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: #0a0c10;
-  color: var(--ink);
-  font-family: var(--sans);
-  font-size: 13px;
-  -webkit-font-smoothing: antialiased;
-  overscroll-behavior: none;
+  background: #bcd0e0;
 }
 
-canvas { display: block; touch-action: none; }
-
-/* Tabular figures everywhere a number can change, so columns do not jitter. */
-.num, .mono {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: 'tnum' 1;
-}
-
-/* ------------------------------------------------------------------ layout */
-
-.app { position: fixed; inset: 0; }
-
-.hud {
+.world {
   position: absolute;
   inset: 0;
-  pointer-events: none;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  grid-template-columns: auto 1fr auto;
-  gap: 10px;
-  padding: 10px;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+  touch-action: none;
 }
-.hud > * { pointer-events: auto; }
+.world:active { cursor: grabbing; }
 
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--rule);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+/* One bar, floating, translucent. Pastel and light, matching the frame rather
+   than the old build's near-black chrome. */
+.hud {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: flex;
+  gap: 18px;
+  align-items: baseline;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: rgba(246, 241, 230, 0.86);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 14px rgba(30, 40, 30, 0.14);
+  color: var(--ink);
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  user-select: none;
 }
 
-.panel h2 {
-  margin: 0;
-  padding: 7px 10px 6px;
-  font-size: 10px;
+.brand {
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--ink-dim);
-  border-bottom: 1px solid var(--rule);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-
-/* -------------------------------------------------------------- top strip */
-
-.topbar {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: stretch;
-  gap: 1px;
-  background: var(--rule);
-  border: 1px solid var(--rule);
-  height: 46px;
-}
-
-.topbar .cell {
-  background: var(--panel-solid);
-  padding: 5px 12px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-width: 0;
-}
-.topbar .cell.grow { flex: 1; }
-.topbar .label {
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-  line-height: 1.3;
-}
-.topbar .value {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 15px;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-.topbar .value.small { font-size: 12px; }
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 0 14px;
-  background: var(--panel-solid);
-  font-weight: 600;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
   font-size: 11px;
-  color: var(--accent);
-}
-
-/* ------------------------------------------------------------- speed keys */
-
-.speeds { display: flex; gap: 1px; background: var(--rule); align-items: stretch; }
-.speeds button {
-  background: var(--panel-solid);
-  border: 0;
   color: var(--ink-dim);
-  font-family: var(--mono);
-  font-size: 12px;
-  padding: 0 11px;
-  cursor: pointer;
-  transition: background 90ms, color 90ms;
 }
-.speeds button:hover { background: #1a1f26; color: var(--ink); }
-.speeds button[aria-pressed='true'] { background: var(--accent); color: #14161a; font-weight: 600; }
 
-/* ---------------------------------------------------------------- buttons */
+.dim { color: var(--ink-dim); }
 
-button.btn {
-  background: transparent;
-  border: 1px solid var(--rule-strong);
-  color: var(--ink);
-  font: inherit;
-  font-size: 12px;
-  padding: 5px 11px;
-  cursor: pointer;
-  transition: background 90ms, border-color 90ms;
-}
-button.btn:hover:not(:disabled) { background: rgba(232, 230, 223, 0.09); border-color: var(--ink-dim); }
-button.btn:disabled { opacity: 0.35; cursor: default; }
-button.btn.primary { background: var(--accent); border-color: var(--accent); color: #14161a; font-weight: 600; }
-button.btn.primary:hover:not(:disabled) { background: #d9b14a; }
-button.btn.danger { border-color: rgba(200, 69, 60, 0.5); color: #e08078; }
-button.btn.tiny { padding: 2px 7px; font-size: 11px; }
-
-/* ------------------------------------------------------------- side rails */
-
-.rail {
-  grid-row: 2;
-  width: 44px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  background: var(--rule);
-  border: 1px solid var(--rule);
-  align-self: start;
-}
-.rail button {
-  background: var(--panel-solid);
-  border: 0;
-  color: var(--ink-dim);
-  height: 42px;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  font-size: 16px;
-  transition: background 90ms, color 90ms;
-  position: relative;
-}
-.rail button:hover { background: #1a1f26; color: var(--ink); }
-.rail button[aria-pressed='true'] { background: #1e242c; color: var(--accent); }
-.rail button[aria-pressed='true']::before {
-  content: '';
+.loading {
   position: absolute;
-  left: 0; top: 0; bottom: 0;
-  width: 2px;
-  background: var(--accent);
-}
-
-/* ---------------------------------------------------------------- windows */
-
-.window {
-  grid-row: 2;
-  width: 330px;
-  max-height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-self: start;
-  background: var(--panel);
-  border: 1px solid var(--rule);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-.window .body { overflow-y: auto; overscroll-behavior: contain; }
-.window.right { grid-column: 3; justify-self: end; }
-.window.left { grid-column: 1; }
-
-/* ------------------------------------------------------------------ lists */
-
-.row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--rule);
-  cursor: default;
-}
-.row.click { cursor: pointer; }
-.row.click:hover { background: rgba(232, 230, 223, 0.055); }
-.row.selected { background: rgba(200, 161, 58, 0.14); box-shadow: inset 2px 0 0 var(--accent); }
-.row .grow { flex: 1; min-width: 0; }
-.row .title { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row .sub {
-  font-size: 10.5px;
-  color: var(--ink-faint);
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-
-.kv {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 3px 10px;
-  padding: 8px 10px;
-  font-size: 12px;
-}
-.kv dt { color: var(--ink-dim); }
-.kv dd {
-  margin: 0;
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-/* Ledger: income above the rule, expenditure below, total in the gutter. */
-.ledger { padding: 4px 0; }
-.ledger .line {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  padding: 3px 10px;
-  font-size: 12px;
-  gap: 12px;
-}
-.ledger .line span:last-child {
-  font-family: var(--mono);
-  font-variant-numeric: tabular-nums;
-}
-.ledger .line.total {
-  border-top: 1px solid var(--rule-strong);
-  margin-top: 4px;
-  padding-top: 6px;
-  font-weight: 600;
-}
-.ledger .head {
-  padding: 6px 10px 2px;
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-}
-
-.pos { color: var(--good); }
-.neg { color: var(--bad); }
-.dim { color: var(--ink-faint); }
-.warnc { color: var(--warn); }
-
-/* --------------------------------------------------------------- meters */
-
-.meter { height: 3px; background: rgba(232, 230, 223, 0.12); overflow: hidden; }
-.meter > div { height: 100%; transition: width 200ms; }
-
-.chip {
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 1px 5px;
-  border: 1px solid currentColor;
-  opacity: 0.85;
-  white-space: nowrap;
-}
-
-/* ------------------------------------------------------------------ modal */
-
-.scrim {
-  position: fixed;
-  inset: 0;
-  background: rgba(6, 8, 11, 0.72);
-  display: grid;
-  place-items: center;
-  z-index: 40;
-  backdrop-filter: blur(3px);
-}
-.modal {
-  width: min(940px, 94vw);
-  max-height: 88vh;
-  display: flex;
-  flex-direction: column;
-  background: var(--panel-solid);
-  border: 1px solid var(--rule-strong);
-}
-.modal .body { overflow-y: auto; }
-
-/* ---------------------------------------------------------------- tables */
-
-table.data { width: 100%; border-collapse: collapse; font-size: 12px; }
-table.data th {
-  text-align: left;
-  font-size: 9px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-  font-weight: 500;
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--rule);
-  position: sticky;
-  top: 0;
-  background: var(--panel-solid);
-}
-table.data td { padding: 6px 10px; border-bottom: 1px solid var(--rule); }
-table.data td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
-table.data tr.click:hover { background: rgba(232, 230, 223, 0.055); cursor: pointer; }
-
-/* ------------------------------------------------------------- messages */
-
-.log {
-  grid-column: 2;
-  grid-row: 3;
-  justify-self: center;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  align-items: center;
-  pointer-events: none;
-  max-width: 620px;
-}
-.log .msg {
-  background: var(--panel);
-  border: 1px solid var(--rule);
-  border-left: 2px solid var(--accent);
-  padding: 6px 12px;
-  font-size: 12px;
-  animation: rise 260ms ease-out;
-}
-.log .msg.bad { border-left-color: var(--bad); }
-.log .msg.good { border-left-color: var(--good); }
-
-@keyframes rise {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
-}
-
-/* ------------------------------------------------------------- the world */
-
-.tooltip {
-  position: absolute;
-  transform: translate(-50%, -100%);
-  background: var(--panel-raised);
-  border: 1px solid var(--rule-strong);
-  padding: 5px 9px;
-  font-size: 11.5px;
-  pointer-events: none;
-  white-space: nowrap;
-  z-index: 20;
-}
-
-.legend {
-  display: flex;
-  gap: 12px;
-  padding: 6px 10px;
-  font-size: 10.5px;
-  color: var(--ink-dim);
-  border-top: 1px solid var(--rule);
-  flex-wrap: wrap;
-}
-.legend i {
-  display: inline-block;
-  width: 9px; height: 9px;
-  margin-right: 4px;
-  vertical-align: -1px;
-}
-
-/* ------------------------------------------------------------- start card */
-
-.start {
-  position: fixed;
   inset: 0;
   display: grid;
   place-items: center;
-  background: #0a0c10;
-  z-index: 60;
-}
-.start .card { width: min(620px, 92vw); border: 1px solid var(--rule-strong); background: var(--panel-solid); }
-.start h1 {
-  margin: 0;
-  padding: 22px 26px 6px;
-  font-size: 30px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  font-weight: 300;
-  color: var(--accent);
-}
-.start .tag { padding: 0 26px 18px; color: var(--ink-dim); font-size: 13px; line-height: 1.55; }
-.start .fields { padding: 0 26px 18px; display: grid; gap: 12px; }
-.start label { display: grid; gap: 5px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); }
-.start input, .start select {
-  background: #14181e;
-  border: 1px solid var(--rule);
-  color: var(--ink);
-  font-family: var(--mono);
+  color: var(--ink-dim);
   font-size: 14px;
-  padding: 8px 10px;
-}
-.start .actions { padding: 16px 26px 22px; display: flex; gap: 10px; border-top: 1px solid var(--rule); }
-
-/* ------------------------------------------------------------ responsive */
-
-@media (max-width: 780px) {
-  .window { width: min(300px, calc(100vw - 68px)); }
-  .topbar { height: auto; flex-wrap: wrap; }
-  .topbar .cell { padding: 4px 9px; }
-  .brand { display: none; }
-}
-
-::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(232, 230, 223, 0.16); }
-::-webkit-scrollbar-thumb:hover { background: rgba(232, 230, 223, 0.26); }
-
-/*
- * Photo mode. features.md 19.
- *
- * Subtraction rather than a separate view: the world is already being drawn
- * correctly, so the mode is one class that takes the interface away. Doing it
- * any other way would mean a second render path that could drift from the
- * first, and the whole point is a shot of what the game actually looks like.
- */
-/*
- * Everything the HUD draws, not a list of the pieces I remembered.
- *
- * The first version named the panels one by one and missed the event log, so
- * "a heavy dray has broken down" sat in the middle of an otherwise clean shot.
- * Hiding the container and letting the photo bar out again cannot miss
- * anything, including whatever gets added next.
- */
-.app.photo .hud { display: none; }
-
-.photobar {
-  position: fixed;
-  left: 50%;
-  bottom: 18px;
-  transform: translateX(-50%);
-  z-index: 40;
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  padding: 8px 14px;
-  border: 1px solid var(--line);
-  background: rgba(13, 16, 23, 0.55);
-  backdrop-filter: blur(6px);
-  border-radius: 3px;
-  font-size: 12px;
-  /* Almost invisible until wanted, so it is not in the picture. */
-  opacity: 0.28;
-  transition: opacity 140ms ease;
-}
-.photobar:hover { opacity: 1; }
-.photobar .stamp { font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
-
-/*
- * Accessibility settings. features.md 20.
- *
- * Two classes on the root rather than a theme system, because these are the
- * two requests that actually arrive and each is a handful of declarations.
- * Larger text scales the interface only: the world is drawn at its own scale
- * and the player has a zoom for that.
- */
-html.large-text { font-size: 17px; }
-html.large-text .panel .sub,
-html.large-text .kv dt,
-html.large-text .kv dd { font-size: 13px; }
-html.large-text .topbar .label { font-size: 10.5px; letter-spacing: 0.1em; }
-
-html.reduce-motion *,
-html.reduce-motion *::before,
-html.reduce-motion *::after {
-  animation-duration: 0.001ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 0.001ms !important;
+  background: #bcd0e0;
 }
