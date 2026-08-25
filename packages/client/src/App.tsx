@@ -26,6 +26,9 @@ import { eveningFor, litness, type Evening } from './evening.ts';
 import { Sound, type Heard } from './sound.ts';
 import { Farmwork, type FarmField } from './farmwork.ts';
 import { syncAnchors } from './anchor.ts';
+import {
+  Settings, loadOptions, saveOptions, type Options,
+} from './Settings.tsx';
 import { Fleet, Yard } from './Fleet.tsx';
 import { Planning } from './Planning.tsx';
 import { Dock } from './Dock.tsx';
@@ -185,7 +188,21 @@ export function App(): JSX.Element {
    * coordinate picker in it would be the worst of both.
    */
   const [building, setBuilding] = useState(false);
-  const [muted, setMuted] = useState(sound.isMuted);
+  const [options, setOptions] = useState<Options>(loadOptions);
+  const [paused, setPaused] = useState(false);
+  /**
+   * The frame loop reads both of these through refs.
+   *
+   * It is set up once, in an effect with no dependencies, and closing over the
+   * state directly would freeze it at whatever it was on the first frame — the
+   * pause would never take and the volume slider would move nothing. A ref is
+   * the standard way across that boundary and the only one that does not mean
+   * tearing the loop down and rebuilding it every time a setting changes.
+   */
+  const pausedRef = useRef(false);
+  const optionsRef = useRef(options);
+  pausedRef.current = paused;
+  optionsRef.current = options;
   const [note, setNote] = useState('');
   const [revision, setRevision] = useState(0);
   const bump = useCallback(() => setRevision((r) => r + 1), []);
@@ -284,6 +301,20 @@ export function App(): JSX.Element {
     }, [live, lookAt]),
     close: useCallback((): void => setPanel({ k: 'none' }), []),
   };
+
+  /*
+   * Push the options into the two systems that own them, and to disk.
+   *
+   * One effect rather than three, because they are one decision as far as the
+   * player is concerned and splitting them would mean three writes to
+   * `localStorage` for one click on a segmented control.
+   */
+  useEffect(() => {
+    sound.setMuted(!options.sound);
+    sound.setLevels(options.music, options.effects);
+    live?.renderer.setVfx(options.vfx);
+    saveOptions(options);
+  }, [options, live]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -778,6 +809,18 @@ export function App(): JSX.Element {
      * tractor works a field in the way it should means waiting for one to pick a
      * field the opening shot happens to contain.
      */
+    /*
+     * `?vfx=off`, `?vfx=low`, `?vfx=high` — the picture settings, forceable.
+     *
+     * Alongside the other overrides, and it earns its place for the same reason
+     * they do: the only honest way to judge a grade is to flip it on and off on
+     * the *same frame*, and a URL does that where a menu cannot.
+     */
+    const askedVfx = params.get('vfx');
+    if (askedVfx === 'off' || askedVfx === 'low' || askedVfx === 'high') {
+      setOptions((o) => ({ ...o, vfx: askedVfx }));
+    }
+
     const at = params.get('at');
     if (at) {
       const [ax, az] = at.split(',').map(Number);
@@ -1185,6 +1228,16 @@ export function App(): JSX.Element {
     window.addEventListener('pointerdown', wake);
     window.addEventListener('keydown', wake);
 
+    // Escape opens the menu, and closes it. One key, both ways: a menu that
+    // needs a different gesture to leave than to enter is a menu people get
+    // stuck in.
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      setPaused((was) => !was);
+    };
+    window.addEventListener('keydown', onKey);
+
     canvas.addEventListener('pointerdown', down);
     canvas.addEventListener('pointermove', move);
     canvas.addEventListener('pointerup', up);
@@ -1258,14 +1311,28 @@ export function App(): JSX.Element {
        * calendar and another for the vehicles — two would drift, and the day
        * *is* how long things take.
        */
-      acc += dt * TICKS_PER_SECOND;
-      let ran = 0;
-      while (acc >= 1 && ran < 40) {
-        world.step();
-        acc -= 1;
-        ran++;
+      /*
+       * Paused: the world stops, the frame does not.
+       *
+       * Skipping the render as well would be the obvious reading of "pause" and
+       * the wrong one — the district behind the menu would freeze on its last
+       * frame and the camera would stop answering the mouse, so the game would
+       * look like it had crashed rather than like it was waiting. And the
+       * accumulator is *cleared* rather than left to fill: on resume, a build-up
+       * of ticks would be spent in one frame and the lorries would jump.
+       */
+      if (pausedRef.current) {
+        acc = 0;
+      } else {
+        acc += dt * TICKS_PER_SECOND;
+        let ran = 0;
+        while (acc >= 1 && ran < 40) {
+          world.step();
+          acc -= 1;
+          ran++;
+        }
+        if (ran > 0) world.project();
       }
-      if (ran > 0) world.project();
 
       /*
        * The clock, before anything that reads it.
@@ -1584,6 +1651,7 @@ export function App(): JSX.Element {
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', fit);
+      window.removeEventListener('keydown', onKey);
       canvas.removeEventListener('pointerdown', down);
       canvas.removeEventListener('pointermove', move);
       canvas.removeEventListener('pointerup', up);
@@ -1710,6 +1778,13 @@ export function App(): JSX.Element {
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
+      {paused && (
+        <Settings
+          options={options}
+          onChange={setOptions}
+          onResume={() => setPaused(false)}
+        />
+      )}
       <div className="hud">
         {live && (
           <Status
@@ -1720,12 +1795,7 @@ export function App(): JSX.Element {
             dayFraction={hud.dayFraction}
             night={hud.night}
             weather={hud.weather}
-            muted={muted}
-            onMute={() => {
-              sound.setMuted(!muted);
-              setMuted(!muted);
-              void sound.start();
-            }}
+            onMenu={() => { void sound.start(); setPaused(true); }}
           />
         )}
       </div>

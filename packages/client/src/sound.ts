@@ -118,6 +118,19 @@ export class Sound {
   private voices: Voice[] = [];
   private ambient = new Map<SoundName, { gain: GainNode; source: AudioBufferSourceNode }>();
   private started = false;
+  /**
+   * Two volume multipliers, applied where the game asks for a level rather than
+   * as gain nodes of their own.
+   *
+   * The alternative — a music bus and an effects bus between every source and
+   * the master — is the textbook answer and buys nothing here: nothing in this
+   * game needs to duck one against the other, and every level in it is already
+   * computed per frame from something (the weather, the distance, the season).
+   * Multiplying at the point the level is decided is one operation in the same
+   * expression that was already there.
+   */
+  private musicLevel = 1;
+  private effectsLevel = 1;
   private muted = false;
   /** Wall-clock of the last horn, so they stay occasional. */
   private lastHorn = 0;
@@ -316,7 +329,7 @@ export class Sound {
     v.clip = want;
     v.id = h.id;
     this.aim(v, h);
-    v.gain.gain.setTargetAtTime(0.55, ctx.currentTime, 0.35);
+    v.gain.gain.setTargetAtTime(0.55 * this.effectsLevel, ctx.currentTime, 0.35);
   }
 
   private aim(v: Voice, h: Heard): void {
@@ -363,7 +376,7 @@ export class Sound {
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     const gain = ctx.createGain();
-    gain.gain.value = volume;
+    gain.gain.value = volume * this.effectsLevel;
     if (x !== undefined && z !== undefined) {
       const panner = ctx.createPanner();
       panner.panningModel = 'HRTF';
@@ -387,6 +400,19 @@ export class Sound {
   }
 
   /**
+   * How loud the two halves of the mix are, 0..1 each.
+   *
+   * Separate because they answer different complaints. Music is a matter of
+   * taste and gets turned off by people who are listening to something else;
+   * engines and weather are the *game* making noise and get turned down by
+   * people who want it quieter, not gone.
+   */
+  setLevels(music: number, effects: number): void {
+    this.musicLevel = Math.max(0, Math.min(1, music));
+    this.effectsLevel = Math.max(0, Math.min(1, effects));
+  }
+
+  /**
    * The two music tracks, crossfaded by how far into winter it is.
    *
    * Both loop from the moment there is any music at all, and only their gains
@@ -404,8 +430,8 @@ export class Sound {
     // sin/cos of a quarter turn: the squares sum to one, so total power holds.
     const a = Math.cos(w * Math.PI / 2);
     const b = Math.sin(w * Math.PI / 2);
-    this.ambientLevel('musicSummer', a * volume);
-    this.ambientLevel('musicWinter', b * volume);
+    this.ambientLevel('musicSummer', a * volume * this.musicLevel);
+    this.ambientLevel('musicWinter', b * volume * this.musicLevel);
   }
 
   /**
@@ -419,6 +445,9 @@ export class Sound {
     const ctx = this.ctx;
     const buffer = this.buffers.get(name);
     if (!ctx || !this.master || !buffer) return;
+    const music = name === 'musicSummer' || name === 'musicWinter';
+    // Music arrives with `musicLevel` already in it, from `music()` above.
+    if (!music) level *= this.effectsLevel;
     let entry = this.ambient.get(name);
     if (!entry) {
       const source = ctx.createBufferSource();

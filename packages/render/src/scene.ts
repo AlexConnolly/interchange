@@ -28,7 +28,7 @@
  */
 
 import {
-  AdditiveBlending, BackSide, Color, DirectionalLight, DoubleSide, Group,
+  AdditiveBlending, BackSide, Color, DirectionalLight, DoubleSide, Fog, Group,
   InstancedBufferAttribute, InstancedMesh, MeshBasicMaterial, MeshLambertMaterial,
   Object3D, OrthographicCamera, HemisphereLight, PCFSoftShadowMap, PointLight,
   Scene as ThreeScene, Vector3, WebGLRenderer,
@@ -41,6 +41,10 @@ import { buildRoads, buildCatsEyes, type RoadSource } from './roads.ts';
 import type { Model } from './glb.ts';
 import { Precipitation } from './weather.ts';
 import { LIVERY, NIGHT, SKY, SNOW, type RGB } from './palette.ts';
+import {
+  LOOK, aimFog, aimShade, buildComposer, makeFog, makeMotes, moodAt, stylise,
+  type Composed, type Mood, type Motes,
+} from './look.ts';
 
 export { HEIGHT_TO_WORLD };
 
@@ -52,6 +56,15 @@ export { HEIGHT_TO_WORLD };
  * rather than carried across the district.
  */
 const REVERSE_LIMIT = 3.5;
+
+/**
+ * How far back the camera sits from what it is looking at.
+ *
+ * Named because the fog needs it too. With an orthographic camera every pixel is
+ * at roughly this depth, so aerial perspective has to be graded *around* the
+ * figure rather than outward from zero — see `aimFog`.
+ */
+const CAMERA_DISTANCE = 120;
 
 /** Tiles per chunk. Small enough that one rebuild is cheap, large enough that a
  *  128² district is sixty-four draw calls rather than a thousand. */
@@ -191,6 +204,38 @@ export class Renderer {
   private readonly glow: MeshBasicMaterial;
   private readonly sun: DirectionalLight;
   private readonly fill: HemisphereLight;
+  /**
+   * A cool directional kicker opposite the sun, casting no shadow.
+   *
+   * The missing half of the temperature contrast. The hemisphere lifts the
+   * shadows but lifts them from directly above, so a vertical face turned away
+   * from the sun got almost nothing and every silhouette lost its form on its
+   * dark side. This fills that side from the opposite quarter, in a colder
+   * colour than the key, which is the single change that stops the district
+   * reading as one temperature.
+   */
+  private readonly kicker: DirectionalLight;
+  private readonly fog: Fog;
+  private readonly motes: Motes;
+  private composed: Composed | null = null;
+  private mood: Mood = moodAt(1, 0);
+  /** The sun's height, 0 at the horizon and 1 overhead. Written by `placeSun`. */
+  private sunHeight = 1;
+  private snowDepth = 0;
+  private elapsed = 0;
+  private width = 1;
+  private height = 1;
+  /**
+   * How much of the look to draw.
+   *
+   * `high` is the whole chain; `low` keeps the grade and the fog and drops the
+   * two passes that cost real fill rate — bloom and the shaft march — along with
+   * the motes; `off` renders straight to the canvas with none of it. Offered
+   * because the chain is the one part of this renderer whose cost scales with
+   * screen area rather than with district size, so it is the part a slower
+   * machine needs to be able to decline.
+   */
+  vfx: 'high' | 'low' | 'off' = 'high';
   /**
    * Real lights, a few, for the things nearest the camera.
    *
@@ -383,6 +428,21 @@ export class Renderer {
       new Color(...SKY.zenith), new Color(...SKY.ground), 0.78,
     );
     this.scene.add(this.fill);
+
+    /*
+     * The cool kicker. No shadow, on purpose: a second shadow-casting light
+     * doubles the shadow pass and draws a second set of shadows going the wrong
+     * way, and its whole job is to be the light that has no direction you can
+     * point at.
+     */
+    this.kicker = new DirectionalLight(new Color(0.55, 0.70, 0.95), 0.45);
+    this.kicker.position.set(-0.6, 0.5, 0.7);
+    this.scene.add(this.kicker);
+
+    this.fog = makeFog();
+    this.scene.fog = this.fog;
+    this.motes = makeMotes();
+    this.scene.add(this.motes.points);
     for (let i = 0; i < LAMP_POOL; i++) {
       // Distance rather than decay: a physically correct inverse-square falloff
       // at this scale puts everything either blown out or black, because a tile
@@ -401,6 +461,9 @@ export class Renderer {
 
   resize(w: number, h: number): void {
     this.renderer.setSize(w, h, false);
+    this.width = w;
+    this.height = h;
+    this.composed?.setSize(w, h);
     const aspect = w / Math.max(1, h);
     const half = this.tilesAcross / 2;
     this.camera.left = -half;
@@ -418,10 +481,27 @@ export class Renderer {
    * is what a steeper camera loses and why the old build's buildings read as
    * coloured footprints.
    */
+  /**
+   * Half the depth the frame spans, in world units along the view axis.
+   *
+   * Moving up the screen by `v` world units in the image plane means moving
+   * `v / sin(elevation)` further across the ground, which is `v / tan(elevation)`
+   * further from the camera. At the standard thirty-eight degrees that is about
+   * 1.28 units of depth per unit of screen height — so a frame twenty-six tiles
+   * wide on a wide window spans a mere eleven units front to back. Every fog
+   * figure in this renderer has to be scaled to that, and the number is small
+   * enough that guessing it is guaranteed to be wrong.
+   */
+  private halfDepth(): number {
+    const aspect = Math.max(0.2, this.width / Math.max(1, this.height));
+    const halfUp = this.tilesAcross / aspect / 2;
+    return halfUp / Math.tan((38 * Math.PI) / 180);
+  }
+
   private placeCamera(): void {
     const el = (38 * Math.PI) / 180;
     const az = (-32 * Math.PI) / 180;
-    const d = 120;
+    const d = CAMERA_DISTANCE;
     /*
      * Aim at the ground, not at y = 0.
      *
@@ -611,6 +691,9 @@ export class Renderer {
      * Now there are. So the ground can go properly dark, because the road is
      * picked out in studs and the traffic is carrying lights.
      */
+    // Kept for the mood table, which is a function of exactly the two numbers
+    // the light already had to work out.
+    this.sunHeight = lit;
     this.sun.intensity = (2.5 + lit * 0.5) * day + 0.34 * this.night;
     this.fill.intensity = (0.62 + (1 - lit) * 0.22) * day + 0.20 * this.night;
     lerpColour(this.fill.color, SKY.zenith, NIGHT.zenith, this.night);
@@ -649,6 +732,7 @@ export class Renderer {
    */
   private setSeason(snow: number): void {
     SNOW_UNIFORM.value = snow;
+    this.snowDepth = snow;
     // A gentle lift, not a wash. Snow is a big reflector so the shaded side of
     // everything is brighter and bluer in winter — but overdoing it flattens the
     // contrast that was showing the relief in the first place, which at 0.35 it
@@ -1547,7 +1631,76 @@ export class Renderer {
       this.snowing ? this.rain : 0,
     );
     this.placeCamera();
-    this.renderer.render(this.scene, this.camera);
+
+    /*
+     * The look, and it is all downstream of two numbers.
+     *
+     * `lit` and `night` already exist because the sun needs them, and every
+     * value in the mood table is a continuous function of those two — so the
+     * grade, the fog, the bloom and the hue ramp cannot fall out of step with
+     * the light, and none of them can jump at an hour boundary because there are
+     * no hour boundaries.
+     */
+    this.elapsed += dt;
+    this.mood = moodAt(this.sunHeight, this.night);
+    LOOK.ramp.value = this.vfx === 'off' ? 0 : this.mood.ramp;
+    /*
+     * The wrapped fill, and the hemisphere pays for it.
+     *
+     * This term *adds* light — up to `wrap * wrapGain` times the albedo — so
+     * switching it on without taking the same amount off the real fill simply
+     * makes the district brighter, which on a pastel palette reads as washed
+     * out rather than as softly lit. That is exactly what the first attempt did.
+     * The hemisphere is scaled down by the same figure below, so turning this
+     * dial changes the *shape* of the fill and not its quantity.
+     */
+    LOOK.wrap.value = this.vfx === 'off' ? 0 : 0.30 * (1 - this.night * 0.5);
+    this.fill.intensity *= 1 - LOOK.wrap.value * LOOK.wrapGain.value;
+    aimShade(this.camera, this.sun, this.kicker);
+    // The kicker cools and dims after dark: at night the sky *is* the fill, so
+    // a directional kicker as strong as the daytime one would light the wrong
+    // side of every building with something that is not there.
+    this.kicker.intensity = 0.45 * (1 - this.night * 0.62);
+    aimFog(this.fog, CAMERA_DISTANCE, this.halfDepth(), this.mood, this.clear);
+    this.scene.fog = this.vfx === 'off' ? null : this.fog;
+    /*
+     * Motes in the warm half of the year only.
+     *
+     * Pollen and dust in the air is a July thing; in January the air is doing
+     * something else and the precipitation system is already drawing it. Faded
+     * on the snow rather than on the month so the two hand over to each other.
+     */
+    this.motes.update(
+      dt, this.elapsed, this.camX, this.camZ,
+      this.vfx === 'high' ? (1 - this.snowDepth) * (1 - this.night * 0.8) : 0,
+    );
+
+    if (this.vfx === 'off' || !this.composed) {
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+    this.composed.apply(this.vfx === 'low'
+      ? { ...this.mood, bloom: 0, scatter: 0 }
+      : this.mood);
+    this.composed.aim(this.sun, this.camera);
+    this.composed.render();
+  }
+
+  /**
+   * Turn the post chain on, off, or down.
+   *
+   * The chain is built on first use rather than at construction, so a player who
+   * never turns it on never pays for the half-float multisampled target — which
+   * at a large window is tens of megabytes.
+   */
+  setVfx(level: 'high' | 'low' | 'off'): void {
+    this.vfx = level;
+    if (level === 'off') return;
+    if (!this.composed) {
+      this.composed = buildComposer(
+        this.renderer, this.scene, this.camera, this.width, this.height,
+      );
+    }
   }
 
   /**
@@ -1765,6 +1918,9 @@ function litMaterial(
   { livery, takes = 1, to = SNOW.lit }:
   { livery?: RGB; takes?: number; to?: RGB },
 ): MeshLambertMaterial {
+  // Every lit material carries the hue ramp, applied at the end of this
+  // function so it chains onto the snow, cloud and livery injections below
+  // rather than replacing them.
   const mat = new MeshLambertMaterial({ vertexColors: true, side: DoubleSide });
   mat.shadowSide = BackSide;
   const tint = livery ? new Color(...livery) : null;
@@ -1873,7 +2029,7 @@ ${shader.fragmentShader}`.replace(
 	vColor = mix( vColor, mix( vec3( lum ), vec3( 0.34, 0.30, 0.26 ), 0.40 ), winter );`,
     );
   };
-  return mat;
+  return stylise(mat);
 }
 
 /**
