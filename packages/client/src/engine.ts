@@ -30,13 +30,13 @@ export interface EngineEvent {
 }
 
 /**
- * How long a full dawn-to-dark-to-dawn takes, in real seconds.
+ * The shortest a dawn-to-dawn may take, in real seconds.
  *
- * Four minutes: long enough that the light is a slow change you notice rather
- * than an effect happening at you, short enough that a player who sits down at
- * noon sees a dusk before they get bored of noon.
+ * Forty, which is exactly a game day at 1x — so at the slowest speed the sun
+ * and the calendar are the same thing, and at faster speeds the sun keeps this
+ * pace while the date runs on ahead.
  */
-const SUN_CYCLE_SECONDS = 240;
+const MIN_DAY_SECONDS = 40;
 
 export class Engine {
   world: World;
@@ -48,9 +48,10 @@ export class Engine {
 
   private accumulator = 0;
   private lastFrame = 0;
-  /** Where the sun is, 0..1. Advanced in real time, not in game time — see
-   *  the note in buildSource. */
+  /** Where the sun is, 0..1. Tracks the game clock but is rate-limited — see
+   *  advanceSun. */
   private sunPhase = 0.35;
+  private lastSunTick = 0;
   private raf = 0;
   private source: RenderSource | null = null;
   private listeners = new Set<() => void>();
@@ -295,28 +296,36 @@ export class Engine {
     this.notify();
   }
 
+
   /**
-   * Move the sun. Real seconds, not game days.
+   * Move the sun: with the game clock, but never faster than you can watch.
    *
-   * A game day is forty-eight ticks, and at the fastest speed the simulation
-   * runs several hundred ticks a second — so a sun tied directly to the
-   * calendar completed a dawn-to-dusk cycle about ten times a second and the
-   * screen strobed. That is not a day and night; it is a fault.
+   * The contradiction is not fixable and it is worth writing down rather than
+   * claiming otherwise. A game day is eight hundred ticks, which is forty real
+   * seconds at 1x and eight at 5x. Coupled directly to the calendar, the light
+   * is a genuine day at the slowest speed and a strobe at the quickest; run on
+   * its own timer, it is smooth everywhere and stops agreeing with the date.
    *
-   * The honest fix is to admit these are two different clocks. The calendar
-   * spans two hundred and forty years and is the *subject* of the game; the
-   * sun is atmosphere, and art-direction.md 13 is explicit that weather and
-   * light are mood and never information. Nothing is read off the sun, so
-   * nothing is lost by letting it keep its own time — and a fixed cycle means
-   * the light looks the same at every game speed, which is what you want from
-   * something whose whole job is to look like light.
+   * So it does both. The phase advances by however much game time passed,
+   * clamped to a floor on how long a full cycle may take. At 1x and 2x the sun
+   * *is* the game's day. At 5x it falls behind the calendar and keeps moving at
+   * a watchable rate, and because there is no day in the interface
+   * (constants.ts) there is nothing on screen for it to contradict.
    *
-   * It still stops when the game is paused, because a world that has stopped
-   * and a sky that has not is unsettling in a way nobody can name.
+   * art-direction.md 8 is what licenses this: light is mood and never
+   * information. Nothing is read off the sun, so nothing is lost by letting it
+   * lag when the alternative is a flicker.
    */
   private advanceSun(dt: number): void {
-    if (!this.running || SPEED_STEPS[this.world.speed] === 0) return;
-    this.sunPhase = (this.sunPhase + dt / SUN_CYCLE_SECONDS) % 1;
+    const tick = this.world.tick;
+    if (!this.running || SPEED_STEPS[this.world.speed] === 0) {
+      this.lastSunTick = tick;
+      return;
+    }
+    const wanted = Math.max(0, tick - this.lastSunTick) / TICKS_PER_DAY;
+    const ceiling = dt / MIN_DAY_SECONDS;
+    this.sunPhase = (this.sunPhase + Math.min(wanted, ceiling)) % 1;
+    this.lastSunTick = tick;
   }
 
   private start(): void {

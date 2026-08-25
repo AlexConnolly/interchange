@@ -263,16 +263,25 @@ with.**
   see is not absurd.
 - Speeds are shown in mph as flavour, never beside a duration.
 
-| | |
-|---|---|
-| Tile | 32 m — unchanged, so existing art scale holds |
-| District | 256 × 256, about 8 km square |
-| Week | 4 real minutes at 1× |
-| Month | 4 weeks |
-| Year | 12 months, about 3¼ hours at 1× |
-| Campaign | 10 years — roughly 6 hours at 5× |
-| Speeds | 1×, 2×, 5×. No 20×. |
+| | Value | Real time at 1× |
+|---|---|---|
+| Tile | 32 m — unchanged, so existing art scale holds | |
+| District | 256 × 256, about 8 km square | |
+| Tick | 20 Hz | |
+| Day | 800 ticks — a rate bucket, never shown | 40 s |
+| Week | 6 days | 4 min |
+| Month | 4 weeks | 16 min |
+| Year | 12 months | 3¼ h |
+| Campaign | 10 years | 32 h, or 6½ h at 5× |
+| Speeds | 1×, 2×, 5×. No 20×. | |
 
-Dropping 20× lets the sun run on the game clock at every speed rather than on a
-separate one. At 5× a game day is under a minute, which is a cycle you can
-watch rather than a strobe.
+**The sun, and what dropping 20× did and did not fix.** A game day is forty real
+seconds at 1× and eight at 5×, so a sun coupled directly to the calendar is a
+real day at the slowest speed and a flicker at the quickest. Dropping 20× made
+that better and not well: eight seconds is still not a day.
+
+So the sun tracks the game clock with a floor on how long a cycle may take —
+forty seconds, which is exactly a game day at 1×. At 1× and 2× the sun *is* the
+game's day. At 5× it falls behind the date and keeps moving at a watchable rate.
+Because no day is ever printed, there is nothing on screen for it to contradict,
+and art.md §8 is what licenses it: light is mood and never information.

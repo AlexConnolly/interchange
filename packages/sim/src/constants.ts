@@ -28,10 +28,35 @@ export const TICKS_PER_SECOND = 20;
  * A twenty-day month gives a game year of 9.6 real minutes at 1x, so Act I's
  * two decades is a couple of hours at the speeds people actually play at.
  */
-export const TICKS_PER_DAY = 48;
-export const DAYS_PER_MONTH = 20;
+/*
+ * The calendar, and the one honest thing to say about it.
+ *
+ * Any transport game has a contradiction between two clocks. A vehicle has to
+ * take tens of seconds to make a journey you can watch, and the calendar has
+ * to advance fast enough for progression. At realistic road speeds those are
+ * incompatible by two orders of magnitude, and no setting of these numbers
+ * fixes it. The old draft picked one and wrote a whole document apologising.
+ *
+ * The answer here is to stop showing the player a unit they can do arithmetic
+ * with. The player-facing unit is the **week**; accounts are monthly; there is
+ * no day in the interface at all. A day exists below here purely as the bucket
+ * that per-day rates are charged against, and because nothing displays it,
+ * nobody can notice that a lorry covers more ground in one than it should.
+ *
+ * A six-day week is therefore not a claim about anything. It is the divisor
+ * that makes a week a round number of ticks, and it is invisible.
+ *
+ * Three runs a week is a real pattern for a dedicated haulage contract, so the
+ * numbers the player *can* see are not absurd. Speeds are shown in mph as
+ * flavour and never beside a duration.
+ */
+export const TICKS_PER_DAY = 800;
+export const DAYS_PER_WEEK = 6;
+export const WEEKS_PER_MONTH = 4;
+export const DAYS_PER_MONTH = DAYS_PER_WEEK * WEEKS_PER_MONTH;
 export const MONTHS_PER_YEAR = 12;
 export const DAYS_PER_YEAR = DAYS_PER_MONTH * MONTHS_PER_YEAR;
+export const TICKS_PER_WEEK = TICKS_PER_DAY * DAYS_PER_WEEK;
 export const TICKS_PER_YEAR = TICKS_PER_DAY * DAYS_PER_YEAR;
 
 /*
@@ -52,7 +77,19 @@ export const START_YEAR = 1985;
 export const END_YEAR = 1995;
 
 /** Speed multipliers the player can select. Index 0 is paused. */
-export const SPEED_STEPS = [0, 1, 2, 5, 20] as const;
+/*
+ * Speed multipliers. Index 0 is paused, and there is deliberately no 20x.
+ *
+ * At twenty times a game day passes in two seconds, which is not a day and a
+ * night, it is a strobe — so the sun had to be given its own clock and the
+ * light stopped agreeing with the calendar. At five times a day is a hundred
+ * and sixty seconds, which is a cycle you can watch, so the sun can run on the
+ * game clock at every speed the player can select.
+ *
+ * The campaign is ten years and about six hours at five times, which does not
+ * need a fourth gear.
+ */
+export const SPEED_STEPS = [0, 1, 2, 5] as const;
 
 // ------------------------------------------------------------- the network
 

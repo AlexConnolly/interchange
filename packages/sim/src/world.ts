@@ -13,7 +13,7 @@ import {
   ACCEL, AUTHORITY, CELLS_PER_TILE, Control, DIR_BIT, DIR_DX, DIR_DY,
   DIR_OPPOSITE, FLOW_WINDOW, HASH_INTERVAL, MAX_COMPANIES, MAX_VEHICLES,
   MAX_NODES, MODE_COUNT, MODE_NAMES, Mode, PATH_LATENCY_TICKS, SPEED_STEPS, START_YEAR,
-  TICKS_PER_DAY, TICKS_PER_YEAR, DAYS_PER_MONTH, DAYS_PER_YEAR, ECONOMY_SCALE, ECOMMERCE_ERA, ECOMMERCE_SHIFT, LOAD_PATIENCE_DAYS, LOAD_PATIENCE_SHARE, CONTAINER_ERA, CONTAINER_TRANSFER_GAIN, PUBLIC_STANDARD, INDUSTRY_SIGHT, CHARACTER_COUNT, ENTRANT_CAPITAL,
+  TICKS_PER_DAY, TICKS_PER_YEAR, DAYS_PER_MONTH, DAYS_PER_YEAR, ECONOMY_SCALE, ECOMMERCE_ERA, ECOMMERCE_SHIFT, LOAD_PATIENCE_DAYS, LOAD_PATIENCE_SHARE, CONTAINER_ERA, CONTAINER_TRANSFER_GAIN, PUBLIC_STANDARD, ENTRANT_CAPITAL, DAYS_PER_WEEK,
   ACCESS_SCALE, STALLED_DAYS,
 } from './constants.ts';
 import { Cmd, CommandQueue, type Command } from './commands.ts';
@@ -324,6 +324,11 @@ export class World {
     return this.day % DAYS_PER_MONTH;
   }
 
+  /** The week of the month, 0..3. The only sub-monthly unit the player sees. */
+  get weekOfMonth(): number {
+    return ((this.day % DAYS_PER_MONTH) / DAYS_PER_WEEK) | 0;
+  }
+
   /**
    * Rebuild the town basket for an era. Cheap, and called only when the era
    * turns over, so the cost is a handful of times in a whole game.
@@ -377,9 +382,18 @@ export class World {
     return 1;
   }
 
+  /**
+   * The date, as the player is allowed to see it.
+   *
+   * Weeks and months, never a day. constants.md has the reasoning: a day is a
+   * rate bucket rather than a unit, and the moment one is printed next to a
+   * speed the arithmetic stops working. "Week 2, Mar 1985" is legible, is what
+   * a haulage office would actually say, and cannot be divided into anything
+   * that contradicts a lorry.
+   */
   dateString(): string {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return `${this.dayOfMonth + 1} ${months[this.month]} ${this.year}`;
+    return `Week ${this.weekOfMonth + 1}, ${months[this.month]} ${this.year}`;
   }
 
   // ------------------------------------------------------------ the graph

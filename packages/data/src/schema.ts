@@ -211,7 +211,13 @@ export type Balance = z.infer<typeof Balance>;
 export const ContentBundle = z.object({
   cargo: z.array(CargoDef),
   vehicles: z.array(VehicleDef),
-  eras: z.array(EraDef).length(8),
+  /*
+   * One era, and the length is checked rather than left open because a bundle
+   * with two eras in it would be a half-reverted content cut and should fail
+   * loudly rather than quietly gate half the vehicles behind a decade that
+   * never arrives. decisions.md D7.
+   */
+  eras: z.array(EraDef).length(1),
   industries: z.array(IndustryDef),
   ways: z.array(WayClass),
   balance: Balance,
@@ -243,8 +249,11 @@ export function validateBundle(raw: unknown): ContentBundle {
       if (!cargoIds.has(k)) errors.push(`industry "${ind.id}" produces unknown cargo "${k}"`);
     }
   }
+  // Numbered from one and contiguous, however many there are. The count is
+  // checked by the schema above; this checks there are no gaps, which matters
+  // because the sim resolves an era by index.
   const eraNumbers = b.eras.map((e) => e.n).sort((x, y) => x - y);
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < eraNumbers.length; i++) {
     if (eraNumbers[i] !== i + 1) errors.push(`era ${i + 1} is missing`);
   }
   // A cargo nobody produces or nobody consumes is dead content — the balance

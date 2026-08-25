@@ -1,72 +1,101 @@
 [
   {
-    "id": "colliery",
-    "name": "Colliery",
+    "id": "dairy-farm",
+    "name": "Dairy farm",
     "kind": "extraction",
-    "deposit": 1,
+    "deposit": 9,
     "recipe": {
-      "inputs": {},
-      "outputs": {
-        "coal": 6
+      "inputs": {
+        "feed": 2
       },
-      "period": 60
+      "outputs": {
+        "milk": 5
+      },
+      "period": 40
     },
-    "footprint": 3,
-    "foundCost": 2400000,
-    "powerNeed": 20,
-    "waterNeed": 12,
-    "labourNeed": 60,
-    "amenityPenalty": 26,
-    "amenityRadius": 10,
+    "footprint": 2,
+    "foundCost": 380000,
+    "powerNeed": 0,
+    "waterNeed": 0,
+    "labourNeed": 0,
+    "amenityPenalty": 2,
+    "amenityRadius": 3,
     "fromEra": 1,
-    "kit": "mine",
-    "colour": "#39343a"
+    "kit": "farm",
+    "colour": "#8ea866"
   },
   {
-    "id": "ironstone-mine",
-    "name": "Ironstone mine",
+    "id": "arable-farm",
+    "name": "Arable farm",
     "kind": "extraction",
-    "deposit": 2,
+    "deposit": 9,
     "recipe": {
       "inputs": {},
       "outputs": {
-        "iron-ore": 5
+        "grain": 5
       },
-      "period": 60
+      "period": 44
     },
-    "footprint": 3,
-    "foundCost": 2600000,
-    "powerNeed": 22,
-    "waterNeed": 14,
-    "labourNeed": 55,
-    "amenityPenalty": 24,
-    "amenityRadius": 9,
+    "footprint": 2,
+    "foundCost": 340000,
+    "powerNeed": 0,
+    "waterNeed": 0,
+    "labourNeed": 0,
+    "amenityPenalty": 1,
+    "amenityRadius": 3,
     "fromEra": 1,
-    "kit": "mine",
-    "colour": "#5e4436"
+    "kit": "farm",
+    "colour": "#b0a95e"
   },
   {
-    "id": "bauxite-pit",
-    "name": "Bauxite pit",
-    "kind": "extraction",
-    "deposit": 6,
+    "id": "creamery",
+    "name": "Creamery",
+    "kind": "processing",
+    "deposit": 0,
     "recipe": {
-      "inputs": {},
-      "outputs": {
-        "bauxite": 5
+      "inputs": {
+        "milk": 6
       },
-      "period": 66
+      "outputs": {
+        "dairy": 4
+      },
+      "period": 36
     },
     "footprint": 3,
-    "foundCost": 3000000,
-    "powerNeed": 24,
-    "waterNeed": 30,
-    "labourNeed": 50,
-    "amenityPenalty": 34,
-    "amenityRadius": 13,
+    "foundCost": 1650000,
+    "powerNeed": 0,
+    "waterNeed": 0,
+    "labourNeed": 0,
+    "amenityPenalty": 14,
+    "amenityRadius": 7,
     "fromEra": 1,
-    "kit": "pit",
-    "colour": "#8f5f34"
+    "kit": "works",
+    "colour": "#c8cbc4"
+  },
+  {
+    "id": "mill",
+    "name": "Feed mill",
+    "kind": "processing",
+    "deposit": 0,
+    "recipe": {
+      "inputs": {
+        "grain": 6
+      },
+      "outputs": {
+        "feed": 5
+      },
+      "period": 40
+    },
+    "footprint": 3,
+    "foundCost": 1200000,
+    "powerNeed": 0,
+    "waterNeed": 0,
+    "labourNeed": 0,
+    "amenityPenalty": 12,
+    "amenityRadius": 6,
+    "fromEra": 1,
+    "kit": "works",
+    "colour": "#a89050"
   },
   {
     "id": "quarry",
@@ -76,67 +105,20 @@
     "recipe": {
       "inputs": {},
       "outputs": {
-        "stone": 8,
-        "spoil": 2
+        "aggregate": 8
       },
-      "period": 54
+      "period": 44
     },
     "footprint": 3,
-    "foundCost": 1800000,
-    "powerNeed": 14,
-    "waterNeed": 8,
-    "labourNeed": 35,
-    "amenityPenalty": 28,
-    "amenityRadius": 11,
+    "foundCost": 1900000,
+    "powerNeed": 0,
+    "waterNeed": 0,
+    "labourNeed": 0,
+    "amenityPenalty": 34,
+    "amenityRadius": 12,
     "fromEra": 1,
-    "kit": "pit",
-    "colour": "#807d76"
-  },
-  {
-    "id": "sand-pit",
-    "name": "Sand pit",
-    "kind": "extraction",
-    "deposit": 10,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "sand": 7
-      },
-      "period": 54
-    },
-    "footprint": 2,
-    "foundCost": 1200000,
-    "powerNeed": 8,
-    "waterNeed": 6,
-    "labourNeed": 22,
-    "amenityPenalty": 18,
-    "amenityRadius": 8,
-    "fromEra": 1,
-    "kit": "pit",
-    "colour": "#c2ac7d"
-  },
-  {
-    "id": "clay-pit",
-    "name": "Clay pit",
-    "kind": "extraction",
-    "deposit": 5,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "clay": 6
-      },
-      "period": 56
-    },
-    "footprint": 2,
-    "foundCost": 1100000,
-    "powerNeed": 8,
-    "waterNeed": 14,
-    "labourNeed": 22,
-    "amenityPenalty": 16,
-    "amenityRadius": 7,
-    "fromEra": 1,
-    "kit": "pit",
-    "colour": "#8b6b55"
+    "kit": "mine",
+    "colour": "#948f86"
   },
   {
     "id": "forestry",
@@ -146,242 +128,20 @@
     "recipe": {
       "inputs": {},
       "outputs": {
-        "timber": 6
+        "timber": 4
       },
-      "period": 62
+      "period": 52
     },
-    "footprint": 3,
-    "foundCost": 900000,
-    "powerNeed": 6,
-    "waterNeed": 4,
-    "labourNeed": 26,
-    "amenityPenalty": 12,
-    "amenityRadius": 8,
+    "footprint": 2,
+    "foundCost": 420000,
+    "powerNeed": 0,
+    "waterNeed": 0,
+    "labourNeed": 0,
+    "amenityPenalty": 4,
+    "amenityRadius": 4,
     "fromEra": 1,
     "kit": "yard",
-    "colour": "#5c4a2e"
-  },
-  {
-    "id": "farm",
-    "name": "Farm",
-    "kind": "extraction",
-    "deposit": 9,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "grain": 5,
-        "livestock": 2
-      },
-      "period": 70
-    },
-    "footprint": 4,
-    "foundCost": 700000,
-    "powerNeed": 4,
-    "waterNeed": 26,
-    "labourNeed": 20,
-    "amenityPenalty": 0,
-    "amenityRadius": 0,
-    "fromEra": 1,
-    "kit": "farm",
-    "colour": "#a08f4e"
-  },
-  {
-    "id": "fishery",
-    "name": "Fishery",
-    "kind": "extraction",
-    "deposit": 8,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "fish": 4
-      },
-      "period": 64
-    },
-    "footprint": 2,
-    "foundCost": 900000,
-    "powerNeed": 6,
-    "waterNeed": 4,
-    "labourNeed": 24,
-    "amenityPenalty": 4,
-    "amenityRadius": 3,
-    "fromEra": 1,
-    "kit": "wharf",
-    "colour": "#4f7d8c"
-  },
-  {
-    "id": "oil-rig",
-    "name": "Oil platform",
-    "kind": "extraction",
-    "deposit": 7,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "crude-oil": 6
-      },
-      "period": 58
-    },
-    "footprint": 2,
-    "foundCost": 7200000,
-    "powerNeed": 40,
-    "waterNeed": 10,
-    "labourNeed": 40,
-    "amenityPenalty": 22,
-    "amenityRadius": 12,
-    "fromEra": 3,
-    "kit": "rig",
-    "colour": "#3a3a34"
-  },
-  {
-    "id": "lithium-works",
-    "name": "Lithium works",
-    "kind": "extraction",
-    "deposit": 11,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "lithium": 3
-      },
-      "period": 74
-    },
-    "footprint": 3,
-    "foundCost": 9000000,
-    "powerNeed": 60,
-    "waterNeed": 70,
-    "labourNeed": 45,
-    "amenityPenalty": 30,
-    "amenityRadius": 12,
-    "fromEra": 6,
-    "kit": "pit",
-    "colour": "#8f9aa2"
-  },
-  {
-    "id": "coking-plant",
-    "name": "Coking plant",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "coal": 6
-      },
-      "outputs": {
-        "coke": 4
-      },
-      "period": 58
-    },
-    "footprint": 3,
-    "foundCost": 3800000,
-    "powerNeed": 30,
-    "waterNeed": 34,
-    "labourNeed": 45,
-    "amenityPenalty": 30,
-    "amenityRadius": 11,
-    "fromEra": 1,
-    "kit": "works",
-    "colour": "#4b4640"
-  },
-  {
-    "id": "gasworks",
-    "name": "Gasworks",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "coal": 5
-      },
-      "outputs": {
-        "chemicals": 2,
-        "coke": 1
-      },
-      "period": 62
-    },
-    "footprint": 3,
-    "foundCost": 3000000,
-    "powerNeed": 18,
-    "waterNeed": 28,
-    "labourNeed": 34,
-    "amenityPenalty": 24,
-    "amenityRadius": 9,
-    "fromEra": 1,
-    "kit": "works",
-    "colour": "#59544a"
-  },
-  {
-    "id": "steelworks",
-    "name": "Steelworks",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "coke": 4,
-        "iron-ore": 6
-      },
-      "outputs": {
-        "steel": 5,
-        "spoil": 2
-      },
-      "period": 64
-    },
-    "footprint": 4,
-    "foundCost": 8600000,
-    "powerNeed": 70,
-    "waterNeed": 60,
-    "labourNeed": 90,
-    "amenityPenalty": 42,
-    "amenityRadius": 16,
-    "fromEra": 1,
-    "kit": "works",
-    "colour": "#6d747c"
-  },
-  {
-    "id": "smelter",
-    "name": "Aluminium smelter",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "bauxite": 6
-      },
-      "outputs": {
-        "aluminium": 3
-      },
-      "period": 66
-    },
-    "footprint": 4,
-    "foundCost": 9800000,
-    "powerNeed": 140,
-    "waterNeed": 70,
-    "labourNeed": 70,
-    "amenityPenalty": 38,
-    "amenityRadius": 15,
-    "fromEra": 3,
-    "kit": "works",
-    "colour": "#95a0a8"
-  },
-  {
-    "id": "cement-works",
-    "name": "Cement works",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "stone": 6,
-        "clay": 2
-      },
-      "outputs": {
-        "cement": 5
-      },
-      "period": 60
-    },
-    "footprint": 3,
-    "foundCost": 4400000,
-    "powerNeed": 44,
-    "waterNeed": 30,
-    "labourNeed": 40,
-    "amenityPenalty": 34,
-    "amenityRadius": 13,
-    "fromEra": 1,
-    "kit": "works",
-    "colour": "#a9a69e"
+    "colour": "#4f6642"
   },
   {
     "id": "sawmill",
@@ -390,552 +150,73 @@
     "deposit": 0,
     "recipe": {
       "inputs": {
-        "timber": 6
-      },
-      "outputs": {
-        "planks": 4
-      },
-      "period": 56
-    },
-    "footprint": 3,
-    "foundCost": 1600000,
-    "powerNeed": 20,
-    "waterNeed": 12,
-    "labourNeed": 30,
-    "amenityPenalty": 14,
-    "amenityRadius": 7,
-    "fromEra": 1,
-    "kit": "yard",
-    "colour": "#9c7b4c"
-  },
-  {
-    "id": "paper-mill",
-    "name": "Paper mill",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
         "timber": 5
       },
       "outputs": {
-        "paper": 4
+        "sawn": 4
       },
-      "period": 60
+      "period": 40
     },
     "footprint": 3,
-    "foundCost": 4000000,
-    "powerNeed": 40,
-    "waterNeed": 80,
-    "labourNeed": 42,
+    "foundCost": 1100000,
+    "powerNeed": 0,
+    "waterNeed": 0,
+    "labourNeed": 0,
+    "amenityPenalty": 16,
+    "amenityRadius": 7,
+    "fromEra": 1,
+    "kit": "works",
+    "colour": "#96703e"
+  },
+  {
+    "id": "concrete-plant",
+    "name": "Concrete plant",
+    "kind": "processing",
+    "deposit": 0,
+    "recipe": {
+      "inputs": {
+        "aggregate": 7
+      },
+      "outputs": {},
+      "period": 40
+    },
+    "footprint": 3,
+    "foundCost": 1450000,
+    "powerNeed": 0,
+    "waterNeed": 0,
+    "labourNeed": 0,
     "amenityPenalty": 26,
-    "amenityRadius": 11,
-    "fromEra": 1,
-    "kit": "works",
-    "colour": "#c6bfab"
-  },
-  {
-    "id": "refinery",
-    "name": "Refinery",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "crude-oil": 8
-      },
-      "outputs": {
-        "fuel": 5,
-        "chemicals": 2
-      },
-      "period": 60
-    },
-    "footprint": 4,
-    "foundCost": 11000000,
-    "powerNeed": 80,
-    "waterNeed": 90,
-    "labourNeed": 70,
-    "amenityPenalty": 40,
-    "amenityRadius": 16,
-    "fromEra": 3,
-    "kit": "works",
-    "colour": "#b4923a"
-  },
-  {
-    "id": "brickworks",
-    "name": "Brickworks",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "clay": 5
-      },
-      "outputs": {
-        "cement": 3
-      },
-      "period": 58
-    },
-    "footprint": 2,
-    "foundCost": 1800000,
-    "powerNeed": 18,
-    "waterNeed": 16,
-    "labourNeed": 26,
-    "amenityPenalty": 20,
-    "amenityRadius": 8,
-    "fromEra": 1,
-    "kit": "works",
-    "colour": "#9e6146"
-  },
-  {
-    "id": "glassworks",
-    "name": "Glassworks",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "sand": 5,
-        "coal": 2
-      },
-      "outputs": {
-        "glass": 4
-      },
-      "period": 58
-    },
-    "footprint": 3,
-    "foundCost": 3400000,
-    "powerNeed": 40,
-    "waterNeed": 24,
-    "labourNeed": 34,
-    "amenityPenalty": 22,
     "amenityRadius": 9,
     "fromEra": 1,
     "kit": "works",
-    "colour": "#7fa0a6"
+    "colour": "#8f9298"
   },
   {
-    "id": "food-works",
-    "name": "Food processing",
-    "kind": "processing",
+    "id": "terminal",
+    "name": "Freight terminal",
+    "kind": "terminal",
     "deposit": 0,
     "recipe": {
       "inputs": {
-        "grain": 4,
-        "livestock": 2,
-        "fish": 2
+        "dairy": 3,
+        "sawn": 3
       },
       "outputs": {
-        "food": 5,
-        "waste": 1
+        "parcels": 4,
+        "fuel": 4
       },
-      "period": 56
-    },
-    "footprint": 3,
-    "foundCost": 2800000,
-    "powerNeed": 26,
-    "waterNeed": 44,
-    "labourNeed": 48,
-    "amenityPenalty": 12,
-    "amenityRadius": 6,
-    "fromEra": 1,
-    "kit": "works",
-    "colour": "#b3634a"
-  },
-  {
-    "id": "mill-textile",
-    "name": "Textile mill",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "coal": 3,
-        "grain": 1
-      },
-      "outputs": {
-        "textiles": 3
-      },
-      "period": 62
-    },
-    "footprint": 3,
-    "foundCost": 2600000,
-    "powerNeed": 30,
-    "waterNeed": 50,
-    "labourNeed": 70,
-    "amenityPenalty": 18,
-    "amenityRadius": 8,
-    "fromEra": 1,
-    "kit": "works",
-    "colour": "#8b5771"
-  },
-  {
-    "id": "factory",
-    "name": "Factory",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "steel": 3,
-        "chemicals": 2,
-        "planks": 1
-      },
-      "outputs": {
-        "goods": 4,
-        "waste": 1
-      },
-      "period": 58
+      "period": 32
     },
     "footprint": 4,
-    "foundCost": 5600000,
-    "powerNeed": 60,
-    "waterNeed": 40,
-    "labourNeed": 90,
-    "amenityPenalty": 26,
-    "amenityRadius": 11,
+    "foundCost": 3200000,
+    "powerNeed": 0,
+    "waterNeed": 0,
+    "labourNeed": 0,
+    "amenityPenalty": 22,
+    "amenityRadius": 9,
     "fromEra": 1,
-    "kit": "works",
-    "colour": "#b8862e"
-  },
-  {
-    "id": "electronics-plant",
-    "name": "Electronics plant",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "aluminium": 2,
-        "glass": 2,
-        "chemicals": 1
-      },
-      "outputs": {
-        "electronics": 3,
-        "waste": 1
-      },
-      "period": 58
-    },
-    "footprint": 3,
-    "foundCost": 12000000,
-    "powerNeed": 90,
-    "waterNeed": 60,
-    "labourNeed": 110,
-    "amenityPenalty": 14,
-    "amenityRadius": 7,
-    "fromEra": 5,
-    "kit": "works",
-    "colour": "#3f7ea6"
-  },
-  {
-    "id": "vehicle-plant",
-    "name": "Vehicle plant",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "steel": 4,
-        "aluminium": 2,
-        "electronics": 1
-      },
-      "outputs": {
-        "luxury": 2,
-        "goods": 3
-      },
-      "period": 62
-    },
-    "footprint": 4,
-    "foundCost": 16000000,
-    "powerNeed": 110,
-    "waterNeed": 70,
-    "labourNeed": 160,
-    "amenityPenalty": 24,
-    "amenityRadius": 11,
-    "fromEra": 5,
-    "kit": "works",
-    "colour": "#8a7a3e"
-  },
-  {
-    "id": "battery-plant",
-    "name": "Battery plant",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "lithium": 3,
-        "chemicals": 2
-      },
-      "outputs": {
-        "batteries": 3
-      },
-      "period": 60
-    },
-    "footprint": 3,
-    "foundCost": 18000000,
-    "powerNeed": 140,
-    "waterNeed": 90,
-    "labourNeed": 100,
-    "amenityPenalty": 20,
-    "amenityRadius": 10,
-    "fromEra": 7,
-    "kit": "works",
-    "colour": "#43705f"
-  },
-  {
-    "id": "recycling",
-    "name": "Recycling plant",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "waste": 6
-      },
-      "outputs": {
-        "steel": 1,
-        "glass": 1,
-        "goods": 1
-      },
-      "period": 60
-    },
-    "footprint": 3,
-    "foundCost": 9000000,
-    "powerNeed": 70,
-    "waterNeed": 50,
-    "labourNeed": 60,
-    "amenityPenalty": 10,
-    "amenityRadius": 6,
-    "fromEra": 7,
-    "kit": "works",
-    "colour": "#5f7a52"
-  },
-  {
-    "id": "power-coal",
-    "name": "Coal power station",
-    "kind": "utility",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "coal": 8
-      },
-      "outputs": {
-        "electricity": 200
-      },
-      "period": 40
-    },
-    "footprint": 4,
-    "foundCost": 14000000,
-    "powerNeed": 0,
-    "waterNeed": 120,
-    "labourNeed": 60,
-    "amenityPenalty": 44,
-    "amenityRadius": 18,
-    "fromEra": 1,
-    "kit": "power",
-    "colour": "#4a4740"
-  },
-  {
-    "id": "power-hydro",
-    "name": "Hydro station",
-    "kind": "utility",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "electricity": 120
-      },
-      "period": 40
-    },
-    "footprint": 3,
-    "foundCost": 19000000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 30,
-    "amenityPenalty": 12,
-    "amenityRadius": 8,
-    "fromEra": 1,
-    "kit": "power",
-    "colour": "#4a7a94"
-  },
-  {
-    "id": "power-gas",
-    "name": "Gas turbine station",
-    "kind": "utility",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "fuel": 5
-      },
-      "outputs": {
-        "electricity": 180
-      },
-      "period": 40
-    },
-    "footprint": 3,
-    "foundCost": 15000000,
-    "powerNeed": 0,
-    "waterNeed": 60,
-    "labourNeed": 40,
-    "amenityPenalty": 26,
-    "amenityRadius": 12,
-    "fromEra": 5,
-    "kit": "power",
-    "colour": "#6b6a5c"
-  },
-  {
-    "id": "power-nuclear",
-    "name": "Nuclear station",
-    "kind": "utility",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "electricity": 480
-      },
-      "period": 40
-    },
-    "footprint": 5,
-    "foundCost": 42000000,
-    "powerNeed": 0,
-    "waterNeed": 200,
-    "labourNeed": 120,
-    "amenityPenalty": 30,
-    "amenityRadius": 20,
-    "fromEra": 5,
-    "kit": "power",
-    "colour": "#7d8f92"
-  },
-  {
-    "id": "power-wind",
-    "name": "Wind farm",
-    "kind": "utility",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "electricity": 90
-      },
-      "period": 40
-    },
-    "footprint": 4,
-    "foundCost": 12000000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 12,
-    "amenityPenalty": 8,
-    "amenityRadius": 10,
-    "fromEra": 6,
-    "kit": "wind",
-    "colour": "#c3c8cc"
-  },
-  {
-    "id": "power-solar",
-    "name": "Solar farm",
-    "kind": "utility",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "electricity": 70
-      },
-      "period": 40
-    },
-    "footprint": 5,
-    "foundCost": 11000000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 10,
-    "amenityPenalty": 6,
-    "amenityRadius": 6,
-    "fromEra": 7,
-    "kit": "solar",
-    "colour": "#3f4a5c"
-  },
-  {
-    "id": "grid-storage",
-    "name": "Grid storage",
-    "kind": "utility",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "batteries": 1
-      },
-      "outputs": {
-        "electricity": 60
-      },
-      "period": 40
-    },
-    "footprint": 2,
-    "foundCost": 14000000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 8,
-    "amenityPenalty": 4,
-    "amenityRadius": 4,
-    "fromEra": 7,
-    "kit": "power",
-    "colour": "#4f6f6a"
-  },
-  {
-    "id": "reservoir",
-    "name": "Reservoir",
-    "kind": "utility",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "water": 200
-      },
-      "period": 40
-    },
-    "footprint": 5,
-    "foundCost": 9000000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 14,
-    "amenityPenalty": 0,
-    "amenityRadius": 0,
-    "fromEra": 1,
-    "kit": "water",
-    "colour": "#3f7fa8"
-  },
-  {
-    "id": "treatment-works",
-    "name": "Water treatment",
-    "kind": "utility",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "water": 140
-      },
-      "period": 40
-    },
-    "footprint": 3,
-    "foundCost": 6000000,
-    "powerNeed": 40,
-    "waterNeed": 0,
-    "labourNeed": 24,
-    "amenityPenalty": 10,
-    "amenityRadius": 6,
-    "fromEra": 1,
-    "kit": "water",
-    "colour": "#5f8f9c"
-  },
-  {
-    "id": "desalination",
-    "name": "Desalination plant",
-    "kind": "utility",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "water": 220
-      },
-      "period": 40
-    },
-    "footprint": 3,
-    "foundCost": 20000000,
-    "powerNeed": 160,
-    "waterNeed": 0,
-    "labourNeed": 30,
-    "amenityPenalty": 14,
-    "amenityRadius": 8,
-    "fromEra": 7,
-    "kit": "water",
-    "colour": "#6fa0b0"
+    "kit": "yard",
+    "colour": "#5b6470"
   },
   {
     "id": "builders-merchant",
@@ -944,194 +225,43 @@
     "deposit": 0,
     "recipe": {
       "inputs": {
-        "cement": 4,
-        "planks": 3,
-        "glass": 2
+        "sawn": 4
       },
       "outputs": {},
-      "period": 52
+      "period": 36
     },
     "footprint": 2,
-    "foundCost": 2200000,
-    "powerNeed": 12,
-    "waterNeed": 10,
-    "labourNeed": 30,
-    "amenityPenalty": 6,
-    "amenityRadius": 4,
-    "fromEra": 1,
-    "kit": "shed",
-    "colour": "#9c9384"
-  },
-  {
-    "id": "warehouse",
-    "name": "Wholesale warehouse",
-    "kind": "terminal",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "goods": 3,
-        "textiles": 2,
-        "paper": 2
-      },
-      "outputs": {},
-      "period": 50
-    },
-    "footprint": 3,
-    "foundCost": 2600000,
-    "powerNeed": 16,
-    "waterNeed": 10,
-    "labourNeed": 44,
-    "amenityPenalty": 8,
-    "amenityRadius": 4,
-    "fromEra": 1,
-    "kit": "shed",
-    "colour": "#a89670"
-  },
-  {
-    "id": "tip",
-    "name": "Landfill",
-    "kind": "terminal",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "waste": 6,
-        "spoil": 4
-      },
-      "outputs": {},
-      "period": 50
-    },
-    "footprint": 3,
-    "foundCost": 3000000,
+    "foundCost": 620000,
     "powerNeed": 0,
     "waterNeed": 0,
-    "labourNeed": 14,
-    "amenityPenalty": 40,
-    "amenityRadius": 14,
-    "fromEra": 4,
-    "kit": "pit",
-    "colour": "#5d564a"
+    "labourNeed": 0,
+    "amenityPenalty": 8,
+    "amenityRadius": 5,
+    "fromEra": 1,
+    "kit": "yard",
+    "colour": "#a4763f"
   },
   {
-    "id": "resort",
-    "name": "Resort",
-    "kind": "tourism",
+    "id": "filling-station",
+    "name": "Filling station",
+    "kind": "terminal",
     "deposit": 0,
     "recipe": {
       "inputs": {
-        "food": 2,
-        "goods": 1
+        "fuel": 3
       },
-      "outputs": {
-        "tourists": 6
-      },
-      "period": 50
+      "outputs": {},
+      "period": 32
     },
-    "footprint": 4,
-    "foundCost": 12000000,
-    "powerNeed": 40,
-    "waterNeed": 60,
-    "labourNeed": 90,
+    "footprint": 1,
+    "foundCost": 340000,
+    "powerNeed": 0,
+    "waterNeed": 0,
+    "labourNeed": 0,
     "amenityPenalty": 6,
     "amenityRadius": 4,
-    "fromEra": 4,
-    "kit": "resort",
-    "colour": "#3fa08c"
-  },
-  {
-    "id": "heritage-site",
-    "name": "Heritage site",
-    "kind": "tourism",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "tourists": 3
-      },
-      "period": 56
-    },
-    "footprint": 2,
-    "foundCost": 5000000,
-    "powerNeed": 10,
-    "waterNeed": 14,
-    "labourNeed": 24,
-    "amenityPenalty": 0,
-    "amenityRadius": 0,
-    "fromEra": 5,
-    "kit": "resort",
-    "colour": "#8f8f6a"
-  },
-  {
-    "id": "retail-park",
-    "name": "Retail park",
-    "kind": "terminal",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "retail": 5,
-        "food": 2
-      },
-      "outputs": {},
-      "period": 48
-    },
-    "footprint": 4,
-    "foundCost": 7000000,
-    "powerNeed": 40,
-    "waterNeed": 26,
-    "labourNeed": 80,
-    "amenityPenalty": 14,
-    "amenityRadius": 7,
-    "fromEra": 5,
-    "kit": "retail",
-    "colour": "#d0913c"
-  },
-  {
-    "id": "distribution-centre",
-    "name": "Distribution centre",
-    "kind": "terminal",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "goods": 4,
-        "electronics": 1
-      },
-      "outputs": {
-        "retail": 5
-      },
-      "period": 46
-    },
-    "footprint": 4,
-    "foundCost": 8500000,
-    "powerNeed": 44,
-    "waterNeed": 20,
-    "labourNeed": 90,
-    "amenityPenalty": 12,
-    "amenityRadius": 7,
-    "fromEra": 6,
-    "kit": "shed",
-    "colour": "#a08b5e"
-  },
-  {
-    "id": "remediation",
-    "name": "Remediation works",
-    "kind": "terminal",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "spoil": 4,
-        "water": 20
-      },
-      "outputs": {},
-      "period": 54
-    },
-    "footprint": 3,
-    "foundCost": 16000000,
-    "powerNeed": 50,
-    "waterNeed": 60,
-    "labourNeed": 40,
-    "amenityPenalty": 0,
-    "amenityRadius": 0,
-    "fromEra": 7,
+    "fromEra": 1,
     "kit": "yard",
-    "colour": "#6f9060"
+    "colour": "#43506a"
   }
 ]
