@@ -28,6 +28,7 @@ import {
   runningCostPercent, ratePercent, FLOOD_LINE, EVENT_NAMES, EventKind, WEATHER_NAMES, Weather,
 } from './weather.ts';
 import { AmenityField, stepAmenity, REMEDIATION_PRICE, REMEDIATION_FROM_ERA } from './amenity.ts';
+import { SchemeTable, stepPublicWorks, SchemeState } from './publicworks.ts';
 import { RegulatorTable, stepRegulator, accessChargeFor, Intervention, INTERVENTION_NAMES } from './regulation.ts';
 import {
   AssetTable, Graph, NONE, NO_WAY, WayLayer, hashNetwork, rebuildGraph,
@@ -131,6 +132,9 @@ export class World {
   /** What the region is like to be in, and what industry has done to it.
    *  design.md 2.3. */
   readonly amenity: AmenityField;
+  /** Public road schemes the authority has in hand against dear private
+   *  ways. features.md 12. */
+  readonly schemes = new SchemeTable();
   readonly climate = new Climate();
   readonly events = new EventTable();
   private lastEra = 0;
@@ -572,6 +576,7 @@ export class World {
     this.stepWeather();
     if (this.dayOfMonth === 0) this.stepAmenityField();
     this.stepRegulation();
+    if (this.day % DAYS_PER_YEAR === 0 && this.day > 0) this.stepPublicWorks();
     this.checkCharters();
   }
 
@@ -1611,6 +1616,109 @@ export class World {
     const strike = strikePercent(this.events, company);
     if (strike < 100) pct = (pct * strike) / 100;
     return pct;
+  }
+
+  /**
+   * The authority's own capital programme, once a year.
+   *
+   * The frightening one, and deliberately so: unlike the regulator it does
+   * not care how dominant you are, only that a corridor matters and that
+   * using it is dear — which are precisely the two things that made the asset
+   * worth owning. Announced, slow, and withdrawn if the case goes away, so a
+   * player who does not fancy the competition has six years to drop the
+   * charge and make the scheme not worth building.
+   */
+  private stepPublicWorks(): void {
+    const report = stepPublicWorks(
+      this.schemes, this.assets, this.era, this.tick, TICKS_PER_YEAR,
+      (asset) => this.assetEndpoints(asset),
+    );
+
+    for (const i of report.proposed) {
+      const owner = this.assets.owner[this.schemes.against[i]];
+      if (owner !== this.player) continue;
+      this.onEvent?.(
+        'publicworks',
+        'The authority is consulting on a public road beside one of yours. '
+        + 'It says the passage is dear. Lower the charge and the case for it goes away.',
+      );
+    }
+    for (const i of report.withdrawn) {
+      const owner = this.assets.owner[this.schemes.against[i]];
+      if (owner !== this.player) continue;
+      this.onEvent?.('publicworks', 'The authority has dropped its road scheme. The case for it went away.');
+    }
+    for (const i of report.build) {
+      const path = this.tileRouter.route(this.schemes.fromTile[i], this.schemes.toTile[i]);
+      if (!path || path.length < 2) continue;
+      const cls = this.publicRoadClass();
+      if (cls < 0) continue;
+      const way = this.content.ways[cls];
+      const laid = this.layPublicWay(Mode.Road, cls, path, way.publicCharge, way.buildCost);
+      if (!laid) continue;
+      const owner = this.assets.owner[this.schemes.against[i]];
+      this.onEvent?.(
+        'publicworks',
+        owner === this.player
+          ? 'The public road has opened alongside yours. Traffic has somewhere else to go.'
+          : 'The authority has opened a new public road.',
+      );
+    }
+  }
+
+  /**
+   * Lay a way for the authority.
+   *
+   * Separate from buildWay because the authority is not a company: it has no
+   * charter to check, no cash to run out of, and no ledger to post the cost
+   * to. It also does not stop for a gradient it does not like — a public
+   * scheme that quietly fails to build because the survey was awkward would
+   * read to the player as the threat having been a bluff.
+   */
+  private layPublicWay(
+    mode: number, cls: number, path: ArrayLike<number>, charge: number, buildCost: number,
+  ): boolean {
+    const plan = this.planWay(mode, cls, path, AUTHORITY);
+    if (plan.tiles.length < 2) return false;
+    const asset = this.assets.alloc(mode, cls, AUTHORITY, charge, this.tick);
+    if (asset === NONE) return false;
+    const laid = layAlignment(this.layers[mode], this.config.size, plan, cls, asset);
+    this.assets.tiles[asset] = laid;
+    this.assets.buildCost[asset] = buildCost * laid;
+    if (laid === 0) {
+      this.assets.count--;
+      return false;
+    }
+    this.rebuild();
+    this.router.invalidate();
+    return true;
+  }
+
+  /** The best road the authority would build this era. */
+  private publicRoadClass(): number {
+    let best = -1;
+    let bestCost = -1;
+    for (let i = 0; i < this.content.ways.length; i++) {
+      const w = this.content.ways[i];
+      if (w.mode !== 'road' || w.era > this.era || w.buildCost === 0) continue;
+      if (w.buildCost > bestCost) { bestCost = w.buildCost; best = i; }
+    }
+    return best;
+  }
+
+  /** The two ends of an asset, in tiles, for surveying a scheme against it. */
+  private assetEndpoints(asset: number): { from: number; to: number } | null {
+    let from = NONE;
+    let to = NONE;
+    for (let l = 0; l < this.graph.linkCount; l += 2) {
+      if (this.graph.linkAsset[l] !== asset) continue;
+      const start = this.graph.linkChainStart[l];
+      const len = this.graph.linkChainLen[l];
+      if (from === NONE) from = this.graph.chain[start];
+      to = this.graph.chain[start + len - 1];
+    }
+    if (from === NONE || to === NONE || from === to) return null;
+    return { from, to };
   }
 
   /**

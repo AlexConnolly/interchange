@@ -46,3 +46,4 @@ export function createWorld(config: Partial<WorldConfig> = {}, content?: Content
 export * from './regulation.ts';
 export * from './weather.ts';
 export * from './amenity.ts';
+export * from './publicworks.ts';
