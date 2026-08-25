@@ -59,11 +59,10 @@ function district(): ReturnType<typeof createWorld> {
  * barely changes is the one across the road.
  *
  * The returned figure is that axis's fractional part, and it is the one number
- * that pins the whole thing down. On a lane it should be about 0.34 or 0.66 —
- * half a tile to reach the centreline, a sixth back for keeping left. Dead on 0.0
- * is the bug where a tile index was used as a position; dead on 0.5 is the bug
- * where there is no lane offset and two lorries meeting head-on drive through
- * each other.
+ * that pins this down. It should be a half: the middle of the tile. Dead on 0.0
+ * is the bug this was written for, where a tile index was used as a position and
+ * every lorry drove up the verge. Which side of the centre a vehicle then sits on
+ * is a rendering matter and is tested in `facing.test.ts`.
  */
 function crossFractions(w: ReturnType<typeof createWorld>, ticks: number): number[] {
   const out: number[] = [];
@@ -92,23 +91,62 @@ function crossFractions(w: ReturnType<typeof createWorld>, ticks: number): numbe
 }
 
 describe('vehicles on the road', () => {
-  it('drives down the lane rather than along the tile boundary', () => {
+  it('runs down the middle of the lane, not along the tile boundary', () => {
     const f = crossFractions(district(), 900);
     expect(f.length).toBeGreaterThan(50);
-    const onTheLine = f.filter((v) => v < 0.15 || v > 0.85).length;
-    expect(onTheLine / f.length).toBeLessThan(0.05);
+    /*
+     * Dead centre is now the *right* answer, and it did not used to be.
+     *
+     * A tile index names its corner, so a projection that stopped there put every
+     * lorry half a tile into the verge — the bug this test was written for. The
+     * lane offset that keeps a vehicle to the left of the centreline has since
+     * moved into the renderer, because computing it per link made it flip axis at
+     * every junction and jump the vehicle sideways; see `laneOffset`. So what the
+     * simulation reports is the centreline, and what this asserts is that the
+     * centreline really is the centre.
+     */
+    for (const v of f) expect(Math.abs(v - 0.5)).toBeLessThan(0.02);
   });
+});
 
-  it('keeps left, so two lorries meeting do not pass through each other', () => {
-    const f = crossFractions(district(), 900);
-    const deadCentre = f.filter((v) => Math.abs(v - 0.5) < 0.08).length;
-    expect(deadCentre / f.length).toBeLessThan(0.05);
-  });
 
-  it('sits about a sixth of a tile off the centreline', () => {
-    const f = crossFractions(district(), 900);
-    const mean = f.reduce((a, b) => a + Math.abs(b - 0.5), 0) / f.length;
-    expect(mean).toBeGreaterThan(0.10);
-    expect(mean).toBeLessThan(0.24);
+/**
+ * The simulated position never jumps at a junction.
+ *
+ * This is the measurement that finally caught the spin. The lane offset used to
+ * be computed per link, perpendicular to that link's direction — so the instant a
+ * vehicle changed link the offset changed axis and the position moved a quarter of
+ * a tile sideways in one tick. Measured: a largest single-tick step of 0.2342
+ * tiles against a top speed of 0.0731, a sideways flip more than three times the
+ * real motion, and every one of the top ten steps was exactly that same figure —
+ * one per junction.
+ *
+ * The renderer derives a vehicle's facing from how it is moving, so for a few
+ * frames after each junction a vehicle faced the flip rather than the road, and a
+ * van turning left span the long way round. Halving the road speeds made it far
+ * worse, because the jump stayed the same size while the real motion halved.
+ *
+ * So the assertion is simply that the largest step is a plausible step. Anything
+ * that reintroduces a positional discontinuity here brings the spin back with it.
+ */
+describe('the simulated path is continuous', () => {
+  it('never moves a vehicle further in one tick than it could drive', () => {
+    const w = district();
+    let prev: { x: number; z: number } | null = null;
+    let worst = 0;
+    for (let t = 0; t < TICKS_PER_DAY * 2; t++) {
+      w.step();
+      w.project();
+      for (let v = 0; v < w.vehicles.count; v++) {
+        if (!w.vehicles.alive[v] || w.vehicles.company[v] !== w.player) continue;
+        if (w.vehicles.link[v] === -1) { prev = null; continue; }
+        const at = { x: w.vehicles.x[v] / 65536, z: w.vehicles.y[v] / 65536 };
+        if (prev) worst = Math.max(worst, Math.hypot(at.x - prev.x, at.z - prev.z));
+        prev = at;
+      }
+    }
+    expect(worst).toBeGreaterThan(0);
+    // Top speed is about 0.073 tiles a tick; the junction flip was 0.234.
+    expect(worst).toBeLessThan(0.12);
   });
 });

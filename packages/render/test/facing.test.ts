@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { facingFromHeading, facingFromMotion } from '../src/scene.ts';
+import {
+  LANE_OFFSET, facingFromHeading, facingFromMotion, laneOffset,
+} from '../src/scene.ts';
 
 /**
  * The two ways a vehicle's facing is worked out have to agree.
@@ -40,5 +42,46 @@ describe('which way a vehicle is pointing', () => {
   it('points east for a quarter turn', () => {
     expect(facingFromHeading(0.25)).toBeCloseTo(0, 12);
     expect(facingFromMotion(1, 0)).toBeCloseTo(0, 12);
+  });
+});
+
+
+/**
+ * Which side of the road a vehicle sits on.
+ *
+ * It is 1985 in England, so the left — and this had been the right for as long as
+ * the offset had existed, under a comment saying otherwise. North is -Z, which is
+ * the trap: for a vehicle travelling east the naive normal points south, and south
+ * is its right.
+ */
+describe('keeping left', () => {
+  it('puts an eastbound vehicle to the north of the centreline', () => {
+    // East is +X; the nose points along +X at a facing of zero. Left is north,
+    // which is -Z.
+    const o = laneOffset(facingFromHeading(0.25));
+    expect(o.z).toBeLessThan(-LANE_OFFSET * 0.9);
+    expect(Math.abs(o.x)).toBeLessThan(1e-9);
+  });
+
+  it('puts a northbound vehicle to the west', () => {
+    const o = laneOffset(facingFromHeading(0));
+    expect(o.x).toBeLessThan(-LANE_OFFSET * 0.9);
+    expect(Math.abs(o.z)).toBeLessThan(1e-9);
+  });
+
+  it('is always exactly one offset from the centreline, whichever way round', () => {
+    for (let i = 0; i < 32; i++) {
+      const o = laneOffset(facingFromHeading(i / 32));
+      expect(Math.hypot(o.x, o.z)).toBeCloseTo(LANE_OFFSET, 12);
+    }
+  });
+
+  it('is perpendicular to the direction of travel', () => {
+    for (let i = 0; i < 32; i++) {
+      const a = facingFromHeading(i / 32);
+      const o = laneOffset(a);
+      // The nose points along (cos a, -sin a).
+      expect(Math.cos(a) * o.x + -Math.sin(a) * o.z).toBeCloseTo(0, 12);
+    }
   });
 });

@@ -24,7 +24,7 @@
 
 import { BufferGeometry, Mesh as ThreeMesh, type Material } from 'three';
 import { Mesh } from './geometry.ts';
-import { CROP, HEDGE, LAND, shade, type RGB } from './palette.ts';
+import { CROP, FENCE, HEDGE, WALL, LAND, shade, type RGB } from './palette.ts';
 
 /** Height units to world units. A tile is one world unit. */
 export const HEIGHT_TO_WORLD = (h: number): number => (h / 64) * 0.42;
@@ -208,6 +208,98 @@ function buildHedges(
   const H = 0.21;
   const TAPER = 0.80;
 
+  /**
+   * What kind of boundary two fields share.
+   *
+   * Keyed on the *pair* of parcel ids, not on the tile, and that is the whole
+   * trick: every tile along one boundary gets the same answer, so a run is a
+   * wall for its length and the next one along is a hedge. Hashing the tile
+   * instead would change material every yard, which is not a boundary, it is a
+   * skip.
+   */
+  const kindOf = (a: number, b: number): number => {
+    const pa = src.parcel[a];
+    const pb = src.parcel[b];
+    const lo = Math.min(pa, pb);
+    const hi = Math.max(pa, pb);
+    const n = (((lo + 1) * 2654435761) ^ ((hi + 1) * 2246822519)) >>> 0;
+    const r = (n >>> 8) & 1023;
+    if (r < 560) return 0;        // hedge, and still most of the country
+    if (r < 700) return 1;        // an overgrown one
+    if (r < 880) return 2;        // post and rail
+    return 3;                     // dry stone
+  };
+
+  /**
+   * Draw one tile's worth of boundary, whichever kind it is.
+   *
+   * `alongZ` says which way the run goes, and it is the only difference between
+   * the two axes — everything else is shared, so adding a kind of boundary is one
+   * case here rather than two.
+   */
+  const boundary = (
+    kind: number, alongZ: boolean, cx: number, base: number, cz: number,
+    h: number, inf: number, jitter: number, hedge: RGB,
+  ): void => {
+    /** Half-extents for something `t` thick across the run and `l` along it. */
+    const ext = (t: number, l: number): [number, number] => (
+      alongZ ? [t, l] : [l, t]);
+
+    if (kind === 1) {
+      // Overgrown: nearly twice as thick and a little taller, and it keeps the
+      // hedge colour — an old hedge is the same plant, left alone.
+      const [hx, hz] = ext(T * 1.9, 0.5);
+      wedge(m, cx, base, cz, hx, hz, h * 1.14, 0.70, hedge);
+      return;
+    }
+
+    if (kind === 2) {
+      /*
+       * Post and rail.
+       *
+       * Two rails and three posts, which is the fewest that reads as a fence: the
+       * rails give the horizontal line and the posts break it up, and without the
+       * posts it is a plank on edge. Deliberately *lower* than a hedge — you can
+       * see over a fence, which is most of why a paddock is fenced and not
+       * hedged, and at this size the difference in height is what tells them
+       * apart before the colour does.
+       */
+      const rail = faded(FENCE.rail, inf);
+      const post = faded(FENCE.post, inf);
+      const fh = h * 0.72;
+      for (const at of [0.62, 0.30]) {
+        const [hx, hz] = ext(0.026, 0.5);
+        wedge(m, cx, base + fh * at, cz, hx, hz, fh * 0.16, 1, rail);
+      }
+      for (const off of [-0.34, 0, 0.34]) {
+        const [hx, hz] = ext(0.05, 0.05);
+        wedge(m, alongZ ? cx : cx + off, base, alongZ ? cz + off : cz,
+          hx, hz, fh, 0.9, post);
+      }
+      return;
+    }
+
+    if (kind === 3) {
+      /*
+       * Dry stone. Vertical rather than tapered, because that is what makes it
+       * read as *built* — a hedge narrows toward the top and a wall does not, and
+       * that silhouette difference survives at any zoom the game is played at.
+       * A course of paler stone along the top catches the light the way a coping
+       * does.
+       */
+      const stone = faded((jitter & 3) === 0 ? WALL.stone : WALL.shadow, inf);
+      const cap = faded(WALL.stone, inf);
+      const [hx, hz] = ext(T * 1.3, 0.5);
+      wedge(m, cx, base, cz, hx, hz, h * 0.82, 0.97, stone);
+      const [cx2, cz2] = ext(T * 1.45, 0.5);
+      wedge(m, cx, base + h * 0.82, cz, cx2, cz2, h * 0.09, 0.9, cap);
+      return;
+    }
+
+    const [hx, hz] = ext(T, 0.5);
+    wedge(m, cx, base, cz, hx, hz, h, TAPER, hedge);
+  };
+
   const wants = (a: number, b: number): boolean => {
     if (src.parcel[a] === src.parcel[b]) return false;
     if (src.parcel[a] === NO_PARCEL || src.parcel[b] === NO_PARCEL) return false;
@@ -251,11 +343,11 @@ function buildHedges(
 
       if (x + 1 < s && wants(tile, tile + 1)) {
         const base = Math.max(cornerHeight(src, x + 1, y), cornerHeight(src, x + 1, y + 1));
-        wedge(m, x + 1, base, y + 0.5, T, 0.5, h, TAPER, c);
+        boundary(kindOf(tile, tile + 1), true, x + 1, base, y + 0.5, h, inf, jitter, c);
       }
       if (y + 1 < s && wants(tile, tile + s)) {
         const base = Math.max(cornerHeight(src, x, y + 1), cornerHeight(src, x + 1, y + 1));
-        wedge(m, x + 0.5, base, y + 1, 0.5, T, h, TAPER, c);
+        boundary(kindOf(tile, tile + s), false, x + 0.5, base, y + 1, h, inf, jitter, c);
       }
     }
   }

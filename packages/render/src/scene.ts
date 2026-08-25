@@ -87,6 +87,28 @@ export function facingFromMotion(mx: number, mz: number): number {
   return Math.atan2(-mz, mx);
 }
 
+/** How far off the centreline a vehicle sits, in tiles. */
+export const LANE_OFFSET = 0.16;
+
+/**
+ * Where a vehicle sits across the road, from the way it is facing.
+ *
+ * It is 1985 in England, so: to the left. A rotation of `a` points the nose along
+ * `(cos a, -sin a)`, north is -Z, and the left-hand normal of a direction
+ * `(dx, dz)` is `(dz, -dx)` — which works out to `(-sin a, -cos a)`.
+ *
+ * Taken from the *smoothed* facing rather than from the road, and that is the
+ * whole point of it living here. Computed per link in the simulation, the offset
+ * flipped axis the instant a vehicle changed link, jumping it a quarter of a tile
+ * sideways at every junction; derived from the facing, it swings round the corner
+ * with the vehicle. It also means the position the facing is derived *from* no
+ * longer contains it, so it cannot feed back into the direction the vehicle
+ * thinks it is going.
+ */
+export function laneOffset(a: number): { x: number; z: number } {
+  return { x: -Math.sin(a) * LANE_OFFSET, z: -Math.cos(a) * LANE_OFFSET };
+}
+
 /** Tiles per chunk. Small enough that one rebuild is cheap, large enough that a
  *  128² district is sixty-four draw calls rather than a thousand. */
 export const CHUNK = 16;
@@ -1627,7 +1649,11 @@ export class Renderer {
         seen.a += d * Math.min(1, dt * 12);
       }
       this.smooth.set(id, seen);
-      this.tmp.position.set(seen.x, y, seen.z);
+      // Drawn on its own side of the road, which is a placement and not a
+      // position: `seen` stays on the centreline so the facing above cannot be
+      // perturbed by it.
+      const side = laneOffset(seen.a);
+      this.tmp.position.set(seen.x + side.x, y, seen.z + side.z);
       /*
        * And the facing itself was ninety degrees out.
        *

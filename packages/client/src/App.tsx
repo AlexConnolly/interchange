@@ -1260,7 +1260,18 @@ export function App(): JSX.Element {
         // off the screen.
         renderer.flyTo(world.sites.x[found] + 0.5, world.sites.y[found] + 0.5);
         setPanel({ k: 'place', site: found });
+        return;
       }
+      /*
+       * Clicked on nothing: put away whatever was open.
+       *
+       * A panel that can only be closed by finding its little cross is a panel
+       * you have to *aim* at to be rid of, and the ground is the biggest target
+       * on the screen. Clicking away from a thing is how every map in the world
+       * dismisses the thing.
+       */
+      setPanel({ k: 'none' });
+      setNote('');
     };
     const wheel = (e: WheelEvent): void => {
       e.preventDefault();
@@ -1349,6 +1360,8 @@ export function App(): JSX.Element {
     // Reused every frame: allocating thirty objects sixty times a second to hand
     // the same information to the mixer is pure garbage.
     const heard: Heard[] = [];
+    /** The camera's keyboard velocity, in tiles a second. */
+    const panVel = { x: 0, y: 0 };
     let season = -1;
 
     let raf = 0;
@@ -1384,16 +1397,42 @@ export function App(): JSX.Element {
       const dt = Math.min(0.25, (now - last) / 1000);
       last = now;
 
-      if (held.size > 0) {
-        // Two thirds of a screen a second, which is brisk without overshooting.
-        const step = renderer.tilesAcross * 0.66 * dt;
-        let right = 0;
-        let up = 0;
-        if (held.has('a') || held.has('arrowleft')) right -= step;
-        if (held.has('d') || held.has('arrowright')) right += step;
-        if (held.has('w') || held.has('arrowup')) up += step;
-        if (held.has('s') || held.has('arrowdown')) up -= step;
-        if (right !== 0 || up !== 0) renderer.nudge(right, up);
+      /*
+       * Keyboard panning, with a bit of weight to it.
+       *
+       * The old version applied the full speed on the frame a key went down and
+       * none on the frame it came up, so the camera started and stopped like a
+       * light switch — which at two thirds of a screen a second is a lurch in
+       * both directions. It was already frame-rate independent; what it was not
+       * was *smooth*, and those are different complaints.
+       *
+       * A velocity that chases the keys instead. Roughly a fifth of a second to
+       * reach full speed and the same to stop, which is short enough to feel
+       * direct and long enough that the first and last moments of a pan are not
+       * a jolt. Diagonals are normalised, or holding two keys goes forty per cent
+       * faster than holding one.
+       */
+      let wantX = 0;
+      let wantY = 0;
+      if (held.has('a') || held.has('arrowleft')) wantX -= 1;
+      if (held.has('d') || held.has('arrowright')) wantX += 1;
+      if (held.has('w') || held.has('arrowup')) wantY += 1;
+      if (held.has('s') || held.has('arrowdown')) wantY -= 1;
+      const wantLen = Math.hypot(wantX, wantY);
+      if (wantLen > 0) {
+        const top = renderer.tilesAcross * 0.66;
+        wantX = (wantX / wantLen) * top;
+        wantY = (wantY / wantLen) * top;
+      }
+      const ease = Math.min(1, dt * 9);
+      panVel.x += (wantX - panVel.x) * ease;
+      panVel.y += (wantY - panVel.y) * ease;
+      // Below a hundredth of a tile a second it has stopped; letting it creep
+      // on forever would fight the mouse for the rest of the session.
+      if (Math.abs(panVel.x) < 0.01) panVel.x = 0;
+      if (Math.abs(panVel.y) < 0.01) panVel.y = 0;
+      if (panVel.x !== 0 || panVel.y !== 0) {
+        renderer.nudge(panVel.x * dt, panVel.y * dt);
       }
       frames.push(dt);
       if (frames.length > 30) frames.shift();

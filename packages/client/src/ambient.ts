@@ -364,10 +364,10 @@ export class Ambient {
        * the edge direction, so the offset follows the vehicle round the bend
        * instead of jumping sides at the apex.
        */
-      // Left of travel is `(dz, -dx)`, because north is -Z. The other way round —
-      // which is what this was — is the right-hand side of the road.
-      const atX = bx + (tz / tl) * 0.16;
-      const atZ = bz + (-tx / tl) * 0.16;
+      // Down the middle. Which side of the road it sits on is applied by the
+      // renderer from the vehicle's own smoothed facing — see `laneOffset`.
+      const atX = bx;
+      const atZ = bz;
       /*
        * Anything close in front? Then stop, next frame.
        *

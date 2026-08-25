@@ -643,9 +643,8 @@ export function stepTraffic(
  * vehicle's xy, only its cell. Running it separately also means a dropped
  * frame costs a projection and never a tick.
  */
-/** Half a tile, and a sixth of one. Both in Q16.16. */
+/** Half a tile, in Q16.16: a tile index names its corner, not its middle. */
 const HALF_TILE = Math.round(0.5 * FX_ONE);
-const LANE_OFFSET = Math.round(0.16 * FX_ONE);
 
 export function projectVehicles(g: Graph, v: VehicleTable, size: number): void {
   for (let id = 0; id < v.count; id++) {
@@ -667,7 +666,7 @@ export function projectVehicles(g: Graph, v: VehicleTable, size: number): void {
     const bx = (b % size) * FX_ONE;
     const by = ((b / size) | 0) * FX_ONE;
     /*
-     * Down the middle of the lane, and on the left of it.
+     * Down the middle of the road. The *side* of it is the renderer's business.
      *
      * A tile index converts to the tile's *corner*, and the road surface is
      * drawn from that corner to the next one with its centreline at plus a half
@@ -676,21 +675,25 @@ export function projectVehicles(g: Graph, v: VehicleTable, size: number): void {
      * beside a farmhouse, half a tile is inside the farmhouse. Reported as
      * "vehicles are driving through buildings", and they were.
      *
-     * The lane offset earns its place twice: it is 1985 in England, and it means
-     * two lorries meeting on a lane pass on the correct sides instead of through
-     * each other.
+     * Keeping left used to be done here, perpendicular to the link's direction,
+     * and it had to move. The offset flips axis the instant a vehicle changes
+     * link, so at every junction this position jumped a quarter of a tile
+     * sideways — and once the roads were halved in speed a vehicle only advances
+     * two hundredths of a tile in a frame, making that jump *ten times* the real
+     * motion. The renderer derives a vehicle's facing from how it is moving, so
+     * for a few frames it faced the jump instead of the road: a van turning left
+     * span the long way round. Reported twice, and neither time was it the
+     * shortest-path arithmetic it looked like.
      *
-     * And it is `(dz, -dx)`, not `(-dz, dx)`. North is -Z here, so for a vehicle
-     * travelling east the second of those points *south* — which is its right.
-     * Every vehicle in the game was driving on the right, under a comment saying
-     * it was 1985 in England. It also makes a turn worse than wrong: from the
-     * far lane a right turn has to hook across the junction, which swings the
-     * direction of travel much further than the turn itself.
+     * A lane offset is where a vehicle sits *across* a road, not part of where
+     * the road goes. Keeping it out of the simulated position leaves that
+     * position continuous through a junction, which is what the facing needs;
+     * `laneOffset` in the renderer puts the vehicle on the correct side, taken
+     * from its own smoothed facing, so it swings round a corner instead of
+     * snapping across it.
      */
-    const dirX = Math.sign(bx - ax);
-    const dirZ = Math.sign(by - ay);
-    v.x[id] = (ax + fxMul((bx - ax) | 0, frac) + HALF_TILE + dirZ * LANE_OFFSET) | 0;
-    v.y[id] = (ay + fxMul((by - ay) | 0, frac) + HALF_TILE - dirX * LANE_OFFSET) | 0;
+    v.x[id] = (ax + fxMul((bx - ax) | 0, frac) + HALF_TILE) | 0;
+    v.y[id] = (ay + fxMul((by - ay) | 0, frac) + HALF_TILE) | 0;
     v.heading[id] = bearing(size, a, b);
     void cellsPerLink;
   }

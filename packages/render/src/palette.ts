@@ -75,6 +75,31 @@ export const HEDGE = {
   lit: hex('#4e6e3c'),
 };
 
+/**
+ * The other things a field can be bounded by.
+ *
+ * A district enclosed entirely in hedge reads as one estate laid out on one
+ * afternoon, and English fields are not that: they are centuries of separate
+ * decisions, so a lane has a hedge on one side and a wall on the other and the
+ * paddock behind the farm is post and rail. Which boundary a pair of fields
+ * shares is fixed by their two ids, so a run is one thing for its whole length —
+ * a boundary that changed material every tile would read as rubble.
+ *
+ * The palette matters as much as the geometry. Both of these are *paler and
+ * cooler* than a hedge, so they read as a different material at forty pixels
+ * rather than as a hedge with something wrong with it — which is what a
+ * differently-shaped green line would have looked like.
+ */
+export const FENCE = {
+  rail: hex('#8d7c62'),
+  post: hex('#6f6049'),
+};
+
+export const WALL = {
+  stone: hex('#8e8d85'),
+  shadow: hex('#75746d'),
+};
+
 export const TREE = {
   trunk: hex('#54402f'),
   canopy: hex('#3e6b34'),
