@@ -53,6 +53,15 @@ const HEADLAND = 0.42;
 /** How far out of the furrow the turn loops. Must stay under `HEADLAND`. */
 const TURN_BULGE = 0.36;
 
+/**
+ * Where on the machine the work actually happens, in tiles from its centre.
+ *
+ * Measured off the models: a plough or a drill toolbar sits about a fifth of a
+ * tile behind the tractor, and a combine's header about a third of one in front.
+ */
+const IMPLEMENT_BEHIND = 0.20;
+const HEADER_AHEAD = 0.30;
+
 export interface FarmField {
   parcel: number;
   /** Tile bounds, inclusive. */
@@ -160,6 +169,24 @@ export class Farmwork {
   private farmsCache: { tile: number; x: number; z: number }[] = [];
   private age = 0;
   /**
+   * Which fields already have a machine on them or on the way, by parcel.
+   *
+   * Nothing used to stop two machines being sent to the same field. With seven of
+   * them and only a handful of fields wanting work in a given week, that happened
+   * constantly — and the second one to arrive drove the whole field towing a
+   * plough over ground the first had already turned over. Which is exactly what
+   * "a tractor going over ground it has supposedly ploughed and hasn't" is: the
+   * machine was real, the work was real, and it had been done an hour earlier by
+   * somebody else.
+   *
+   * A map from field to *which machine holds it*, not a set of fields, and the
+   * difference is a bug I wrote and caught: a claim nobody owns can be released
+   * by anybody. Two machines that had each visited the same field at some point
+   * both thought the release was theirs to make, so one working machine had its
+   * field freed under it and a second was sent straight in.
+   */
+  private readonly claimed = new Map<number, number>();
+  /**
    * How many more tractors may start out already in a field.
    *
    * Only spent at the beginning. After that a tractor that wants a field drives
@@ -204,16 +231,23 @@ export class Farmwork {
      * is asked at the field's gateway tile, which is inside the parcel, so one
      * question settles it for the whole field.
      */
-    const wanting = near.filter((f) => this.world.needsWork(
+    const mine = this.tractors.indexOf(t);
+    const free = near.filter((f) => {
+      const holder = this.claimed.get(f.parcel);
+      return holder === undefined || holder === mine;
+    });
+    const wanting = free.filter((f) => this.world.needsWork(
       Math.floor(f.entryZ) * this.world.size + Math.floor(f.entryX),
     ));
-    const field = this.pick(wanting.length > 0 ? wanting : near);
+    const field = this.pick(wanting.length > 0 ? wanting : free);
     if (!field) return false;
     // A tractor already in its field still needs a way home, so the route is
     // required either way. Nothing else would notice until it tried to leave.
     const path = this.world.route(farm.tile, field.road);
     if (path.length < 3) return false;
 
+    this.release(t);
+    this.claimed.set(field.parcel, mine);
     t.farmTile = farm.tile;
     /*
      * It starts at the farm, and saying so matters.
@@ -228,6 +262,9 @@ export class Farmwork {
     t.hold = false;
     t.waited = 0;
     t.field = field;
+    // Or the first tile change in the new field also works a tile in the old
+    // one, which may be half the district away.
+    t.lastTile = -1;
     t.path = path;
     t.leg = 1;
     t.t = 0;
@@ -343,6 +380,22 @@ export class Farmwork {
     return t.lengthwise ? { x: along, z: side } : { x: side, z: along };
   }
 
+  /**
+   * Give up the claim on a field.
+   *
+   * Called on every route back to `idle`, and dispatch calls it too — belt and
+   * braces, because a claim that leaks is a field no machine will ever visit
+   * again, and that failure is invisible until somebody notices a field standing
+   * in stubble all winter.
+   */
+  private release(t: Tractor): void {
+    if (!t.field) return;
+    const mine = this.tractors.indexOf(t);
+    if (this.claimed.get(t.field.parcel) === mine) {
+      this.claimed.delete(t.field.parcel);
+    }
+  }
+
   /** A point on the current furrow, and the direction of travel along it. */
   private furrow(t: Tractor): { x: number; z: number; dx: number; dz: number } {
     const f = t.field as FarmField;
@@ -432,7 +485,7 @@ export class Farmwork {
 
         case 'out':
         case 'home': {
-          if (t.path.length < 3) { t.phase = 'idle'; t.wait = 8; continue; }
+          if (t.path.length < 3) { this.release(t); t.phase = 'idle'; t.wait = 8; continue; }
           /*
            * Held up behind something. Redraw where it already is, and give up
            * after a few seconds — a lorry loading at a farm gate stands on the
@@ -462,6 +515,7 @@ export class Farmwork {
                 t.toX = head.x;
                 t.toZ = head.z;
               } else {
+                this.release(t);
                 t.phase = 'idle';
                 /*
                  * A rest, but not a long one.
@@ -481,7 +535,7 @@ export class Farmwork {
           if (t.phase !== 'out' && t.phase !== 'home') continue;
           const leg = Math.max(1, Math.min(t.leg, t.path.length - 2));
           const here = t.path[leg];
-          if (!this.world.usable(here)) { t.phase = 'idle'; t.wait = 10; continue; }
+          if (!this.world.usable(here)) { this.release(t); t.phase = 'idle'; t.wait = 10; continue; }
           // The same per-tile quadratic Bézier the traffic uses, so a tractor
           // takes a corner the way everything else does.
           const cx = (here % size) + 0.5;
@@ -565,7 +619,7 @@ export class Farmwork {
         case 'entering':
         case 'leaving': {
           const f = t.field;
-          if (!f) { t.phase = 'idle'; t.wait = 6; continue; }
+          if (!f) { this.release(t); t.phase = 'idle'; t.wait = 6; continue; }
           const entering = t.phase === 'entering';
           /*
            * Through the gateway, in two straight runs.
@@ -621,6 +675,24 @@ export class Farmwork {
           if (t.t >= 2) {
             t.t = 0;
             if (entering) {
+              /*
+               * Ask again, at the gate, what the field actually needs.
+               *
+               * The answer can have changed since the machine set off: the
+               * off-screen catch-up brings fields on a share at a time, and a
+               * journey across the district takes the best part of a minute. A
+               * machine that arrives to find the job already done should not then
+               * drive the whole field towing a plough over ground that will not
+               * change — it should be the thing that *does* cross a finished
+               * field, which is a sprayer.
+               *
+               * Asked once, here, and never again. Re-deriving it per frame would
+               * flip the model to a sprayer under the machine's own wheels the
+               * moment it turned over the tile it was standing on.
+               */
+              t.job = this.world.job(
+                Math.floor(f.entryZ) * size + Math.floor(f.entryX),
+              );
               t.phase = 'working';
               t.pass = 0;
               t.along = 0;
@@ -635,7 +707,7 @@ export class Farmwork {
 
         case 'turning': {
           const f = t.field;
-          if (!f) { t.phase = 'idle'; t.wait = 6; continue; }
+          if (!f) { this.release(t); t.phase = 'idle'; t.wait = 6; continue; }
           const across = t.passes > 1
             ? (t.lengthwise ? f.z1 + 1 - f.z0 : f.x1 + 1 - f.x0) / (t.passes - 1)
             : 1;
@@ -670,7 +742,7 @@ export class Farmwork {
 
         case 'working': {
           const f = t.field;
-          if (!f) { t.phase = 'idle'; t.wait = 6; continue; }
+          if (!f) { this.release(t); t.phase = 'idle'; t.wait = 6; continue; }
           const long = t.lengthwise ? f.x1 - f.x0 + 1 : f.z1 - f.z0 + 1;
           // Along the furrow at the tractor's own speed, so a long field takes
           // longer — which is obvious and is exactly why it has to be right.
@@ -691,7 +763,7 @@ export class Farmwork {
                * after it is what makes the two agree.
                */
               const back = this.world.route(f.road, t.farmTile);
-              if (back.length < 3) { t.phase = 'idle'; t.wait = 10; continue; }
+              if (back.length < 3) { this.release(t); t.phase = 'idle'; t.wait = 10; continue; }
               t.path = back;
               t.leg = 1;
               t.pass++;
@@ -718,18 +790,37 @@ export class Farmwork {
            *
            * Only when the tile changes, not every frame: the sim's `workField`
            * is idempotent, but each real change drops a chunk of ground for
-           * rebuilding and there is no sense asking sixty times for the one
-           * answer. Two tiles are offered - the one under the tractor and the
-           * one just behind it - so a fast pass across a corner cannot skip a
-           * tile and leave a hole in the furrow.
+           * rebuilding and there is no sense asking sixty times for one answer.
+           *
+           * One tile, not two. This used to offer the tile behind as well, in case
+           * a fast pass skipped one — a real risk when a leg of the journey could
+           * cover seven tiles in a second. Now that every phase is paced by
+           * distance nothing moves more than four hundredths of a tile in a frame,
+           * so a whole tile cannot be jumped, and the second call was doing
+           * nothing but asking for ground that had already been worked.
            */
           {
-            const tx = Math.floor(t.x);
-            const tz = Math.floor(t.z);
-            const here = tz * size + tx;
+            /*
+             * The ground changes under the *working part*, not under the cab.
+             *
+             * A plough and a drill are dragged behind; a combine's header is slung
+             * out in front. Taking the tile under the machine's centre put the
+             * change a fifth of a tile away from the thing doing it in both cases
+             * — ahead of the plough, behind the header — which at this zoom is a
+             * quarter of a machine length and reads as the ground changing on the
+             * *line* the tractor is following rather than where it actually is.
+             *
+             * The forward vector comes from the heading the same way the models
+             * are oriented: a heading of `h` turns points along
+             * (sin 2*pi*h, -cos 2*pi*h).
+             */
+            const fwd = t.job === 'combine' ? HEADER_AHEAD : -IMPLEMENT_BEHIND;
+            const a = t.heading * Math.PI * 2;
+            const wx = t.x + Math.sin(a) * fwd;
+            const wz = t.z - Math.cos(a) * fwd;
+            const here = Math.floor(wz) * size + Math.floor(wx);
             if (here !== t.lastTile) {
               this.world.work(here);
-              if (t.lastTile >= 0) this.world.work(t.lastTile);
               t.lastTile = here;
             }
           }

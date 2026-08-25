@@ -71,8 +71,18 @@ describe('tractors', () => {
     // report working must be one of the field's own. A tractor that ploughed
     // the lane it drove down would be very obvious and very wrong.
     const worked = new Set<number>();
-    run(120, worked);
-    expect(worked.size).toBeGreaterThan(6);
+    run(400, worked);
+    /*
+     * Every tile of the field, not "more than six".
+     *
+     * The first version of this assertion was `> 6` on a field of forty-eight
+     * tiles, which is no assertion at all — it would have passed with an eighth
+     * of the field done, and the complaint that brought me back here was
+     * precisely that ground driven over was not changing. A coverage count is the
+     * only version of this test worth having.
+     */
+    const tiles = (FIELD.x1 - FIELD.x0 + 1) * (FIELD.z1 - FIELD.z0 + 1);
+    expect(worked.size).toBe(tiles);
     for (const tile of worked) {
       const x = tile % SIZE;
       const z = Math.floor(tile / SIZE);
@@ -123,18 +133,25 @@ describe('tractors', () => {
  * The rule is the road class: a lane gives way to anything on a better road.
  */
 describe('a tractor at a junction', () => {
-  it('holds for a vehicle on a more important road, and not for one on its own', () => {
-    const cap = 64;
-    const vx = new Float32Array(cap);
-    const vz = new Float32Array(cap);
-    const vh = new Float32Array(cap);
-    const vl = new Uint8Array(cap);
-    const vm = new Uint8Array(cap);
-    const vi = new Int32Array(cap);
-
-    // One vehicle already in the arrays, sitting on the lane a little ahead of
-    // where a tractor leaving the farm will be.
+  it('holds on the lane for a vehicle on a more important road', () => {
+    /*
+     * Measured on the lane only, and over long enough for a machine to have
+     * finished a field and set off again.
+     *
+     * The first version of this test watched tractor zero and ran for thirteen
+     * seconds. Both assumptions were wrong once fields could be claimed: which
+     * machine gets the one field is decided by whoever's idle timer fires first,
+     * and half of them start out already mid-furrow and so never drive the lane
+     * at all. It measured nothing and said so by returning zero for both cases.
+     */
     const run = (laneRank: number, otherRank: number): number => {
+      const cap = 64;
+      const vx = new Float32Array(cap);
+      const vz = new Float32Array(cap);
+      const vh = new Float32Array(cap);
+      const vl = new Uint8Array(cap);
+      const vm = new Uint8Array(cap);
+      const vi = new Int32Array(cap);
       const farm = new Farmwork({
         size: SIZE,
         farms: () => [{ tile: t(4, 10), x: 4.5, z: 10.5 }],
@@ -143,50 +160,39 @@ describe('a tractor at a junction', () => {
         route: (from) => (from === t(4, 10) ? [...LANE] : [...LANE].reverse()),
         work: () => {},
         needsWork: () => true,
+        // The obstruction sits on tile (7,10); everything else is the lane.
         rank: (tile) => (tile === t(7, 10) ? otherRank : laneRank),
         job: () => 'plough' as const,
       });
+      const last = new Map<number, number>();
       let moved = 0;
-      let last = -1;
-      for (let s = 0; s < 400; s++) {
-        // A parked obstruction on tile (7,10), written before the tractors.
+      for (let s = 0; s < 30 * 200; s++) {
+        // A parked obstruction on the lane, written before the machines so they
+        // can see it.
         vx[0] = 7.5;
         vz[0] = 10.5;
         vi[0] = 99;
         const n = farm.step(1 / 30, MACHINES, 1, vx, vz, vh, vl, vm, vi);
         for (let k = 1; k < n; k++) {
-          if (vi[k] !== -1000) continue;
-          if (last >= 0 && Math.abs(vx[k] - last) > 1e-4) moved++;
-          last = vx[k];
+          // Only while it is on the lane, which is where the junction is.
+          if (vz[k] < 9.5 || vz[k] > 11.5) { last.delete(vi[k]); continue; }
+          const was = last.get(vi[k]);
+          if (was !== undefined && Math.abs(vx[k] - was) > 1e-4) moved++;
+          last.set(vi[k], vx[k]);
         }
       }
       return moved;
     };
 
-    // On a better road, the obstruction is given way to and the first tractor
-    // spends far more of its time standing still than when it outranks it.
     const yielding = run(1, 3);
     const equal = run(1, 1);
+    // Both cases have to be doing something, or the comparison is vacuous — the
+    // mistake the first version of this test made.
+    expect(equal).toBeGreaterThan(50);
     expect(yielding).toBeLessThan(equal);
   });
 });
 
-
-/**
- * Nothing in the field ever jumps.
- *
- * "It looks like some of the tractors are drifting" — they were, and the cause
- * was a single-frame teleport rather than anything in the drawing. At the end of
- * each pass the position moved sideways by one furrow spacing in one frame, and
- * the renderer's smoothing, seeing a jump too small to be a real teleport, eased
- * across it: a tractor sliding sideways while still facing along the furrow.
- *
- * The measurement is therefore the largest step between consecutive frames. A
- * tractor moving at well under a tile a second, sampled thirty times a second,
- * cannot legitimately move more than a few hundredths of a tile in one frame —
- * and a furrow spacing is a whole one, so the two are nowhere near each other and
- * the threshold needs no fine tuning.
- */
 describe('a tractor never teleports', () => {
   it('moves in small steps for its whole visit, turns included', () => {
     const farm = district();
@@ -227,5 +233,68 @@ describe('a tractor never teleports', () => {
      * slightly quicker pace and nothing else.
      */
     expect(worst).toBeLessThan(0.08);
+  });
+});
+
+
+/**
+ * Two machines are never sent to the same field.
+ *
+ * With seven of them and a handful of fields wanting work in a given week, this
+ * happened constantly — and the second to arrive drove the whole field towing a
+ * plough over ground the first had already turned over. The work was real and
+ * had been done an hour earlier by somebody else, which from the air is
+ * indistinguishable from a machine that does nothing.
+ */
+describe('two machines never share a field', () => {
+  it('claims a field and does not offer it again', () => {
+    const seen = new Map<number, Set<number>>();
+    const fields: FarmField[] = [
+      FIELD,
+      { parcel: 2, x0: 22, x1: 28, z0: 12, z1: 17, road: t(20, 10), entryX: 22.5, entryZ: 12.5 },
+    ];
+    const laneLong: number[] = [];
+    for (let x = 4; x <= 22; x++) laneLong.push(t(x, 10));
+    const farm = new Farmwork({
+      size: SIZE,
+      farms: () => [{ tile: t(4, 10), x: 4.5, z: 10.5 }],
+      fields: () => fields,
+      usable: () => true,
+      route: (from) => (from === t(4, 10) ? [...laneLong] : [...laneLong].reverse()),
+      work: () => {},
+      needsWork: () => true,
+      rank: () => 1,
+      job: () => 'plough' as const,
+    });
+    const cap = 64;
+    const vx = new Float32Array(cap);
+    const vz = new Float32Array(cap);
+    const vh = new Float32Array(cap);
+    const vl = new Uint8Array(cap);
+    const vm = new Uint8Array(cap);
+    const vi = new Int32Array(cap);
+    for (let s = 0; s < 30 * 300; s++) {
+      const n = farm.step(1 / 30, MACHINES, 0, vx, vz, vh, vl, vm, vi);
+      // Which field is each machine standing in?
+      const inField = new Map<number, number>();
+      for (let k = 0; k < n; k++) {
+        for (const f of fields) {
+          if (vx[k] >= f.x0 && vx[k] <= f.x1 + 1 && vz[k] >= f.z0 && vz[k] <= f.z1 + 1) {
+            inField.set(vi[k], f.parcel);
+          }
+        }
+      }
+      for (const [id, p] of inField) {
+        const set = seen.get(p) ?? new Set<number>();
+        set.add(id);
+        seen.set(p, set);
+      }
+      // At any instant, no two machines in the same field.
+      const counts = new Map<number, number>();
+      for (const p of inField.values()) counts.set(p, (counts.get(p) ?? 0) + 1);
+      for (const [, c] of counts) expect(c).toBeLessThan(2);
+    }
+    // And both fields did get visited, or the claim is simply blocking everything.
+    expect(seen.size).toBe(2);
   });
 });
