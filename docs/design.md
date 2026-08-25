@@ -25,71 +25,114 @@ the word "fun" appeared once in two thousand lines. See
 
 ## 1. Where you start
 
-A small yard with a couple of trucks. Farms around you. A little village.
+A tiny village. Farms all round it. One truck, and just enough money to buy a
+second.
 
-You do not own the farms, the dairy or the roads. You own two trucks and the
-yard they sleep in.
+That last part is the whole opening: you are not given a fleet, you are given
+the *first purchase*, and making it is what starts the loop.
 
-## 2. The core loop, and it is one sentence
+You own the truck and nothing else. Not the farms, not the dairy, not the roads.
 
-**Click a place, take a contract, put a truck on it, get paid.**
+## 2. The core loop
 
-- Click a farm. It has **contracts**: *milk to the creamery, 3 collections a
-  week, £48 a load.*
-- Accept it. Assign a truck.
-- The truck drives there and back, through the day, and the money comes in.
-- Buy another truck. Take another contract.
+**See a contract, take it, run it, get paid, buy another truck.**
 
-That is the whole of the first half hour and there is nothing else in it. Two
-spots, back and forth, paid per load. No route editor, no stop list, no
-timetable.
+Contracts live on the map. As you move around, a place with work going shows a
+**pin above it** — a map marker with a contract mark on it. Click the pin and a
+floating panel opens over the world showing what the place is and what it is
+offering:
 
-**Contracts are the interaction.** The previous spec cut them as "paperwork"
-and replaced them with a route editor, which was exactly backwards: a route
-editor is a tool, and a contract is *somebody offering you work*, which is a
-thing that happens to you and is much more legible.
+> **Marchford Farm**
+> Livestock to the abattoir at Aldbridge · 18 tiles
+> Needs: a livestock box · Pays: £340 a load · About 2 days a run
 
-## 3. The ladder
+Accept it if you have a vehicle free. The truck drives out, loads, drives back,
+unloads, and the money arrives. Then you buy the second truck and take the
+second contract.
 
-Each rung is one purchase and one new problem. Nothing unlocks by date.
+Two places, back and forth. No route editor, no stop lists, no timetables.
 
-| | You buy | The new problem |
-|---|---|---|
-| 1 | **trucks** | which contracts are worth taking |
-| 2 | **production** — a dairy, a mill, a quarry | you make your own freight now, and it needs *different vehicles* |
-| 3 | **facilities** — a weighbridge, a chiller, a tank bay | this yard cannot handle that vehicle |
-| 4 | **more yards** | where they go decides what you can reach |
-| 5 | **distribution centres** | consolidation: many small drops instead of one big haul |
-| 6 | **influence** | you cannot expand until the district lets you |
+**Renting.** When you cannot afford a truck, you can hire one by the week. It
+costs more over time and it gets you moving now, which is the right kind of bad
+deal to be offered — and it keeps the loop alive at the one moment it could
+stall.
 
-The arc in the player's words: *I work for someone, then I start buying the
-land.*
+## 3. The ladder, thought through to the end
 
-### Why buying production is the pivot
+Each rung is one purchase. Each one creates the problem the next one solves.
 
-Taking contracts is working for other people. Buying the creamery means the
-milk contract is now *yours to set*, and it means you need a tanker rather than
-a flatbed, and a tanker needs a bay your yard has not got.
+| | You buy | What you now have | The new problem |
+|---|---|---|---|
+| 1 | **a truck** | capacity | which contracts are worth taking |
+| 2 | **a farm** | *goods of your own* | nobody is buying them yet |
+| 3 | **a shop in a town** | *demand of your own* | it wants things your farm does not make |
+| 4 | **the rest of the chain** | the whole margin | it only works if the vehicles are in the right places |
+| 5 | **more yards** | reach | closer to the city costs far more |
+| 6 | **distribution** | consolidation | many small drops, not one big haul |
+| 7 | **influence** | permission | the district has to let you build |
 
-That single purchase creates three problems at once, all of them concrete, all
-of them solved by another purchase. That is the engine of the whole game and it
-needs no new systems to work.
+### Rung 2 is the real turn, and it is not what I had before
 
-### Facilities, which are the good constraint
+Taking a contract is somebody telling you A to B. **Owning a farm inverts it:
+now you have output and nobody has asked for it.** You have to go and find
+buyers.
 
-A yard is not a spawn point. It has **facilities**, and a vehicle needs the
-right one:
+That is the moment the game stops being a job and starts being a business, and
+it needs no new systems — a buyer is a place with a requirement, which is a
+contract seen from the other end.
 
-| Facility | Needed by |
-|---|---|
-| Weighbridge | tippers, bulk |
-| Chiller | refrigerated |
-| Tank bay | tankers |
-| Long bay | artics |
-| Workshop | keeps the whole fleet running |
+### Rung 3, and the chain
 
-So "buy a tanker" fails with *your yard has no tank bay*, and that is a good
-failure: it is one sentence, it is obviously true, and the fix is a purchase.
+A shop has **requirements**: it wants meat *and* vegetables, and it wants them
+steadily. Supply it and it pays well, because you are its supplier rather than
+its haulier.
+
+Own the farm and the shop and you hold the whole chain — you produce, you carry,
+you sell, and every margin in between is yours. Then you buy a second shop, and
+the farm cannot feed both.
+
+That is the engine for the rest of the game and none of it is a new mechanic. It
+is the same click-a-place-see-what-it-wants interaction all the way up.
+
+### The land-value gradient
+
+**Everything costs more the closer it is to the city.** A farm in the hills is
+cheap, a shop on the high street is not.
+
+This is one number per tile and it does an enormous amount:
+
+- You cannot jump to the city. You have to work your way in.
+- It makes *where* as interesting as *what*, from the first hour.
+- It gives the map a direction — out here is where you start, in there is where
+  you are going — without a single arrow drawn on it.
+
+### What each place gives you
+
+Places are not interchangeable, and that is what makes buying one a decision:
+
+| | Gives | Wants | Needs to be served by |
+|---|---|---|---|
+| Livestock farm | animals | feed | livestock box |
+| Dairy farm | milk | feed | tanker, chilled |
+| Arable farm | grain, vegetables | — | tipper, flatbed |
+| Abattoir | meat | animals | chilled |
+| Creamery | dairy goods | milk | chilled |
+| Mill | feed, flour | grain | tipper |
+| Village shop | — | meat, vegetables, dairy | small box van |
+| Town shop | — | everything, steadily | box van |
+| Depot | — | everything | artic |
+
+Each row needs a different vehicle, and every vehicle needs a facility at a
+yard. That is the whole of rungs 3 to 5 and it comes out of this table rather
+than out of a new system.
+
+### Later, and only later
+
+**Vehicle wear.** Trucks get worse. A worn truck on a bad road is slow, and it
+breaks down. Which leads to —
+
+**Road quality.** A better road is faster and kinder to the fleet. You cannot
+build one, but the district can, and whether it does is —
 
 ## 4. Influence, and how it stays out of the way
 

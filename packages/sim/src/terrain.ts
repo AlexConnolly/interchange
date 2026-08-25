@@ -13,6 +13,7 @@
 import { FX_ONE, fx, fxMul, fxDiv, fxHypot, fxSqrt, type Fx } from './fixed.ts';
 import { fbm, ridged, warpedFbm, hash3 } from './noise.ts';
 import { erode } from './erosion.ts';
+import { generateFields, type FieldMap } from './fields.ts';
 import { Rng } from './rng.ts';
 
 /** One height unit is half a metre. Sea level is zero. */
@@ -110,6 +111,9 @@ export interface DepositSeed {
 export class Terrain {
   readonly size: number;
   readonly seed: number;
+  /** Field parcels. See fields.ts — this is what the ground is made of, and
+   *  the single biggest visual decision in the project. */
+  fields!: FieldMap;
   readonly height: Int16Array;
   readonly biome: Uint8Array;
   readonly flags: Uint8Array;
@@ -258,6 +262,17 @@ export function generateTerrain(cfg: WorldConfig): Terrain {
 
   // ---- 3. biomes and buildability ---------------------------------------
   classify(t, cfg.seed);
+
+  /*
+   * Fields. After the biomes, because a parcel's crop is decided from the
+   * ground it covers, and after erosion, because what is steep enough to leave
+   * unenclosed depends on the erosion pass having happened.
+   */
+  t.fields = generateFields(
+    size, rng,
+    (tile) => t.height[tile] > SEA_LEVEL && (t.flags[tile] & TileFlag.River) === 0,
+    (tile) => slopeAt(t, tile % size, (tile / size) | 0),
+  );
 
   // ---- 4. amenity --------------------------------------------------------
   computeBaseAmenity(t);

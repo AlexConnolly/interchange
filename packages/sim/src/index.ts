@@ -40,3 +40,4 @@ export function createWorld(config: Partial<WorldConfig> = {}, content?: Content
 }
 export * from './amenity.ts';
 export * from './erosion.ts';
+export * from './fields.ts';

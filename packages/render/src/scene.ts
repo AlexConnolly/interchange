@@ -1,1406 +1,324 @@
 /**
- * The renderer. Orthographic, instanced, chunked.
+ * The renderer. Rebuilt against `art/reference/TARGET-FRAME.png`.
  *
- * Three rules from art-direction.md drive the whole file.
+ * The old one was 1,406 lines and solved a different problem: five transport
+ * modes, eight eras, twenty overlay modes, regions up to 1024². It also had no
+ * shadows at all — a two-term hemisphere model in a hand-written shader — which
+ * is most of the reason nothing in it had any weight.
  *
- *   The camera decides everything (§1). Orthographic at a fixed elevation,
- *   rotatable in ninety-degree steps. Height survives; footprint along the
- *   view axis does not.
+ * The three decisions that matter, all taken from the picture rather than from
+ * principles:
  *
- *   The world is never dressed with UI (§14). No floating labels, no icons in
- *   the resting state. Overlay modes recolour the world wholesale rather than
- *   adding marks to it — each mode is a different drawing of the same place.
+ *   **Shadows.** A single directional light with a shadow map, following the
+ *   camera. Nothing else in this file makes as much difference. The frame's long
+ *   afternoon shadows are what make a hedge a hedge and a lorry an object
+ *   sitting on a road rather than a decal printed on it.
  *
- *   Motion is art direction, not polish (§12). The renderer interpolates
- *   between simulation ticks so a queue reads as a queue; a dropped frame
- *   costs a frame and never a tick.
+ *   **Three's own lit material, not a custom shader.** `MeshLambertMaterial`
+ *   with vertex colours. Flat-shaded low poly barely cares about the BRDF, and
+ *   what it does care about — shadow receiving, correct output encoding, a tone
+ *   mapping that does not have opinions — comes free and correct. The old custom
+ *   shader hand-rolled linear-to-sRGB, clipped every highlight, and could not
+ *   receive a shadow at all.
+ *
+ *   **No overlays.** The old renderer had twenty modes recolouring the world
+ *   wholesale. `design.md` allows eight controls on screen; a mode switcher with
+ *   twenty entries is not a feature, it is an admission that the world does not
+ *   show you what you need.
  */
 
 import {
-  BufferAttribute, BufferGeometry, Color, InstancedBufferAttribute, InstancedMesh,
-  Matrix4, Mesh as ThreeMesh, OrthographicCamera, Quaternion, Scene as ThreeScene,
-  Vector3, WebGLRenderer,
+  AmbientLight, Color, DirectionalLight, Group, InstancedMesh,
+  MeshLambertMaterial, Object3D, OrthographicCamera, PCFSoftShadowMap,
+  Scene as ThreeScene, Vector3, WebGLRenderer, type BufferGeometry,
 } from 'three';
-import {
-  BIOME_COLOURS, LAND, LIVERIES, SEMANTIC, WAY_COLOURS, shade, type RGB,
-} from './palette.ts';
-import { Mesh } from './geometry.ts';
-import { buildIndustry, buildTownBlock, buildTreeClump, buildVehicle, buildCar } from './models.ts';
-import { buildingCount, layOutTown, mergeTown } from './town.ts';
-import { applyLighting, createWorldMaterial, lightingForTime, makeLighting } from './material.ts';
+import { buildGround, toMesh, HEIGHT_TO_WORLD, type GroundSource } from './ground.ts';
+import { buildRoads, type RoadSource } from './roads.ts';
+import { LIVERY, SKY } from './palette.ts';
 
-/** Tiles per render chunk. Small enough that an edit rebuilds little, large
- *  enough that a region is not a hundred thousand draw calls. */
-export const CHUNK = 32;
+export { HEIGHT_TO_WORLD };
+
+/** Tiles per chunk. Small enough that one rebuild is cheap, large enough that a
+ *  128² district is sixty-four draw calls rather than a thousand. */
+export const CHUNK = 16;
 
 /**
- * A ceiling on ambient cars. Atmosphere gets a fixed budget and never more:
- * the moment traffic can cost a frame it stops being free and starts being a
- * decision, and it is not worth one.
- */
-const TRAFFIC_MAX = 900;
-
-/** Neighbour offsets, in the order the way layer packs its direction bits. */
-const DIRDX = [0, 1, 0, -1];
-const DIRDY = [-1, 0, 1, 0];
-
-/**
- * Vertical exaggeration.
+ * How many tiles the camera shows across the frame.
  *
- * One height unit is half a metre and one tile is thirty-two, so real
- * elevation is already correct at 1.0 — a 1000 m ridge stands 31 tiles tall.
- * At an orthographic 35 degrees that reads flatter than it measures, because
- * the eye reads relief against the *ground* distance the camera is
- * foreshortening. 1.5 puts the highlands back where the map says they are.
+ * This is *the* number, derived backwards from readability as postmortem.md
+ * demands: a lorry has to be about forty pixels, a lorry is drawn about a tile
+ * long, so a 1920 px frame shows about twenty-six tiles. Everything else — the
+ * district size, the field size, the model budgets — follows from it.
  */
-export const VERTICAL = 1.5;
+export const TILES_ACROSS_DEFAULT = 26;
 
-export const HEIGHT_TO_WORLD = (h: number) => (h / 64) * VERTICAL;
-
-export const OverlayMode = {
-  None: 0,
-  Congestion: 1,
-  Ownership: 2,
-  Amenity: 3,
-  Catchment: 4,
-  Power: 5,
-  Water: 6,
-  Cargo: 7,
-} as const;
-export type OverlayMode = (typeof OverlayMode)[keyof typeof OverlayMode];
-
-/** Everything the renderer needs from the simulation. Deliberately a plain
- *  data interface: the renderer must never reach into sim state and must never
- *  write to it (determinism rule 6). */
-export interface RenderSource {
-  size: number;
-  height: Int16Array;
-  biome: Uint8Array;
-  flags: Uint8Array;
-  amenity: Uint8Array;
-  /** Per-mode tile layers. */
-  wayClass: Uint8Array[];
-  wayDir: Uint8Array[];
-  wayAsset: Int32Array[];
-  wayLink: Int32Array[];
-  /** Formation level per tile, per mode. A way sits on this, not the ground. */
-  wayLevel: Int16Array[];
-  /** Which layer each vehicle type runs on, so a vehicle can stand on its own
-   *  formation rather than on the ground beneath it. */
-  vehicleMode: Uint8Array | number[];
-  /** Embankment / cutting / bridge / tunnel bits. */
-  wayFlags: Uint8Array[];
-  assetOwner: Int16Array;
-  assetCondition: Uint8Array;
-  linkFlowPrev: Int32Array;
-  /** What each *tile* mostly carries, and how much. Per tile rather than per
-   *  link because links are renumbered whenever anybody builds anything. */
-  tileCargo: Uint8Array;
-  tileTonnes: Float32Array;
-  /** The colour agreed for a cargo, from the content. */
-  cargoColourOf: (cargo: number) => RGB;
-  linkCellCount: Int32Array;
-  wayColourOf: (cls: number) => RGB;
-  /** True for a way class that is a routing convenience rather than a built
-   *  thing: sea lanes and air corridors. */
-  invisibleWay: (cls: number) => boolean;
-  /** Vehicles, already projected to world tiles in Q16.16. */
+export interface RenderSource extends GroundSource, RoadSource {
+  /** Vehicles: position in tiles, heading in turns, and whose it is. */
   vehicleCount: number;
-  vAlive: Uint8Array;
-  vType: Uint8Array;
-  vCompany: Int16Array;
-  vX: Int32Array;
-  vY: Int32Array;
-  vHeading: Int32Array;
-  vState: Uint8Array;
-  vLoad: Int32Array;
-  vehicleClassOf: (type: number) => string;
-  vehicleEraOf: (type: number) => number;
-  /** Sites. */
-  siteCount: number;
-  sX: Int32Array;
-  sY: Int32Array;
-  sState: Uint8Array;
-  sDef: Int32Array;
-  sOwner: Int16Array;
-  industryKitOf: (def: number) => string;
-  industryFootprintOf: (def: number) => number;
-  /** Towns. */
-  townCount: number;
-  tX: Int32Array;
-  tY: Int32Array;
-  tPopulation: Int32Array;
-  /**
-   * A per-tile field, 0..1, for whichever overlay wants one — amenity,
-   * catchment, and later the noise and pollution fields. Null when the current
-   * overlay does not use one.
-   *
-   * Overlay modes recolour the world wholesale rather than adding marks to it
-   * (art-direction.md §14), so a field is the natural shape: each mode is a
-   * different drawing of the same place, and the drawing is a function from
-   * tile to colour.
-   */
-  overlayField: Float32Array | null;
-  /** Per-mode grid satisfaction, 0..100, indexed by the grid a tile is on. */
-  gridSatisfaction: Float32Array | null;
-  gridOfTile: Int32Array | null;
-  /** Calendar. */
+  vx: Float32Array;
+  vz: Float32Array;
+  vHeading: Float32Array;
+  vLivery: Uint8Array;
+  /** 0..1 through the day, for the sun. */
   dayFraction: number;
-  season: number;
-  era: number;
-  player: number;
 }
 
 interface Chunk {
-  terrain: ThreeMesh;
-  ways: ThreeMesh | null;
-  props: ThreeMesh | null;
-  overlayVersion: number;
-  wayVersion: number;
-  /** Frame this chunk was last wanted, for eviction without a per-frame Set. */
+  ground: ReturnType<typeof toMesh>;
+  roads: ReturnType<typeof toMesh> | null;
   seen: number;
 }
 
-interface VehicleBatch {
-  mesh: InstancedMesh;
-  count: number;
-  /** Which LOD the geometry in this batch was built at. */
-  far: boolean;
-}
-
-export interface CameraState {
-  /** Centre of view, in tiles. */
-  x: number;
-  z: number;
-  /** Tiles visible vertically. Smaller is closer in. */
-  view: number;
-  /** 0..3, ninety degrees apart. */
-  rotation: number;
-  /** Degrees above the horizon. art-direction.md §1 leaves this open for
-   *  Phase 0 to settle with real geometry; 35 is the proposal. */
-  elevation: number;
-}
-
 export class Renderer {
-  readonly scene = new ThreeScene();
-  readonly camera: OrthographicCamera;
-  readonly renderer: WebGLRenderer;
-  readonly material = createWorldMaterial();
-
-  camState: CameraState = { x: 0, z: 0, view: 90, rotation: 0, elevation: 35 };
-  overlay: OverlayMode = OverlayMode.None;
-  showGrid = false;
-  selectedVehicle = -1;
-  selectedTile = -1;
-
-  private chunks = new Map<number, Chunk>();
-  private vehicleBatches = new Map<number, VehicleBatch>();
-  private siteMeshes = new Map<number, ThreeMesh>();
-  private townMeshes = new Map<number, ThreeMesh>();
-  private sea: ThreeMesh | null = null;
-  private previewMesh: ThreeMesh | null = null;
-  private overlayVersion = 0;
-  private wayVersion = 0;
+  private readonly renderer: WebGLRenderer;
+  private readonly scene = new ThreeScene();
+  private readonly camera: OrthographicCamera;
+  private readonly material: MeshLambertMaterial;
+  private readonly sun: DirectionalLight;
+  private readonly fill: AmbientLight;
+  private readonly chunks = new Map<number, Chunk>();
+  private readonly fleet = new Group();
+  private batches: (InstancedMesh | null)[] = [];
+  private frame = 0;
   private cols = 0;
 
-  private frameCounter = 0;
-  private terrainScratchPos = new Float32Array(0);
-  private terrainScratchCol = new Float32Array(0);
-  /** Reused, so the day/night cycle does not allocate four colours a frame. */
-  private light = makeLighting();
-
-  /** Live count per vehicle type, so instance buffers can be sized correctly. */
-  private typeCounts = new Int32Array(256);
-
-  /** Previous vehicle positions, for tick interpolation. */
-  private prevX = new Int32Array(0);
-  private prevY = new Int32Array(0);
-  /**
-   * Models from the art pipeline, once they arrive.
-   *
-   * Loaded asynchronously and used only when present, so a region renders
-   * immediately with the generated geometry and swaps to the authored models a
-   * few hundred milliseconds later. That is not a nicety: a renderer that
-   * cannot draw until a fetch completes is a renderer that shows a black
-   * screen on a slow connection, and art-pipeline.md's whole argument for
-   * .glb as the shipped artefact assumes the game still works without it.
-   */
-  private kit: Map<string, BufferGeometry> | null = null;
-  private kitVersion = 0;
-
-  /** Ambient road traffic. One batch, no state, see updateTraffic. */
-  private traffic: { mesh: InstancedMesh; count: number } | null = null;
-  private prevHeading = new Int32Array(0);
-  private havePrev = false;
-
-  /**
-   * Where the frame went. Kept permanently rather than added for one
-   * investigation: roadmap.md Phase 6 wants frame time tracked against
-   * per-device budgets over time, and a single total tells you that you are
-   * over budget without telling you which part to look at.
-   */
-  stats = {
-    chunks: 0, instances: 0, drawCalls: 0, triangles: 0,
-    buildMs: 0, sitesMs: 0, townsMs: 0, vehiclesMs: 0, drawMs: 0,
-    chunksBuilt: 0, sitesBuilt: 0, townsBuilt: 0, batchesBuilt: 0,
-  };
+  /** Where the camera is looking, in tiles, and how much it shows. */
+  camX = 0;
+  camZ = 0;
+  tilesAcross = TILES_ACROSS_DEFAULT;
 
   constructor(canvas: HTMLCanvasElement) {
-    this.renderer = new WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(2, globalThis.devicePixelRatio ?? 1));
-    this.camera = new OrthographicCamera(-1, 1, 1, -1, -2000, 4000);
-    this.scene.background = new Color(0.06, 0.09, 0.13);
+    this.renderer = new WebGLRenderer({ canvas, antialias: true });
+    this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    /*
+     * Shadows, and this is the single most important line in the file.
+     *
+     * Soft PCF at 2048: big enough that a hedge casts a hedge rather than a
+     * staircase, small enough to cost nothing on an integrated part. The old
+     * renderer had no shadow map at all.
+     */
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    // No tone mapping. The target frame was rendered through Standard for
+    // exactly this reason: a film curve desaturates, and the palette is meant
+    // to arrive as authored.
+    this.renderer.setClearColor(new Color(...SKY.horizon));
+
+    this.camera = new OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
+    this.material = new MeshLambertMaterial({ vertexColors: true });
+
+    this.sun = new DirectionalLight(new Color(...SKY.sun), 2.1);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    const cam = this.sun.shadow.camera;
+    cam.near = 0.5;
+    cam.far = 220;
+    this.sun.shadow.bias = -0.0006;
+    this.scene.add(this.sun, this.sun.target);
+
+    // Sky and bounce, as one ambient term. Two lights is enough when the
+    // facets are doing the describing.
+    this.fill = new AmbientLight(new Color(...SKY.zenith), 1.35);
+    this.scene.add(this.fill);
+    this.scene.add(this.fleet);
   }
 
-  dispose(): void {
-    for (const c of this.chunks.values()) {
-      c.terrain.geometry.dispose();
-      c.ways?.geometry.dispose();
-      c.props?.geometry.dispose();
-    }
-    this.chunks.clear();
-    this.renderer.dispose();
-  }
-
-  resize(width: number, height: number): void {
-    this.renderer.setSize(width, height, false);
-    this.updateCamera(width / height);
-  }
-
-  /**
-   * A ghost alignment, drawn over the world while the player is dragging one
-   * out. Rebuilt whenever it changes rather than every frame: a drag produces
-   * a new route only when the cursor crosses a tile boundary.
-   */
-  setPreview(
-    tiles: ArrayLike<number> | null,
-    levels: ArrayLike<number> | null,
-    flags: ArrayLike<number> | null,
-    ok: boolean,
-    size: number,
-  ): void {
-    if (this.previewMesh) {
-      this.scene.remove(this.previewMesh);
-      this.previewMesh.geometry.dispose();
-      this.previewMesh = null;
-    }
-    if (!tiles || tiles.length === 0) return;
-    const m = new Mesh(tiles.length * 40);
-    // The semantic set, and nothing else: a legal alignment is the good hue
-    // and an illegal one is the failure hue, both reserved.
-    const good: RGB = [0.36, 0.78, 0.52];
-    const bad: RGB = [0.86, 0.28, 0.24];
-    const c = ok ? good : bad;
-    for (let i = 0; i < tiles.length; i++) {
-      const tile = tiles[i];
-      const x = tile % size;
-      const y = (tile / size) | 0;
-      const level = levels ? levels[i] : 0;
-      const yy = HEIGHT_TO_WORLD(level) + 0.09;
-      m.flat(x + 0.5, yy, y + 0.5, 0.34, 0.34, c, 0.85);
-      const f = flags ? flags[i] : 0;
-      // A marker on anything that is not ordinary construction, so the player
-      // sees the expensive tiles before they see the bill.
-      if (f !== 0) m.box(x + 0.5, yy + 0.10, y + 0.5, 0.09, 0.09, 0.09, 0.02, c, c, c, 1);
-    }
-    const mesh = new ThreeMesh(m.build(), this.material);
-    mesh.frustumCulled = false;
-    mesh.renderOrder = 5;
-    this.scene.add(mesh);
-    this.previewMesh = mesh;
-  }
-
-  /** Recolour everything. Cheap enough to call on a mode change. */
-  invalidateOverlay(): void {
-    this.overlayVersion++;
-  }
-
-  /** The network changed; way meshes must be rebuilt. */
-  invalidateWays(): void {
-    this.wayVersion++;
-  }
-
-  private updateCamera(aspect: number): void {
-    const c = this.camState;
-    const halfH = c.view / 2;
-    const halfW = halfH * aspect;
-    this.camera.left = -halfW;
-    this.camera.right = halfW;
-    this.camera.top = halfH;
-    this.camera.bottom = -halfH;
-
-    const el = (c.elevation * Math.PI) / 180;
-    const az = (c.rotation * Math.PI) / 2 + Math.PI / 4;
-    this.camera.position.set(
-      c.x + Math.cos(az) * Math.cos(el) * CAMERA_DISTANCE,
-      Math.sin(el) * CAMERA_DISTANCE,
-      c.z + Math.sin(az) * Math.cos(el) * CAMERA_DISTANCE,
-    );
-    this.camera.lookAt(c.x, 0, c.z);
+  resize(w: number, h: number): void {
+    this.renderer.setSize(w, h, false);
+    const aspect = w / Math.max(1, h);
+    const half = this.tilesAcross / 2;
+    this.camera.left = -half;
+    this.camera.right = half;
+    this.camera.top = half / aspect;
+    this.camera.bottom = -half / aspect;
     this.camera.updateProjectionMatrix();
   }
 
   /**
-   * The foreshortening constants for the current camera, art-direction.md §1.
+   * Place the camera.
    *
-   * For an orthographic camera at elevation θ a world-vertical length arrives
-   * at cos(θ), a ground length across the view at 1, and a ground length along
-   * the view axis at sin(θ). These are exact — but the document is right that
-   * the *method* is what transfers and the constant is what must be measured,
-   * because the numbers below are only true if the axes are what we think they
-   * are. `packages/tools/src/foreshorten.ts` measures them off a real render.
+   * A low three-quarter orthographic view, matching the target frame's 38° of
+   * elevation and 32° of azimuth. Low enough to see the sides of things, which
+   * is what a steeper camera loses and why the old build's buildings read as
+   * coloured footprints.
    */
-  foreshortening(): { vertical: number; across: number; along: number } {
-    const el = (this.camState.elevation * Math.PI) / 180;
-    return { vertical: Math.cos(el), across: 1, along: Math.sin(el) };
-  }
-
-  // -------------------------------------------------------------- terrain
-
-  private terrainColour(src: RenderSource, tile: number): RGB {
-    const h = src.height[tile];
-    if (this.overlay === OverlayMode.Amenity) {
-      const a = src.amenity[tile] / 100;
-      return [0.75 - a * 0.55, 0.30 + a * 0.50, 0.32 + a * 0.18];
-    }
-    if (this.overlay === OverlayMode.Catchment && src.overlayField) {
-      // How many people can reach here inside a commute. The field is the
-      // whole answer to "where should this industry go", so it gets the
-      // strongest treatment of any overlay.
-      const v = Math.min(1, src.overlayField[tile]);
-      if (h <= 0) return [0.05, 0.07, 0.10];
-      return [0.10 + v * 0.62, 0.13 + v * 0.52, 0.30 - v * 0.14];
-    }
-    if ((this.overlay === OverlayMode.Power || this.overlay === OverlayMode.Water) && h <= 0) {
-      return [0.05, 0.07, 0.10];
-    }
-    if (this.overlay !== OverlayMode.None && h > 0) {
-      // Every other overlay wants the land as a neutral ground so the marks on
-      // top carry all the information.
-      const v = 0.16 + Math.min(0.18, h / 9000);
-      return [v, v * 1.02, v * 1.06];
-    }
-    if (h <= 0) {
-      // Depth, not a flat field. Two colours lerped over the shelf gives the
-      // coast a readable edge; a single ocean blue makes every bay look like
-      // deep water and hides where a wharf could go.
-      const t = Math.min(1, -h / 90);
-      return [
-        LAND.shallows[0] + (LAND.oceanDeep[0] - LAND.shallows[0]) * t,
-        LAND.shallows[1] + (LAND.oceanDeep[1] - LAND.shallows[1]) * t,
-        LAND.shallows[2] + (LAND.oceanDeep[2] - LAND.shallows[2]) * t,
-      ];
-    }
-    const c = BIOME_COLOURS[src.biome[tile]] ?? LAND.grass;
-    // A gentle lift with altitude, so relief reads even where the biome is
-    // uniform. The land is a ground, not a subject: this stays small.
-    const lift = Math.min(0.07, h / 40000);
-    return [c[0] + lift, c[1] + lift, c[2] + lift];
-  }
-
-  private buildTerrainChunk(src: RenderSource, cx: number, cy: number): ThreeMesh {
-    const size = src.size;
-    const x0 = cx * CHUNK;
-    const y0 = cy * CHUNK;
-    const x1 = Math.min(size, x0 + CHUNK);
-    const y1 = Math.min(size, y0 + CHUNK);
-
-    const cornerH = (x: number, y: number): number => {
-      // Average the four tiles meeting at this corner; clamping at the edge
-      // keeps the border from folding down into the sea.
-      let sum = 0;
-      let n = 0;
-      for (let dy = -1; dy <= 0; dy++) {
-        for (let dx = -1; dx <= 0; dx++) {
-          const tx = Math.max(0, Math.min(size - 1, x + dx));
-          const ty = Math.max(0, Math.min(size - 1, y + dy));
-          sum += src.height[ty * size + tx];
-          n++;
-        }
-      }
-      return HEIGHT_TO_WORLD(sum / n);
-    };
-
-    // Exactly six vertices per tile, so the buffers are sized once and written
-    // by index. The array-of-numbers version of this was the single slowest
-    // thing in the renderer.
-    const tiles = (x1 - x0) * (y1 - y0);
-    const pos = this.terrainScratchPos.length >= tiles * 18
-      ? this.terrainScratchPos
-      : (this.terrainScratchPos = new Float32Array(tiles * 18));
-    const col = this.terrainScratchCol.length >= tiles * 18
-      ? this.terrainScratchCol
-      : (this.terrainScratchCol = new Float32Array(tiles * 18));
-    let w = 0;
-    for (let y = y0; y < y1; y++) {
-      for (let x = x0; x < x1; x++) {
-        const tile = y * size + x;
-        const c = this.terrainColour(src, tile);
-        const isSea = src.height[tile] <= 0;
-        const h00 = isSea ? 0 : cornerH(x, y);
-        const h10 = isSea ? 0 : cornerH(x + 1, y);
-        const h01 = isSea ? 0 : cornerH(x, y + 1);
-        const h11 = isSea ? 0 : cornerH(x + 1, y + 1);
-        // Split the quad along the shorter diagonal so a ridge stays a ridge
-        // rather than being bridged flat by an arbitrary triangulation.
-        const flip = Math.abs(h00 - h11) > Math.abs(h10 - h01);
-        const px: number[] = flip
-          ? [x, h00, y, x + 1, h11, y + 1, x + 1, h10, y, x, h00, y, x, h01, y + 1, x + 1, h11, y + 1]
-          : [x, h00, y, x, h01, y + 1, x + 1, h10, y, x + 1, h10, y, x, h01, y + 1, x + 1, h11, y + 1];
-        for (let k = 0; k < 18; k += 3) {
-          pos[w] = px[k];
-          pos[w + 1] = px[k + 1];
-          pos[w + 2] = px[k + 2];
-          col[w] = c[0];
-          col[w + 1] = c[1];
-          col[w + 2] = c[2];
-          w += 3;
-        }
-      }
-    }
-
-    const g = new BufferGeometry();
-    g.setAttribute('position', new BufferAttribute(pos.slice(0, w), 3));
-    g.setAttribute('color', new BufferAttribute(col.slice(0, w), 3));
-    // Terrain has no emissive surfaces, so the attribute is a shared zero
-    // buffer rather than one per chunk.
-    g.setAttribute('emit', new BufferAttribute(zeroEmit(w / 3), 1));
-    g.computeVertexNormals();
-    g.computeBoundingSphere();
-    const mesh = new ThreeMesh(g, this.material);
-    mesh.frustumCulled = true;
-    return mesh;
-  }
-
-  /**
-   * Ways, drawn as a hub and arms rather than a full tile.
-   *
-   * A road that fills its tile reads as a coloured floor; a road drawn as a
-   * narrow band with arms reaching to the connected edges reads as a road, and
-   * — more usefully — its junctions become visible as junctions, which is the
-   * thing the player is actually reading the map for.
-   */
-  private buildWayChunk(src: RenderSource, cx: number, cy: number): ThreeMesh | null {
-    const size = src.size;
-    const x0 = cx * CHUNK;
-    const y0 = cy * CHUNK;
-    const x1 = Math.min(size, x0 + CHUNK);
-    const y1 = Math.min(size, y0 + CHUNK);
-    const m = new Mesh(CHUNK * CHUNK * 30);
-
-    /*
-     * Where a way sits at the edge it shares with a neighbour.
-     *
-     * Every piece of a way used to be a horizontal quad at its own tile's
-     * level, which is fine on the flat and comes apart on a gradient: two
-     * neighbouring tiles half a metre different in height are two flat plates
-     * with a step of clear air between them, and a road up a hillside read as
-     * a string of disconnected blobs rather than as a road.
-     *
-     * Meeting at the midpoint fixes it exactly rather than approximately.
-     * Both tiles compute the same number for the edge they share — each is the
-     * mean of the same two levels — so the two ramps land on precisely the
-     * same line and the surface is continuous however steep the ground is. It
-     * is also what a road actually does: the formation is a slope between two
-     * points, not a staircase.
-     *
-     * Declared once per chunk rather than once per tile. The obvious place to
-     * write these was inside the tile loop where the values they close over
-     * live, and that allocates two closures per tile — a thousand a chunk, a
-     * hundred and fifty thousand for a first frame — which took the frame rate
-     * from sixty to ten on its own. They take what they need as arguments
-     * instead.
-     */
-    const edgeY = (
-      level: Int16Array, x: number, y: number, yy: number, k: number,
-    ): number => {
-      const nx = x + DIRDX[k];
-      const ny = y + DIRDY[k];
-      if (nx < 0 || ny < 0 || nx >= size || ny >= size) return yy;
-      const n = ny * size + nx;
-      const nLevel = level[n];
-      const nGround = HEIGHT_TO_WORLD(Math.max(0, src.height[n]));
-      return (yy + ((nLevel === 0 ? nGround : HEIGHT_TO_WORLD(nLevel)) + 0.05)) / 2;
-    };
-    /** One arm of a way, sloping from the hub out to the shared edge. */
-    const arm = (
-      level: Int16Array, x: number, y: number, yy: number,
-      k: number, halfAcross: number, lift: number, c: RGB,
-    ): void => {
-      const outer = edgeY(level, x, y, yy, k) + lift;
-      const inner = yy + lift;
-      const cx2 = x + 0.5;
-      const cz2 = y + 0.5;
-      if (DIRDX[k] !== 0) {
-        const xo = cx2 + DIRDX[k] * 0.5;
-        m.quad(
-          cx2, inner, cz2 - halfAcross, xo, outer, cz2 - halfAcross,
-          xo, outer, cz2 + halfAcross, cx2, inner, cz2 + halfAcross, c,
-        );
-      } else {
-        const zo = cz2 + DIRDY[k] * 0.5;
-        m.quad(
-          cx2 - halfAcross, inner, cz2, cx2 + halfAcross, inner, cz2,
-          cx2 + halfAcross, outer, zo, cx2 - halfAcross, outer, zo, c,
-        );
-      }
-    };
-
-    for (let mode = 0; mode < src.wayClass.length; mode++) {
-      const cls = src.wayClass[mode];
-      const dir = src.wayDir[mode];
-      const wayLevel = src.wayLevel[mode];
-      const wayFlags = src.wayFlags[mode];
-      if (!cls) continue;
-      for (let y = y0; y < y1; y++) {
-        for (let x = x0; x < x1; x++) {
-          const tile = y * size + x;
-          const c = cls[tile];
-          if (c === 255) continue;
-          /*
-           * A sea lane is not a thing that exists in the world.
-           *
-           * seaair.ts is explicit that the sea is already there and that a
-           * lane is a routing convenience laid on a coarse grid so ships have
-           * something to follow. Drawing it put a pale blue lattice across
-           * every stretch of open water on the map — a piece of the routing
-           * graph showing through the render, which is exactly the sort of
-           * thing art-direction.md means by never letting the machinery
-           * obscure the world. It still draws under an overlay, where the
-           * player has asked to see the machinery.
-           */
-          if (src.invisibleWay(c) && this.overlay === OverlayMode.None) continue;
-          /*
-           * In the trade map, a way that carries nothing is not part of the
-           * trade. Drawing it put a lattice of empty sea lanes across the
-           * whole picture and a grey web of every lane nobody uses, which is
-           * the opposite of what the overlay is for — the point is to see
-           * where the region's goods actually go.
-           */
-          if (this.overlay === OverlayMode.Cargo && src.tileCargo[tile] === 255) continue;
-          const groundY = HEIGHT_TO_WORLD(Math.max(0, src.height[tile]));
-          // The formation, not the ground. A level of zero means the way was
-          // laid before the profile existed, so fall back to the ground.
-          const level = wayLevel[tile];
-          const yy = (level === 0 ? groundY : HEIGHT_TO_WORLD(level)) + 0.05;
-          let colour = src.wayColourOf(c);
-
-          if (this.overlay === OverlayMode.Ownership) {
-            const asset = src.wayAsset[mode][tile];
-            const owner = asset < 0 ? 0 : src.assetOwner[asset];
-            colour = owner === src.player ? SEMANTIC.owned : owner === 0 ? SEMANTIC.public : SEMANTIC.rival;
-          } else if (this.overlay === OverlayMode.Power || this.overlay === OverlayMode.Water) {
-            // Only the network that carries the utility is lit; everything
-            // else recedes, so the grid reads as a grid.
-            const wanted = this.overlay === OverlayMode.Power ? 5 : 4;
-            if (mode !== wanted) {
-              colour = [0.16, 0.17, 0.19];
-            } else if (src.gridOfTile && src.gridSatisfaction) {
-              const gi = src.gridOfTile[tile];
-              const sat = gi >= 0 ? src.gridSatisfaction[gi] : 0;
-              colour = sat >= 99 ? SEMANTIC.free
-                : sat >= 70 ? SEMANTIC.busy
-                : sat >= 30 ? SEMANTIC.congested
-                : SEMANTIC.jammed;
-            }
-          } else if (this.overlay === OverlayMode.Cargo) {
-            /*
-             * Cargo ribbons: every way coloured by what it mostly carries,
-             * brightening with how much of it went along last window.
-             *
-             * This is the overlay that turns a network into a *trade map*.
-             * Congestion says where the pressure is; ownership says whose it
-             * is; this says what the region actually does — coal down the
-             * valley, timber out of the forest, and the corridor everything
-             * shares, which is where a toll would pay.
-             */
-            const cargo = src.tileCargo[tile];
-            if (cargo === 255) {
-              colour = [0.19, 0.20, 0.22];
-            } else {
-              const base = src.cargoColourOf(cargo);
-              // Enough tonnage to read at all, then brighten with volume: a
-              // flat colour would say a lane with one dray a year matters as
-              // much as the main line.
-              const t = Math.min(1, (src.tileTonnes[tile] ?? 0) / 40);
-              const lift = 0.45 + t * 0.85;
-              colour = [
-                Math.min(1, base[0] * lift + t * 0.10),
-                Math.min(1, base[1] * lift + t * 0.10),
-                Math.min(1, base[2] * lift + t * 0.10),
-              ];
-            }
-          } else if (this.overlay === OverlayMode.Congestion) {
-            const link = src.wayLink[mode][tile];
-            if (link >= 0) {
-              const cap = Math.max(1, src.linkCellCount[link] * 4);
-              const load = Math.min(1, src.linkFlowPrev[link] / cap);
-              colour = load < 0.25 ? SEMANTIC.free
-                : load < 0.55 ? SEMANTIC.busy
-                : load < 0.8 ? SEMANTIC.congested
-                : SEMANTIC.jammed;
-            } else colour = [0.22, 0.23, 0.25];
-          } else {
-            // Condition darkens a way, so decay is visible in the world and
-            // not only in a panel (§6).
-            const asset = src.wayAsset[mode][tile];
-            if (asset >= 0) {
-              const k = 0.55 + (src.assetCondition[asset] / 255) * 0.45;
-              colour = [colour[0] * k, colour[1] * k, colour[2] * k];
-            }
-          }
-          // A hub and an arm to each connected edge, all flat. The hub is
-          // what makes a junction read as a junction from above, which is the
-          // thing the player is actually reading the map for.
-          const half = 0.20;
-          const flags = wayFlags[tile];
-          const tunnel = (flags & 8) !== 0;
-          const bridge = (flags & 4) !== 0;
-
-          if (!tunnel) {
-            const d = dir[tile];
-            if (mode === 1) {
-              // Rail: a ballast bed with sleepers across it. Two marks rather
-              // than one, because a railway drawn as a coloured band is a road
-              // in a different colour, and at playing zoom the sleeper rhythm
-              // is what actually says "railway" from above.
-              const ballast: RGB = [colour[0] * 1.25, colour[1] * 1.2, colour[2] * 1.1];
-              const railHead: RGB = [colour[0] * 0.55, colour[1] * 0.56, colour[2] * 0.6];
-              m.flat(x + 0.5, yy, y + 0.5, 0.17, 0.17, ballast);
-              for (let k = 0; k < 4; k++) {
-                if ((d & (1 << k)) === 0) continue;
-                arm(wayLevel, x, y, yy, k, 0.17, 0, ballast);
-                // Two rails, set in from the ballast edge, riding the same
-                // slope as the ballast under them.
-                const outer = edgeY(wayLevel, x, y, yy, k) + 0.006;
-                const inner = yy + 0.006;
-                const cx2 = x + 0.5;
-                const cz2 = y + 0.5;
-                for (const off of [-0.075, 0.075]) {
-                  if (DIRDX[k] !== 0) {
-                    const xo = cx2 + DIRDX[k] * 0.5;
-                    m.quad(
-                      cx2, inner, cz2 + off - 0.018, xo, outer, cz2 + off - 0.018,
-                      xo, outer, cz2 + off + 0.018, cx2, inner, cz2 + off + 0.018,
-                      railHead,
-                    );
-                  } else {
-                    const zo = cz2 + DIRDY[k] * 0.5;
-                    m.quad(
-                      cx2 + off - 0.018, inner, cz2, cx2 + off + 0.018, inner, cz2,
-                      cx2 + off + 0.018, outer, zo, cx2 + off - 0.018, outer, zo,
-                      railHead,
-                    );
-                  }
-                }
-              }
-            } else {
-              m.flat(x + 0.5, yy, y + 0.5, half, half, colour);
-              for (let k = 0; k < 4; k++) {
-                if ((d & (1 << k)) === 0) continue;
-                arm(wayLevel, x, y, yy, k, half, 0, colour);
-              }
-            }
-          }
-
-          // Earthworks and structure. art-direction.md §11: an embankment, a
-          // cutting, a tunnel mouth and a viaduct are the most characterful
-          // things in a transport game and should read clearly from above.
-          const drop = yy - groundY;
-          if (bridge && drop > 0.02) {
-            // Piers rather than a solid wall, so a viaduct reads as a viaduct.
-            const pierColour: RGB = [colour[0] * 0.55, colour[1] * 0.55, colour[2] * 0.55];
-            m.box(x + 0.5, yy - drop / 2, y + 0.5, 0.075, drop / 2, 0.075, 0.02, pierColour);
-            m.box(x + 0.5, yy - 0.012, y + 0.5, half + 0.03, 0.022, half + 0.03, 0.015,
-              pierColour, [colour[0] * 0.8, colour[1] * 0.8, colour[2] * 0.8]);
-          } else if ((flags & 1) !== 0 && drop > 0.01) {
-            // Embankment: a batter on each side, tapering to the ground.
-            const soil: RGB = [0.30, 0.27, 0.21];
-            const soilTop: RGB = [0.38, 0.35, 0.28];
-            m.box(x + 0.5, yy - drop / 2, y + 0.5, half + drop * 0.55, drop / 2, half + drop * 0.55,
-              0.02, soil, soilTop);
-          } else if ((flags & 2) !== 0 && drop < -0.01) {
-            // Cutting: the spoil faces stand above the formation.
-            const rockFace: RGB = [0.34, 0.32, 0.29];
-            const lip = -drop;
-            m.box(x + 0.5, yy + lip / 2, y + 0.5, half + lip * 0.5, lip / 2, half + lip * 0.5,
-              0.02, rockFace, [0.40, 0.38, 0.34]);
-            m.flat(x + 0.5, yy + 0.002, y + 0.5, half, half, colour);
-          } else if (tunnel) {
-            // Only the mouth is visible: a dark portal where the way enters.
-            const portal: RGB = [0.10, 0.10, 0.11];
-            const d = dir[tile];
-            for (let k = 0; k < 4; k++) {
-              if ((d & (1 << k)) === 0) continue;
-              const nx = x + DIRDX[k];
-              const ny = y + DIRDY[k];
-              if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
-              if ((wayFlags[ny * size + nx] & 8) !== 0) continue;
-              m.box(x + 0.5 + DIRDX[k] * 0.35, yy + 0.10, y + 0.5 + DIRDY[k] * 0.35,
-                DIRDX[k] !== 0 ? 0.08 : 0.24, 0.11, DIRDY[k] !== 0 ? 0.08 : 0.24, 0.02,
-                portal, [0.22, 0.22, 0.23]);
-            }
-          }
-        }
-      }
-    }
-    if (m.isEmpty()) return null;
-    const mesh = new ThreeMesh(m.build(), this.material);
-    mesh.frustumCulled = true;
-    return mesh;
-  }
-
-  /** Vegetation massing and other scatter, per chunk. */
-  private buildPropChunk(src: RenderSource, cx: number, cy: number): ThreeMesh | null {
-    const size = src.size;
-    const x0 = cx * CHUNK;
-    const y0 = cy * CHUNK;
-    const x1 = Math.min(size, x0 + CHUNK);
-    const y1 = Math.min(size, y0 + CHUNK);
-    if (this.overlay !== OverlayMode.None) return null;
-    const m = new Mesh(CHUNK * CHUNK * 8);
-    // One clump per four tiles of woodland, positioned by a hash so it is
-    // stable across rebuilds.
-    for (let y = y0; y < y1; y += 2) {
-      for (let x = x0; x < x1; x += 2) {
-        const tile = y * size + x;
-        if (src.biome[tile] !== 6) continue;
-        const h = (Math.imul(x, 0x27d4eb2d) ^ Math.imul(y, 0x85ebca6b)) >>> 0;
-        if ((h & 3) !== 0) continue;
-        m.append(
-          buildTreeClump(h),
-          x + 0.5 + ((h >> 8) & 15) / 16,
-          HEIGHT_TO_WORLD(src.height[tile]),
-          y + 0.5 + ((h >> 12) & 15) / 16,
-        );
-      }
-    }
-    if (m.isEmpty()) return null;
-    const mesh = new ThreeMesh(m.build(), this.material);
-    mesh.frustumCulled = true;
-    return mesh;
-  }
-
-  // --------------------------------------------------------------- update
-
-  /**
-   * Stream chunks around the camera.
-   *
-   * Chunked meshing and streaming are required from early on rather than
-   * later (D6's stated cost), because a thousand-tile region is a hundred
-   * thousand quads and no amount of frustum culling saves you from having
-   * built them all.
-   */
-  /** Tiles the camera can currently see, with a margin, for anything drawn
-   *  per tile. The same reach the chunk streamer uses. */
-  private visibleTileBounds(src: RenderSource): { x0: number; y0: number; x1: number; y1: number } {
-    const c = this.camState;
-    const reachY = (c.view * 0.5) / Math.sin((c.elevation * Math.PI) / 180) + 4;
-    const reachX = c.view * 0.5 * (this.camera.right / this.camera.top) + 4;
-    const reach = Math.max(reachX, reachY);
-    return {
-      x0: Math.max(0, Math.floor(c.x - reach)),
-      y0: Math.max(0, Math.floor(c.z - reach)),
-      x1: Math.min(src.size, Math.ceil(c.x + reach)),
-      y1: Math.min(src.size, Math.ceil(c.z + reach)),
-    };
-  }
-
-  private streamChunks(src: RenderSource): void {
-    const t0 = performance.now();
-    this.cols = Math.ceil(src.size / CHUNK);
-    const c = this.camState;
-    // Enough margin that a rotation does not reveal a hole. The along-axis
-    // extent is the one that catches people out: at 35 degrees the view is
-    // 1/sin(35) ≈ 1.75 times deeper than it is tall.
-    const reachY = c.view * 0.5 / Math.sin((c.elevation * Math.PI) / 180) + CHUNK;
-    const reachX = c.view * 0.5 * (this.camera.right / this.camera.top) + CHUNK;
-    const reach = Math.max(reachX, reachY);
-    const minCx = Math.max(0, Math.floor((c.x - reach) / CHUNK));
-    const maxCx = Math.min(this.cols - 1, Math.floor((c.x + reach) / CHUNK));
-    const minCy = Math.max(0, Math.floor((c.z - reach) / CHUNK));
-    const maxCy = Math.min(this.cols - 1, Math.floor((c.z + reach) / CHUNK));
-
-    // A frame stamp rather than a Set of wanted keys. Allocating a Set and a
-    // hundred and fifty entries every frame is a few thousand short-lived
-    // objects a second, which is enough to schedule a collection roughly every
-    // twenty frames and put a sixty-millisecond stall in a seven-millisecond
-    // frame. None of the individual allocations look like a problem.
-    const frame = ++this.frameCounter;
-    let wantedCount = 0;
-    let built = 0;
-    // A time budget rather than a chunk count. The first frame has to deliver
-    // the whole visible region — a world that fades in over a second reads as
-    // broken — while later frames must never stall, because by then the player
-    // is panning and a hitch is a hitch.
-    const budgetMs = this.chunks.size === 0 ? 400 : 6;
-    for (let cy = minCy; cy <= maxCy; cy++) {
-      for (let cx = minCx; cx <= maxCx; cx++) {
-        const key = cy * this.cols + cx;
-        wantedCount++;
-        let chunk = this.chunks.get(key);
-        if (!chunk) {
-          if (built > 0 && performance.now() - t0 > budgetMs) continue;
-          built++;
-          this.stats.chunksBuilt++;
-          const terrain = this.buildTerrainChunk(src, cx, cy);
-          this.scene.add(terrain);
-          chunk = {
-            terrain,
-            ways: null,
-            props: null,
-            overlayVersion: this.overlayVersion,
-            wayVersion: -1,
-            seen: frame,
-          };
-          this.chunks.set(key, chunk);
-        }
-        chunk.seen = frame;
-        if (chunk.overlayVersion !== this.overlayVersion) {
-          this.scene.remove(chunk.terrain);
-          chunk.terrain.geometry.dispose();
-          chunk.terrain = this.buildTerrainChunk(src, cx, cy);
-          this.scene.add(chunk.terrain);
-          chunk.overlayVersion = this.overlayVersion;
-          chunk.wayVersion = -1;
-          if (chunk.props) {
-            this.scene.remove(chunk.props);
-            chunk.props.geometry.dispose();
-            chunk.props = null;
-          }
-          chunk.props = this.buildPropChunk(src, cx, cy);
-          if (chunk.props) this.scene.add(chunk.props);
-        }
-        if (chunk.wayVersion !== this.wayVersion) {
-          if (chunk.ways) {
-            this.scene.remove(chunk.ways);
-            chunk.ways.geometry.dispose();
-          }
-          chunk.ways = this.buildWayChunk(src, cx, cy);
-          if (chunk.ways) this.scene.add(chunk.ways);
-          chunk.wayVersion = this.wayVersion;
-          if (!chunk.props) {
-            chunk.props = this.buildPropChunk(src, cx, cy);
-            if (chunk.props) this.scene.add(chunk.props);
-          }
-        }
-      }
-    }
-
-    // Evict what has left the view, so a long pan does not accumulate the
-    // whole region in memory.
-    if (this.chunks.size > wantedCount + 64) {
-      for (const [key, chunk] of this.chunks) {
-        if (chunk.seen === frame) continue;
-        this.scene.remove(chunk.terrain);
-        chunk.terrain.geometry.dispose();
-        if (chunk.ways) {
-          this.scene.remove(chunk.ways);
-          chunk.ways.geometry.dispose();
-        }
-        if (chunk.props) {
-          this.scene.remove(chunk.props);
-          chunk.props.geometry.dispose();
-        }
-        this.chunks.delete(key);
-      }
-    }
-    this.stats.chunks = this.chunks.size;
-    this.stats.buildMs = performance.now() - t0;
-  }
-
-  private ensureSea(src: RenderSource): void {
-    if (this.sea) return;
-    const m = new Mesh();
-    const s = src.size;
-    // One quad. Water is the one large saturated field and it anchors the
-    // composition, so it gets the strongest colour in the palette and no
-    // detail whatsoever.
-    // Only a backdrop now: inside the region the sea is part of the terrain
-    // surface, so there are not two coincident planes to fight over the depth
-    // buffer along every coastline.
-    m.quad(-s * 2, -0.4, -s * 2, s * 3, -0.4, -s * 2, s * 3, -0.4, s * 3, -s * 2, -0.4, s * 3, LAND.oceanDeep);
-    const mesh = new ThreeMesh(m.build(), this.material);
-    mesh.frustumCulled = false;
-    mesh.renderOrder = -1;
-    this.scene.add(mesh);
-    this.sea = mesh;
-  }
-
-  private ensureSites(src: RenderSource): void {
-    for (let s = 0; s < src.siteCount; s++) {
-      const state = Math.min(2, src.sState[s] === 3 ? 2 : src.sState[s]);
-      const key = s * 4 + state;
-      if (this.siteMeshes.has(s) && this.siteMeshes.get(s)!.userData.key === key) continue;
-      const old = this.siteMeshes.get(s);
-      if (old) {
-        this.scene.remove(old);
-        old.geometry.dispose();
-      }
-      const kit = src.industryKitOf(src.sDef[s]);
-      const foot = src.industryFootprintOf(src.sDef[s]);
-      this.stats.sitesBuilt++;
-      const built = buildIndustry(kit, state, s * 2654435761, foot);
-      const mesh = new ThreeMesh(built.build(), this.material);
-      const x = src.sX[s];
-      const y = src.sY[s];
-      mesh.position.set(x + 0.5, HEIGHT_TO_WORLD(Math.max(0, src.height[y * src.size + x])), y + 0.5);
-      mesh.userData.key = key;
-      mesh.frustumCulled = true;
-      this.scene.add(mesh);
-      this.siteMeshes.set(s, mesh);
-    }
-  }
-
-  /**
-   * Hand the renderer the pipeline's models. Called once, when they load.
-   *
-   * Bumping the version invalidates every town mesh, so the swap from
-   * generated geometry to authored models happens on the next frame rather
-   * than gradually as towns happen to grow.
-   */
-  useKit(kit: Map<string, BufferGeometry>): void {
-    this.kit = kit;
-    this.kitVersion++;
-  }
-
-  private ensureTowns(src: RenderSource, night: boolean): void {
-    for (let t = 0; t < src.townCount; t++) {
-      // Rebuild in population bands, so a town visibly grows without
-      // regenerating its geometry every time somebody moves in.
-      const band = Math.floor(Math.sqrt(src.tPopulation[t]) / 4);
-      const key = band * 4 + (night ? 1 : 0) + src.era * 64 + this.kitVersion * 4096;
-      const existing = this.townMeshes.get(t);
-      if (existing && existing.userData.key === key) continue;
-      if (existing) {
-        this.scene.remove(existing);
-        existing.geometry.dispose();
-      }
-      this.stats.townsBuilt++;
-
-      /*
-       * The authored kit if it is here, and the generated fallback if not.
-       *
-       * The two are not interchangeable in look — the kit has pitched roofs,
-       * chimneys and hipped villas that no amount of stacking boxes was going
-       * to produce — but they are interchangeable in *interface*, which is
-       * what lets the library be converted one kit at a time instead of in one
-       * irreversible commit.
-       */
-      let geometry: BufferGeometry | null = null;
-      if (this.kit) {
-        const places = layOutTown(t * 40503 + 7, buildingCount(src.tPopulation[t]), src.era);
-        geometry = mergeTown(places, this.kit);
-      }
-      if (!geometry) {
-        geometry = buildTownBlock(t * 40503 + 7, band + 3, src.era, night).build();
-      }
-
-      const mesh = new ThreeMesh(geometry, this.material);
-      const x = src.tX[t];
-      const y = src.tY[t];
-      mesh.position.set(x + 0.5, HEIGHT_TO_WORLD(Math.max(0, src.height[y * src.size + x])), y + 0.5);
-      // The generated block was authored at a nominal size and scaled by band;
-      // the kit is authored at true scale and must not be.
-      mesh.scale.setScalar(this.kit ? 1 : 1 + band * 0.16);
-      mesh.userData.key = key;
-      this.scene.add(mesh);
-      this.townMeshes.set(t, mesh);
-    }
-  }
-
-  // ------------------------------------------------------------- vehicles
-
-  /**
-   * How many screen pixels one tile occupies. The LOD switch is on this rather
-   * than on the zoom number, because the same zoom on a phone and on a
-   * thirty-inch monitor are different pictures.
-   */
-  private pixelsPerTile(): number {
-    const h = this.renderer.domElement.height || 1000;
-    return h / Math.max(1, this.camState.view);
-  }
-
-  private batchFor(src: RenderSource, type: number, capacity: number): VehicleBatch {
-    // Far LOD is a separate authored silhouette, not a decimation (art §7), and
-    // it takes over well before the vehicle is unrecognisable: at twenty-five
-    // pixels a tile a lorry is about six pixels long, and the near model is
-    // spending five hundred triangles on chamfers and headlamps to describe it.
-    const far = this.pixelsPerTile() < 25;
-    let batch = this.vehicleBatches.get(type);
-    if (batch && batch.far === far && batch.mesh.instanceMatrix.count >= capacity) return batch;
-
-    if (batch) {
-      this.scene.remove(batch.mesh);
-      batch.mesh.geometry.dispose();
-      batch.mesh.dispose();
-    }
-    this.stats.batchesBuilt++;
-    const built = buildVehicle({
-      cls: src.vehicleClassOf(type),
-      era: src.vehicleEraOf(type),
-      livery: LIVERIES[1],
-      far,
-    });
-    // Rounded up in powers of two, so a growing fleet reallocates a handful of
-    // times over a whole game rather than every time somebody buys a lorry.
-    let size = 512;
-    while (size < capacity) size *= 2;
-    const mesh = new InstancedMesh(built.build(), this.material, size);
-    mesh.frustumCulled = false;
-    mesh.count = 0;
-    this.scene.add(mesh);
-    batch = { mesh, count: 0, far };
-    this.vehicleBatches.set(type, batch);
-    return batch;
-  }
-
-  private tmpMatrix = new Matrix4();
-  private tmpQuat = new Quaternion();
-  private tmpPos = new Vector3();
-  private tmpScale = new Vector3(1, 1, 1);
-  private tmpColour = new Color();
-
-  private updateVehicles(src: RenderSource, alpha: number): void {
-    for (const b of this.vehicleBatches.values()) b.count = 0;
-
-    // One pass to size the batches, so a fleet that has grown does not spend
-    // the frame silently dropping everything past the old capacity.
-    this.typeCounts.fill(0);
-    for (let id = 0; id < src.vehicleCount; id++) {
-      if (src.vAlive[id]) this.typeCounts[src.vType[id]]++;
-    }
-
-    if (this.prevX.length < src.vehicleCount) {
-      const n = Math.max(1024, src.vehicleCount * 2);
-      const px = new Int32Array(n);
-      const py = new Int32Array(n);
-      const ph = new Int32Array(n);
-      px.set(this.prevX);
-      py.set(this.prevY);
-      ph.set(this.prevHeading);
-      this.prevX = px;
-      this.prevY = py;
-      this.prevHeading = ph;
-    }
-
-    const c = this.camState;
-    // Cull generously in tile space rather than by frustum: at twenty-five
-    // thousand instances the matrix write is the cost, not the draw.
-    const reach = c.view * 1.2 + 40;
-    let drawn = 0;
-
-    for (let id = 0; id < src.vehicleCount; id++) {
-      if (!src.vAlive[id]) continue;
-      const tx = src.vX[id] / 65536;
-      const ty = src.vY[id] / 65536;
-      if (Math.abs(tx - c.x) > reach || Math.abs(ty - c.z) > reach) {
-        this.prevX[id] = src.vX[id];
-        this.prevY[id] = src.vY[id];
-        this.prevHeading[id] = src.vHeading[id];
-        continue;
-      }
-
-      // Interpolate between the last two ticks. A dropped frame never affects
-      // the world; it only shows the same tick twice.
-      const px = this.havePrev ? this.prevX[id] / 65536 : tx;
-      const py = this.havePrev ? this.prevY[id] / 65536 : ty;
-      let x = px + (tx - px) * alpha;
-      let y = py + (ty - py) * alpha;
-      if (Math.abs(tx - px) > 4 || Math.abs(ty - py) > 4) {
-        // Teleported — a rebuild moved it. Snap rather than sliding across
-        // the map over one frame.
-        x = tx;
-        y = ty;
-      }
-
-      const batch = this.batchFor(src, src.vType[id], this.typeCounts[src.vType[id]]);
-      if (batch.count >= batch.mesh.instanceMatrix.count) continue;
-
-      const heading = src.vHeading[id];
-      const prevH = this.havePrev ? this.prevHeading[id] : heading;
-      let dh = heading - prevH;
-      if (dh > 2048) dh -= 4096;
-      if (dh < -2048) dh += 4096;
-      const angle = ((prevH + dh * alpha) / 4096) * Math.PI * 2;
-
-      /*
-       * Ride the formation, not the ground under it.
-       *
-       * A vehicle placed at terrain height is buried to the axles wherever the
-       * way is on an embankment and floating wherever it is in a cutting —
-       * which is every interesting piece of railway in the region. The way's
-       * own level is what it is running on, so that is what it stands on.
-       */
-      const vTile = Math.min(src.size * src.size - 1, (Math.round(y) * src.size + Math.round(x)) | 0);
-      const vMode = src.vehicleMode[src.vType[id]] ?? 0;
-      const vLevel = src.wayLevel[vMode]?.[vTile] ?? 0;
-      const groundH = vLevel !== 0
-        ? HEIGHT_TO_WORLD(vLevel)
-        : HEIGHT_TO_WORLD(Math.max(0, src.height[vTile] ?? 0));
-      this.tmpPos.set(x, groundH + 0.06, y);
-      // Models point along +Z; heading 0 is north, which is -Z.
-      this.tmpQuat.setFromAxisAngle(UP, -angle + Math.PI);
-      this.tmpMatrix.compose(this.tmpPos, this.tmpQuat, this.tmpScale);
-      batch.mesh.setMatrixAt(batch.count, this.tmpMatrix);
-
-      const livery = LIVERIES[src.vCompany[id] % LIVERIES.length];
-      if (this.overlay === OverlayMode.Ownership) {
-        const owner = src.vCompany[id];
-        const s = owner === src.player ? SEMANTIC.owned : owner === 0 ? SEMANTIC.public : SEMANTIC.rival;
-        this.tmpColour.setRGB(s[0] * 2.2, s[1] * 2.2, s[2] * 2.2);
-      } else if (id === this.selectedVehicle) {
-        this.tmpColour.setRGB(2.4, 2.3, 2.0);
-      } else {
-        // The instance colour multiplies the model's own, so a livery tints
-        // the painted panels and leaves iron and glass alone.
-        this.tmpColour.setRGB(
-          (livery.colour[0] / 0.4) * 0.85 + 0.3,
-          (livery.colour[1] / 0.4) * 0.85 + 0.3,
-          (livery.colour[2] / 0.4) * 0.85 + 0.3,
-        );
-      }
-      batch.mesh.setColorAt(batch.count, this.tmpColour);
-      batch.count++;
-      drawn++;
-
-      this.prevX[id] = src.vX[id];
-      this.prevY[id] = src.vY[id];
-      this.prevHeading[id] = src.vHeading[id];
-    }
-
-    for (const b of this.vehicleBatches.values()) {
-      b.mesh.count = b.count;
-      // Upload only the range actually written. The buffer is sized for the
-      // whole fleet — thirty-two thousand instances is two megabytes of
-      // matrices — and re-uploading all of it every frame to move six thousand
-      // vehicles is what put a three-hundred-millisecond stall in the frame
-      // time distribution while the median sat at seven.
-      const matrix = b.mesh.instanceMatrix;
-      matrix.clearUpdateRanges();
-      if (b.count > 0) matrix.addUpdateRange(0, b.count * 16);
-      matrix.needsUpdate = true;
-      const colour = b.mesh.instanceColor;
-      if (colour) {
-        colour.clearUpdateRanges();
-        if (b.count > 0) colour.addUpdateRange(0, b.count * 3);
-        colour.needsUpdate = true;
-      }
-    }
-    this.stats.instances = drawn;
-    this.havePrev = true;
-  }
-
-  /** Call once per simulation tick, before the next frame's interpolation. */
-  markTick(): void {
-    // Positions were copied into prev during the last update, which is what
-    // makes alpha meaningful. Nothing else to do; the hook exists so the host
-    // does not have to know that.
-  }
-
-  // ---------------------------------------------------------------- frame
-
-  render(src: RenderSource, alpha: number): void {
-    this.stats.chunksBuilt = 0;
-    this.stats.sitesBuilt = 0;
-    this.stats.townsBuilt = 0;
-    this.stats.batchesBuilt = 0;
-    this.ensureSea(src);
-    this.streamChunks(src);
-    const tSites = performance.now();
-    this.ensureSites(src);
-    this.stats.sitesMs = performance.now() - tSites;
-    const light = lightingForTime(src.dayFraction, src.season, this.light);
-    const tTowns = performance.now();
-    this.ensureTowns(src, light.night > 0.35);
-    this.stats.townsMs = performance.now() - tTowns;
-    // The camera stands CAMERA_DISTANCE back from its target, so that is the
-    // depth the aerial perspective is measured from.
-    applyLighting(this.material, light, CAMERA_DISTANCE);
-    (this.scene.background as Color).setRGB(
-      light.fogColour.r * 0.8,
-      light.fogColour.g * 0.8,
-      light.fogColour.b * 0.85,
+  private placeCamera(): void {
+    const el = (38 * Math.PI) / 180;
+    const az = (-32 * Math.PI) / 180;
+    const d = 120;
+    const target = new Vector3(this.camX, 0, this.camZ);
+    this.camera.position.set(
+      target.x + Math.sin(az) * Math.cos(el) * d,
+      target.y + Math.sin(el) * d,
+      target.z - Math.cos(az) * Math.cos(el) * d,
     );
-    const tVeh = performance.now();
-    this.updateVehicles(src, alpha);
-    this.updateTraffic(src);
-    this.stats.vehiclesMs = performance.now() - tVeh;
-    this.updateCamera(this.camera.right / this.camera.top);
-    const tDraw = performance.now();
-    this.renderer.render(this.scene, this.camera);
-    this.stats.drawMs = performance.now() - tDraw;
-    const info = this.renderer.info.render;
-    this.stats.drawCalls = info.calls;
-    this.stats.triangles = info.triangles;
+    this.camera.lookAt(target);
   }
 
   /**
-   * Private cars on the roads, from era four.
+   * Point the sun, and move its shadow camera to where the player is looking.
    *
-   * None of this is in the simulation and none of it may be: adding a
-   * thousand cars to the world would be a thousand more things to path, and
-   * the game would be modelling commuting rather than the transport business
-   * that is its subject. What the simulation has is the *number* — transit.ts
-   * takes a growing share of every town's travel away from the operators from
-   * era four onward — and what was missing was any sight of it.
-   *
-   * So these are drawn straight off the road layer with no state at all. A car
-   * is a road tile plus an offset that advances with the clock; which tiles
-   * get one is decided by a hash of the tile index against a threshold from
-   * the era. That makes them free, deterministic per tile, and impossible to
-   * desync — two clients watching the same region see the same traffic without
-   * a byte crossing between them.
+   * A shadow camera large enough for a whole district would waste almost all of
+   * its resolution on ground nobody can see. Following the view keeps the map
+   * tight around what is on screen, which is how a 2048 map produces sharp
+   * shadows over a 26-tile frame.
    */
-  private updateTraffic(src: RenderSource): void {
-    const era = src.era;
-    // The same ceiling transit.ts uses, so what is on the roads and what the
-    // operators lost are visibly the same fact.
-    const density = era < 4 ? 0 : Math.min(0.55, 0.10 + (era - 4) * 0.11);
-    if (density <= 0) {
-      if (this.traffic) this.traffic.count = 0;
-      if (this.traffic) this.traffic.mesh.count = 0;
-      return;
-    }
-    if (!this.traffic) {
-      const built = buildCar(7);
-      const mesh = new InstancedMesh(built.build(), this.material, TRAFFIC_MAX);
-      mesh.frustumCulled = false;
-      mesh.instanceColor = new InstancedBufferAttribute(new Float32Array(TRAFFIC_MAX * 3), 3);
-      this.scene.add(mesh);
-      this.traffic = { mesh, count: 0 };
-    }
-    const t = this.traffic;
-    t.count = 0;
+  private placeSun(dayFraction: number): void {
+    // Late afternoon at the reference, swinging through the day but never
+    // straight overhead — a high sun kills every shadow and the shadows are
+    // the point.
+    const t = dayFraction;
+    const angle = (t - 0.25) * Math.PI * 2;
+    const elevation = Math.max(0.28, Math.sin(angle) * 0.75 + 0.30);
+    const azimuth = 0.7 + t * 1.6;
+    const d = 70;
+    this.sun.target.position.set(this.camX, 0, this.camZ);
+    this.sun.position.set(
+      this.camX + Math.cos(azimuth) * d * (1 - elevation * 0.5),
+      elevation * d,
+      this.camZ + Math.sin(azimuth) * d * (1 - elevation * 0.5),
+    );
+    const c = this.sun.shadow.camera;
+    const reach = this.tilesAcross * 0.9;
+    c.left = -reach;
+    c.right = reach;
+    c.top = reach;
+    c.bottom = -reach;
+    c.updateProjectionMatrix();
 
-    const size = src.size;
-    const road = src.wayLink[0];
-    const level = src.wayLevel[0];
-    const dirs = src.wayDir[0];
-    if (!road || !dirs) { t.mesh.count = 0; return; }
+    // Warm and strong when low, cooler and softer at noon.
+    const warm = 1 - elevation * 0.4;
+    this.sun.color.setRGB(
+      SKY.sun[0], SKY.sun[1] * (0.94 + warm * 0.06), SKY.sun[2] * (0.82 + warm * 0.18),
+    );
+    this.sun.intensity = 1.7 + elevation * 0.7;
+    this.fill.intensity = 1.15 + (1 - elevation) * 0.35;
+  }
 
-    // Only what is on screen, and only while the camera is close enough for a
-    // car to be more than a pixel: this is atmosphere and must never be the
-    // thing that costs the frame.
-    if (this.pixelsPerTile() < 22) { t.mesh.count = 0; return; }
-    const view = this.visibleTileBounds(src);
-    const phase = (performance.now() / 1000) % 1000;
+  /** Stream the chunks around the camera, building what has come into view. */
+  private streamChunks(src: RenderSource): void {
+    this.cols = Math.ceil(src.size / CHUNK);
+    const reach = this.tilesAcross * 1.1 + CHUNK;
+    const minX = Math.max(0, Math.floor((this.camX - reach) / CHUNK));
+    const maxX = Math.min(this.cols - 1, Math.floor((this.camX + reach) / CHUNK));
+    const minZ = Math.max(0, Math.floor((this.camZ - reach) / CHUNK));
+    const maxZ = Math.min(this.cols - 1, Math.floor((this.camZ + reach) / CHUNK));
+    const frame = ++this.frame;
 
-    for (let y = view.y0; y < view.y1 && t.count < TRAFFIC_MAX; y++) {
-      for (let x = view.x0; x < view.x1 && t.count < TRAFFIC_MAX; x++) {
-        const tile = y * size + x;
-        if (road[tile] < 0) continue;
-        const d = dirs[tile];
-        if (d === 0) continue;
-        // A stable hash of the tile decides whether this bit of road is busy,
-        // so traffic stays put as the camera moves instead of boiling.
-        const h = (Math.imul(tile, 2654435761) >>> 8) / 0x1000000;
-        if (h > density) continue;
-        // Which way it is going: the first direction this tile connects.
-        let k = 0;
-        for (let i = 0; i < 4; i++) if ((d & (1 << i)) !== 0) { k = i; break; }
-        // Along the tile, looping. Two cars per busy tile, half a tile apart,
-        // so a road reads as a stream rather than as dots.
-        const speed = 0.22 + (h * 7 % 1) * 0.16;
-        for (let lane = 0; lane < 2; lane++) {
-          if (t.count >= TRAFFIC_MAX) break;
-          const along = ((phase * speed + h * 13 + lane * 0.5) % 1) - 0.5;
-          const side = lane === 0 ? 0.075 : -0.075;
-          const cx = x + 0.5 + DIRDX[k] * along + (DIRDX[k] !== 0 ? 0 : side);
-          const cz = y + 0.5 + DIRDY[k] * along + (DIRDY[k] !== 0 ? 0 : side);
-          const yy = level && level[tile] !== 0
-            ? HEIGHT_TO_WORLD(level[tile])
-            : HEIGHT_TO_WORLD(Math.max(0, src.height[tile]));
-          this.tmpPos.set(cx, yy + 0.06, cz);
-          // Cars on one side go the other way, which is what makes it traffic.
-          const facing = DIRDX[k] !== 0
-            ? (lane === 0 ? Math.PI / 2 : -Math.PI / 2)
-            : (lane === 0 ? 0 : Math.PI);
-          this.tmpQuat.setFromAxisAngle(UP, facing);
-          this.tmpMatrix.compose(this.tmpPos, this.tmpQuat, this.tmpScale);
-          t.mesh.setMatrixAt(t.count, this.tmpMatrix);
-          t.mesh.instanceColor?.setXYZ(t.count, 1, 1, 1);
-          t.count++;
+    // A time budget rather than a chunk count: the first frame has to deliver
+    // the whole visible district, because a world that fades in reads as
+    // broken, and later frames must never stall.
+    const t0 = performance.now();
+    const budget = this.chunks.size === 0 ? 500 : 6;
+
+    for (let cz = minZ; cz <= maxZ; cz++) {
+      for (let cx = minX; cx <= maxX; cx++) {
+        const key = cz * this.cols + cx;
+        const have = this.chunks.get(key);
+        if (have) {
+          have.seen = frame;
+          continue;
         }
+        if (performance.now() - t0 > budget) continue;
+        const x0 = cx * CHUNK;
+        const z0 = cz * CHUNK;
+        const x1 = Math.min(src.size, x0 + CHUNK);
+        const z1 = Math.min(src.size, z0 + CHUNK);
+
+        const ground = toMesh(buildGround(src, x0, z0, x1, z1), this.material);
+        this.scene.add(ground);
+        const roadMesh = buildRoads(src, x0, z0, x1, z1);
+        let roads: Chunk['roads'] = null;
+        if (!roadMesh.isEmpty()) {
+          roads = toMesh(roadMesh, this.material);
+          // A road receives shadow and does not cast one. A flat surface
+          // casting onto itself is shadow acne and nothing else.
+          roads.castShadow = false;
+          this.scene.add(roads);
+        }
+        this.chunks.set(key, { ground, roads, seen: frame });
       }
     }
-    t.mesh.count = t.count;
-    t.mesh.instanceMatrix.needsUpdate = true;
-    if (t.mesh.instanceColor) t.mesh.instanceColor.needsUpdate = true;
-  }
 
-  // --------------------------------------------------------------- picking
-
-  /** Tile under a screen point, by intersecting the ground plane. Height is
-   *  resolved by stepping down the ray, which is cheap and exact enough. */
-  pickTile(src: RenderSource, ndcX: number, ndcY: number): number {
-    const origin = new Vector3(ndcX, ndcY, -1).unproject(this.camera);
-    const dir = new Vector3(0, 0, -1).transformDirection(this.camera.matrixWorld).normalize();
-    let t = 0;
-    let last = -1;
-    for (let i = 0; i < 4000; i++) {
-      const p = origin.clone().addScaledVector(dir, t);
-      const x = Math.floor(p.x);
-      const y = Math.floor(p.z);
-      if (x >= 0 && y >= 0 && x < src.size && y < src.size) {
-        const h = HEIGHT_TO_WORLD(Math.max(0, src.height[y * src.size + x]));
-        if (p.y <= h + 0.05) return y * src.size + x;
-        last = y * src.size + x;
+    // Drop what has gone out of view.
+    for (const [key, chunk] of [...this.chunks]) {
+      if (chunk.seen === frame) continue;
+      this.scene.remove(chunk.ground);
+      chunk.ground.geometry.dispose();
+      if (chunk.roads) {
+        this.scene.remove(chunk.roads);
+        chunk.roads.geometry.dispose();
       }
-      t += 0.5;
-      if (t > 4000) break;
+      this.chunks.delete(key);
     }
-    return last;
   }
 
-  /** Nearest vehicle to a screen point, within a pixel radius. Cheaper and
-   *  far more forgiving than raycasting twenty-five thousand instances. */
-  pickVehicle(src: RenderSource, ndcX: number, ndcY: number, radiusNdc = 0.03): number {
-    let best = -1;
-    let bestD = radiusNdc * radiusNdc;
-    const v = new Vector3();
-    for (let id = 0; id < src.vehicleCount; id++) {
-      if (!src.vAlive[id]) continue;
-      const x = src.vX[id] / 65536;
-      const y = src.vY[id] / 65536;
-      if (Math.abs(x - this.camState.x) > this.camState.view || Math.abs(y - this.camState.z) > this.camState.view * 1.6) continue;
-      v.set(x, HEIGHT_TO_WORLD(Math.max(0, src.height[Math.round(y) * src.size + Math.round(x)] ?? 0)) + 0.1, y);
-      v.project(this.camera);
-      const dx = v.x - ndcX;
-      const dy = v.y - ndcY;
-      const d = dx * dx + dy * dy;
-      if (d < bestD) {
-        bestD = d;
-        best = id;
+  /** Hand the renderer the vehicle model, once it has loaded. */
+  setVehicleModel(geometry: BufferGeometry, capacity = 256): void {
+    for (const b of this.batches) {
+      if (b) {
+        this.fleet.remove(b);
+        b.dispose();
       }
     }
-    return best;
+    this.batches = LIVERY.map((liv) => {
+      const mat = new MeshLambertMaterial({ vertexColors: true });
+      const mesh = new InstancedMesh(geometry, mat, capacity);
+      mesh.castShadow = true;
+      mesh.receiveShadow = false;
+      mesh.frustumCulled = false;
+      mesh.count = 0;
+      // The livery tints the whole instance. The models reserve a slot for it,
+      // but a lorry that is entirely its company's colour reads better at forty
+      // pixels than one with a stripe on it.
+      void liv;
+      this.fleet.add(mesh);
+      return mesh;
+    });
   }
 
-  /** Screen position of a world tile, for DOM overlay labels. */
-  project(src: RenderSource, tileX: number, tileY: number): { x: number; y: number } {
-    const h = HEIGHT_TO_WORLD(Math.max(0, src.height[tileY * src.size + tileX] ?? 0));
-    const v = new Vector3(tileX + 0.5, h, tileY + 0.5).project(this.camera);
-    return { x: (v.x * 0.5 + 0.5), y: (-v.y * 0.5 + 0.5) };
+  private readonly tmp = new Object3D();
+
+  private updateFleet(src: RenderSource): void {
+    if (this.batches.length === 0) return;
+    const counts = new Array(this.batches.length).fill(0);
+    for (let i = 0; i < src.vehicleCount; i++) {
+      const b = src.vLivery[i] % this.batches.length;
+      const batch = this.batches[b];
+      if (!batch || counts[b] >= batch.instanceMatrix.count) continue;
+      const x = src.vx[i];
+      const z = src.vz[i];
+      const tile = Math.min(src.size * src.size - 1,
+        (Math.round(z) * src.size + Math.round(x)) | 0);
+      const lv = src.level[tile];
+      const y = (lv !== 0 ? HEIGHT_TO_WORLD(lv) : HEIGHT_TO_WORLD(src.height[tile])) + 0.04;
+      this.tmp.position.set(x, y, z);
+      this.tmp.rotation.set(0, -src.vHeading[i] * Math.PI * 2 + Math.PI, 0);
+      this.tmp.updateMatrix();
+      batch.setMatrixAt(counts[b]++, this.tmp.matrix);
+    }
+    for (let b = 0; b < this.batches.length; b++) {
+      const batch = this.batches[b];
+      if (!batch) continue;
+      batch.count = counts[b];
+      batch.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  render(src: RenderSource): void {
+    this.streamChunks(src);
+    this.updateFleet(src);
+    this.placeSun(src.dayFraction);
+    this.placeCamera();
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  get stats(): { chunks: number; calls: number; triangles: number } {
+    const info = this.renderer.info.render;
+    return { chunks: this.chunks.size, calls: info.calls, triangles: info.triangles };
+  }
+
+  dispose(): void {
+    this.renderer.dispose();
   }
 }
-
-const UP = new Vector3(0, 1, 0);
-
-/** A shared run of zeroes for geometry with no emissive surfaces. */
-let ZERO_EMIT = new Float32Array(0);
-function zeroEmit(n: number): Float32Array {
-  if (ZERO_EMIT.length < n) ZERO_EMIT = new Float32Array(n);
-  return ZERO_EMIT.subarray(0, n);
-}
-
-/**
- * How far back the camera stands from its target.
- *
- * Under an orthographic projection this changes nothing about the picture — it
- * only has to be far enough that the near plane clears the tallest thing in
- * the region. It matters because the fog is measured relative to it.
- */
-const CAMERA_DISTANCE = 1200;
-
-export { shade, WAY_COLOURS };
