@@ -44,6 +44,15 @@ loadContent();
 const DISTRICT = 128;
 
 /**
+ * How many things the instanced scatter layer can hold: trees, field props and
+ * street lamps together.
+ *
+ * One number for all three because they are one draw call, and the passes that
+ * fill it are ordered by how much their absence hurts — see the note above them.
+ */
+const SCATTER_MAX = 1800;
+
+/**
  * One audio engine for the page.
  *
  * Outside the component because an `AudioContext` is a scarce resource — a
@@ -460,11 +469,11 @@ export function App(): JSX.Element {
       pRot: new Float32Array(320),
       pLamp: new Float32Array(320 * 3),
       scatterCount: 0,
-      sx: new Float32Array(1400),
-      sz: new Float32Array(1400),
-      sModel: new Uint8Array(1400),
-      sRot: new Float32Array(1400),
-      sScale: new Float32Array(1400),
+      sx: new Float32Array(SCATTER_MAX),
+      sz: new Float32Array(SCATTER_MAX),
+      sModel: new Uint8Array(SCATTER_MAX),
+      sRot: new Float32Array(SCATTER_MAX),
+      sScale: new Float32Array(SCATTER_MAX),
       lampCount: 0,
       lx: new Float32Array(400),
       lz: new Float32Array(400),
@@ -724,8 +733,75 @@ export function App(): JSX.Element {
         if (z + 1 < DISTRICT && parcel[t + DISTRICT] !== p) return true;
         return false;
       };
-      for (let z = 1; z < DISTRICT - 1 && trees.length < 1400; z++) {
-        for (let x = 1; x < DISTRICT - 1 && trees.length < 1400; x++) {
+      /*
+       * One buffer, three passes, and they are deliberately not equal.
+       *
+       * All three draw from the same instanced scatter layer, so all three spend
+       * the same `SCATTER_MAX` slots, and a pass that runs once the budget is
+       * gone places nothing at all. That is a silent failure, and it happened:
+       * the lamp pass used to run last, the trees and the field props between
+       * them came to exactly the cap, and every street lamp in the district
+       * disappeared — the posts, and with them the pool of real lights that
+       * follows the posts. Nothing errored. The villages just went dark.
+       *
+       * So the order here *is* the priority, and structure goes first. A street
+       * lamp is infrastructure: it says which roads a village lights, it is the
+       * main source on a road at night, and one missing is a hole in the world.
+       * A tree is scenery — a district with nine hundred looks like a district
+       * with a thousand. When the two compete it is the scenery that should
+       * lose, and running the lamps first is the whole of the mechanism.
+       */
+      /*
+       * Street lamps, and *where* is the whole design.
+       *
+       * In 1985 England a village street and a trunk road are lit and a country
+       * lane is not — so lighting every road would flatten the one distinction
+       * that makes a district read as a district. Two rules: within reach of a
+       * settlement, or on the best class of road. A farm track is never lit, and
+       * the dark stretch between two villages is the point of the lit ones.
+       *
+       * Every third tile, alternating sides, and each one turned so its arm
+       * overhangs the carriageway — the model knows it leans along +X and
+       * nothing else has to.
+       */
+      for (let z = 1; z < DISTRICT - 1 && trees.length < SCATTER_MAX; z++) {
+        for (let x = 1; x < DISTRICT - 1 && trees.length < SCATTER_MAX; x++) {
+          const t = z * DISTRICT + x;
+          if (roadClass[t] < 0) continue;
+          const trunk = roadClass[t] === RoadClass.Spine;
+          let near = false;
+          for (let tw = 0; tw < world.towns.count; tw++) {
+            const dx = world.towns.x[tw] - x;
+            const dz = world.towns.y[tw] - z;
+            if (dx * dx + dz * dz < 100) { near = true; break; }
+          }
+          if (!near && !trunk) continue;
+          // Every third tile along whichever way the road runs, so the spacing
+          // is even and does not double up at a junction.
+          const alongX = roadClass[t - 1] >= 0 || roadClass[t + 1] >= 0;
+          const step = alongX ? x : z;
+          if (step % 3 !== 0) continue;
+          // Alternating sides, which is what a real street does and what stops a
+          // long straight reading as a fence.
+          const side = ((step / 3) | 0) % 2 === 0 ? 1 : -1;
+          const offX = alongX ? 0 : side * 0.42;
+          const offZ = alongX ? side * 0.42 : 0;
+          // Turn the arm to overhang the road: it points along +X unrotated, so
+          // the rotation is the direction from the post back to the centreline.
+          const rot = Math.atan2(-offZ, -offX) / (Math.PI * 2);
+          lampPosts.push({ x: x + 0.5 + offX, z: z + 0.5 + offZ });
+          trees.push({
+            x: x + 0.5 + offX,
+            z: z + 0.5 + offZ,
+            model: TREE_MODELS.length + PROP_LAMP,
+            rot: ((rot % 1) + 1) % 1,
+            scale: 1,
+          });
+        }
+      }
+
+      for (let z = 1; z < DISTRICT - 1 && trees.length < SCATTER_MAX; z++) {
+        for (let x = 1; x < DISTRICT - 1 && trees.length < SCATTER_MAX; x++) {
           const t = z * DISTRICT + x;
           if (height[t] <= 0) continue;
           if (roadClass[t] >= 0) continue;
@@ -766,57 +842,8 @@ export function App(): JSX.Element {
        * ten-tile field reads as a field with bales in it; thirty reads as a
        * warehouse.
        */
-      /*
-       * Street lamps, and *where* is the whole design.
-       *
-       * In 1985 England a village street and a trunk road are lit and a country
-       * lane is not — so lighting every road would flatten the one distinction
-       * that makes a district read as a district. Two rules: within reach of a
-       * settlement, or on the best class of road. A farm track is never lit, and
-       * the dark stretch between two villages is the point of the lit ones.
-       *
-       * Every third tile, alternating sides, and each one turned so its arm
-       * overhangs the carriageway — the model knows it leans along +X and
-       * nothing else has to.
-       */
-      for (let z = 1; z < DISTRICT - 1 && trees.length < 1400; z++) {
-        for (let x = 1; x < DISTRICT - 1 && trees.length < 1400; x++) {
-          const t = z * DISTRICT + x;
-          if (roadClass[t] < 0) continue;
-          const trunk = roadClass[t] === RoadClass.Spine;
-          let near = false;
-          for (let tw = 0; tw < world.towns.count; tw++) {
-            const dx = world.towns.x[tw] - x;
-            const dz = world.towns.y[tw] - z;
-            if (dx * dx + dz * dz < 100) { near = true; break; }
-          }
-          if (!near && !trunk) continue;
-          // Every third tile along whichever way the road runs, so the spacing
-          // is even and does not double up at a junction.
-          const alongX = roadClass[t - 1] >= 0 || roadClass[t + 1] >= 0;
-          const step = alongX ? x : z;
-          if (step % 3 !== 0) continue;
-          // Alternating sides, which is what a real street does and what stops a
-          // long straight reading as a fence.
-          const side = ((step / 3) | 0) % 2 === 0 ? 1 : -1;
-          const offX = alongX ? 0 : side * 0.42;
-          const offZ = alongX ? side * 0.42 : 0;
-          // Turn the arm to overhang the road: it points along +X unrotated, so
-          // the rotation is the direction from the post back to the centreline.
-          const rot = Math.atan2(-offZ, -offX) / (Math.PI * 2);
-          lampPosts.push({ x: x + 0.5 + offX, z: z + 0.5 + offZ });
-          trees.push({
-            x: x + 0.5 + offX,
-            z: z + 0.5 + offZ,
-            model: TREE_MODELS.length + PROP_LAMP,
-            rot: ((rot % 1) + 1) % 1,
-            scale: 1,
-          });
-        }
-      }
-
-      for (let z = 1; z < DISTRICT - 1 && trees.length < 1400; z++) {
-        for (let x = 1; x < DISTRICT - 1 && trees.length < 1400; x++) {
+      for (let z = 1; z < DISTRICT - 1 && trees.length < SCATTER_MAX; z++) {
+        for (let x = 1; x < DISTRICT - 1 && trees.length < SCATTER_MAX; x++) {
           const t = z * DISTRICT + x;
           if (parcel[t] < 0) continue;
           if (roadClass[t] >= 0 || height[t] <= 0) continue;

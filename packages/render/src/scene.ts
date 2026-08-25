@@ -952,22 +952,40 @@ export class Renderer {
      * Greedy nearest-first with a separation test, which is one more comparison
      * per candidate and needs no clustering pass.
      */
+    /*
+     * Choosing which lamps get one of the eight real lights, in four steps.
+     *
+     * It is worth spelling out why this is four steps and not one loop, because
+     * the one loop was wrong twice.
+     *
+     * The original took the eight nearest candidates greedily with a separation
+     * test, and recomputed the whole thing every frame. Greedy nearest-first with
+     * a separation test is *order dependent*: slide the camera and two lamps a
+     * tile and a half apart swap places in the ordering, so one starts crowding
+     * the other instead of the other way round, and the chosen set changes though
+     * neither lamp moved. The pool then switched a light off here and on there
+     * instantly, which is the reported flicker.
+     *
+     * My first repair kept the greedy loop and tried to do the assignment inside
+     * it. That broke the separation test outright: it compared each candidate
+     * against `lampPool[0..filled-1]`, which only means anything if lights are
+     * handed out in the order they are chosen — and the whole point of the repair
+     * was that they are not. So candidates were rejected for crowding lights that
+     * were nowhere near them, and the street lamps, which are weighted nearest and
+     * therefore picked first, mostly stopped being lit at all.
+     *
+     * Separating the two concerns is what makes both of them simple: *which lamps*
+     * is a question about the world, *which light draws each* is a question about
+     * the pool, and neither needs to know how the other is answered.
+     */
     const APART = 1.5 * 1.5;
 
     /*
-     * Lamps that already have a light keep a head start.
+     * 1. A lamp that already has a light keeps a head start.
      *
-     * "Lights flicker when I move the camera" — they did, and the cause was that
-     * this whole selection was recomputed from nothing every frame. Greedy
-     * nearest-first with a separation test is *order dependent*: as the camera
-     * slides, two lamps a tile and a half apart swap places in the ordering, one
-     * of them starts crowding the other instead of the other way round, and the
-     * chosen set changes even though neither lamp moved. The pool then switched a
-     * light off here and on there, instantly, which is a flicker.
-     *
-     * A fifth off the distance of a lamp that is already lit is enough hysteresis
-     * to stop that swapping: a newcomer has to be meaningfully closer, not
-     * fractionally closer, before it takes a light away.
+     * A fifth off its distance, which is enough hysteresis to stop two lamps
+     * swapping places as the camera slides: a newcomer has to be meaningfully
+     * closer, not fractionally closer, before it takes a light away.
      */
     for (const c of cand) {
       for (const st of this.lampState) {
@@ -978,118 +996,90 @@ export class Renderer {
       }
     }
 
-    let filled = 0;
-    for (let k = 0; k < cand.length && filled < this.lampPool.length; k++) {
-      let best = -1;
-      for (let j = k; j < cand.length; j++) {
-        if (best < 0 || cand[j].d < cand[best].d) best = j;
+    /*
+     * 2. Pick the lamps: nearest first, refusing any within a tile and a half of
+     *    one already picked.
+     *
+     * The separation is the difference between lighting and a blob. Taking simply
+     * the eight nearest put all eight on the street lamps along fifty yards of one
+     * lane, and eight point lights summing over one patch of grass is a floodlight
+     * rather than a lit street. Tested against the lamps chosen *this frame*,
+     * which is the only set that means anything.
+     */
+    const pick = this.lampPicked;
+    pick.length = 0;
+    for (let k = 0; k < cand.length && pick.length < this.lampPool.length; k++) {
+      let best = k;
+      for (let j = k + 1; j < cand.length; j++) {
+        if (cand[j].d < cand[best].d) best = j;
       }
-      if (best < 0) break;
       const tmp = cand[k];
       cand[k] = cand[best];
       cand[best] = tmp;
 
       const c = cand[k];
       let crowded = false;
-      for (let q = 0; q < filled; q++) {
-        const l = this.lampPool[q];
-        const dx = l.position.x - c.x;
-        const dz = l.position.z - c.z;
+      for (const q of pick) {
+        const dx = q.x - c.x;
+        const dz = q.z - c.z;
         if (dx * dx + dz * dz < APART) { crowded = true; break; }
       }
-      if (crowded) continue;
+      if (!crowded) pick.push(c);
+    }
 
-      /*
-       * Which light draws this lamp, and it must be the same one as last frame.
-       *
-       * Assigning by position in the chosen order meant a lamp that moved from
-       * third-nearest to fourth-nearest changed *which* light drew it — so the
-       * light itself jumped across the village, which reads as a flicker even
-       * when nothing turned off. Matching by position keeps a lamp's light with
-       * it for as long as it is chosen at all.
-       */
+    /*
+     * 3. Hand each picked lamp a light, preferring the one it already had.
+     *
+     * A lamp that moved from third-nearest to fourth-nearest must not change
+     * which light draws it, or the light itself jumps across the village — which
+     * reads as a flicker even though nothing turned off. Two passes: keep first,
+     * then fill from the dark ones, and *never* move a light that is still lit.
+     */
+    for (const st of this.lampState) st.taken = false;
+    const outstanding: typeof pick = [];
+    for (const c of pick) {
       let slot = -1;
-      for (let q = 0; q < this.lampPool.length; q++) {
+      for (let q = 0; q < this.lampState.length; q++) {
         const st = this.lampState[q];
         if (st.taken || st.level <= 0.01) continue;
         const dx = st.x - c.x;
         const dz = st.z - c.z;
         if (dx * dx + dz * dz < 0.04) { slot = q; break; }
       }
-      if (slot < 0) {
-        // A free light, or failing that the dimmest one — which is the one whose
-        // reassignment nobody can see.
-        let dimmest = -1;
-        for (let q = 0; q < this.lampPool.length; q++) {
-          const st = this.lampState[q];
-          if (st.taken) continue;
-          if (dimmest < 0 || st.level < this.lampState[dimmest].level) dimmest = q;
-        }
-        if (dimmest < 0) continue;
-        slot = dimmest;
-        // Only *move* a light that is already dark. A lit one sliding to a new
-        // lamp is the most obvious version of this whole bug.
-        if (this.lampState[slot].level > 0.02) {
-          this.lampState[slot].taken = true;
-          filled++;
-          continue;
-        }
+      if (slot < 0) { outstanding.push(c); continue; }
+      this.lampState[slot].taken = true;
+      this.shineLight(src, slot, c);
+    }
+    for (const c of outstanding) {
+      let slot = -1;
+      for (let q = 0; q < this.lampState.length; q++) {
+        const st = this.lampState[q];
+        if (st.taken || st.level > 0.02) continue;
+        slot = q;
+        break;
       }
-      const state = this.lampState[slot];
-      state.taken = true;
-      state.x = c.x;
-      state.z = c.z;
-      const light = this.lampPool[slot];
-      filled++;
-      // A little above the ground: a window is at head height, and a light at
-      // ground level lights the grass and not the wall behind it.
-      light.position.set(c.x, groundHeightAt(src, c.x, c.z) + 0.34, c.z);
-      /*
-       * Dim, and dimmer than the first guess by half.
-       *
-       * At 2.6 over four and a half tiles a single cottage lit most of a field
-       * bright yellow — which is not what a window does, and over green grass it
-       * went lurid. A window throws light a few yards and then stops. Less
-       * saturated too: tungsten *is* orange, but a saturated orange light on
-       * green grass is the one combination that reads as a fault rather than as
-       * warmth.
-       */
-      if (c.sodium) {
-        // Low-pressure sodium, which is the most saturated orange any lamp has
-        // ever been and the reason a photograph of an English town at night in
-        // 1985 is unmistakable. Higher and wider than a window, because it is
-        // eight metres up and pointed at the road.
-        light.color.setRGB(1, 0.62, 0.24);
-        // Times the same midnight switch, or the pools of light would stay on
-        // the road after the lamps above them had gone out.
-        state.base = this.night * 0.85 * this.streetOn;
-        light.distance = 2.9;
-        light.position.y += 0.16;
-      } else if (c.warm) {
-        light.color.setRGB(1, 0.82, 0.60);
-        state.base = this.night * 0.95;
-        light.distance = 2.6;
-      } else {
-        light.color.setRGB(1, 0.96, 0.88);
-        state.base = this.night * 0.8;
-        light.distance = 2.2;
-      }
+      // Every light is either taken or still fading down. The lamp goes unlit
+      // this frame and gets one as soon as something goes dark, which is a few
+      // frames away — and a few frames of one lamp unlit is invisible, where
+      // stealing a lit light to cover it would not be.
+      if (slot < 0) continue;
+      this.lampState[slot].taken = true;
+      this.shineLight(src, slot, c);
     }
 
     /*
-     * And then they fade, rather than switch.
+     * 4. And they fade, rather than switch.
      *
-     * The hysteresis above stops the *set* churning; this is what makes the
-     * churn that remains invisible. A quarter of a second either way, which is
-     * fast enough that walking the camera into a village feels like the lights
-     * arriving and slow enough that no single frame is a step.
+     * Step 1 stops the set churning; this is what makes the churn that remains
+     * invisible. A quarter of a second either way: fast enough that walking the
+     * camera into a village feels like the lights arriving, slow enough that no
+     * single frame is a step.
      */
     const rate = Math.min(1, dt * 4);
     for (let q = 0; q < this.lampPool.length; q++) {
       const st = this.lampState[q];
       const light = this.lampPool[q];
       st.level += ((st.taken ? 1 : 0) - st.level) * rate;
-      st.taken = false;
       if (st.level < 0.01) {
         st.level = 0;
         light.visible = false;
@@ -1098,8 +1088,61 @@ export class Renderer {
       light.visible = true;
       light.intensity = st.base * st.level;
     }
-    void filled;
   }
+
+  /**
+   * Point one light at one lamp, and say what kind of lamp it is.
+   *
+   * Sets a *base* intensity rather than a live one: the fade in `placeLights`
+   * multiplies it, so nothing here needs to know whether the light is on its way
+   * up, down or steady.
+   */
+  private shineLight(
+    src: RenderSource, slot: number,
+    c: { x: number; z: number; warm: boolean; sodium: boolean },
+  ): void {
+    const st = this.lampState[slot];
+    const light = this.lampPool[slot];
+    st.x = c.x;
+    st.z = c.z;
+    // A little above the ground: a window is at head height, and a light at
+    // ground level lights the grass and not the wall behind it.
+    light.position.set(c.x, groundHeightAt(src, c.x, c.z) + 0.34, c.z);
+    if (c.sodium) {
+      /*
+       * Low-pressure sodium, which is the most saturated orange any lamp has ever
+       * been and the reason a photograph of an English town at night in 1985 is
+       * unmistakable. Higher and wider than a window, because it is eight metres
+       * up and pointed at the road.
+       */
+      light.color.setRGB(1, 0.62, 0.24);
+      // Times the same midnight switch, or the pools of light would stay on the
+      // road after the lamps above them had gone out.
+      st.base = this.night * 0.85 * this.streetOn;
+      light.distance = 2.9;
+      light.position.y += 0.16;
+      return;
+    }
+    if (c.warm) {
+      /*
+       * Dim, and dimmer than the first guess by half. At 2.6 over four and a half
+       * tiles a single cottage lit most of a field bright yellow, which is not
+       * what a window does. Less saturated too: tungsten *is* orange, but a
+       * saturated orange light on green grass reads as a fault rather than warmth.
+       */
+      light.color.setRGB(1, 0.82, 0.60);
+      st.base = this.night * 0.95;
+      light.distance = 2.6;
+      return;
+    }
+    light.color.setRGB(1, 0.96, 0.88);
+    st.base = this.night * 0.8;
+    light.distance = 2.2;
+  }
+
+  /** The lamps chosen this frame. Reused, because it is rebuilt every frame. */
+  private readonly lampPicked:
+  { x: number; z: number; d: number; warm: boolean; sodium: boolean }[] = [];
 
   /**
    * What each light in the pool is currently doing.
