@@ -7,7 +7,8 @@
     "paths": {
       "@interchange/sim": ["./packages/sim/src/index.ts"],
       "@interchange/data": ["./packages/data/src/index.ts"],
-      "@interchange/render": ["./packages/render/src/index.ts"]
+      "@interchange/render": ["./packages/render/src/index.ts"],
+      "@interchange/server": ["./packages/server/src/index.ts"]
     },
     "baseUrl": "."
   },

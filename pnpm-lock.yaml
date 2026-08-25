@@ -74,6 +74,8 @@ importers:
         specifier: ^0.171.0
         version: 0.171.0
 
+  packages/server: {}
+
   packages/sim:
     dependencies:
       '@interchange/data':
@@ -85,6 +87,9 @@ importers:
       '@interchange/data':
         specifier: workspace:*
         version: link:../data
+      '@interchange/server':
+        specifier: workspace:*
+        version: link:../server
       '@interchange/sim':
         specifier: workspace:*
         version: link:../sim

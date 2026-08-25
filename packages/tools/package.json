@@ -5,6 +5,7 @@
   "private": true,
   "dependencies": {
     "@interchange/sim": "workspace:*",
-    "@interchange/data": "workspace:*"
+    "@interchange/data": "workspace:*",
+    "@interchange/server": "workspace:*"
   }
 }
