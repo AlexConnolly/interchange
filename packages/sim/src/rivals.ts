@@ -64,8 +64,11 @@ export function stepRival(w: World, company: number, rng: Rng): void {
   const annualRunning = w.companies.ledgerYear[base + Line.RunningCosts] + 1;
   const buffer = (annualRunning * p.thrift) / 100;
   const spendable = cash - buffer;
+  // Not recorded in the log: a replay re-runs this same function against the
+  // same world and produces the same commands, so logging them would apply
+  // every one of them twice. See CommandQueue.push.
   const issue = (kind: number, a = 0, b = 0, c = 0, d = 0, data?: number[] | string): void => {
-    w.queue.push(cmd(w.tick + 2, company, kind, a, b, c, d, data));
+    w.queue.push(cmd(w.tick + 2, company, kind, a, b, c, d, data), false);
   };
 
   /*

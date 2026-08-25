@@ -103,9 +103,25 @@ export class CommandQueue {
   /** The authoritative log. A save is this plus the seed. */
   readonly log: Command[] = [];
 
-  push(c: Command): void {
+  /**
+   * Queue a command, and record it in the log unless it is one the world will
+   * regenerate for itself.
+   *
+   * A rival's decisions are a pure function of the seed and the world, so
+   * logging them stores something the replay is going to work out again
+   * anyway — and worse, then *does* work out again, applying every AI action
+   * twice. That is precisely what happened: the save/replay check passed for
+   * as long as the rival AI was too broken to act, and started failing the
+   * moment it began issuing commands. architecture.md 2 says the command log
+   * plus the seed determines the world; rivals are on the seed's side of that
+   * sentence, not the log's.
+   *
+   * It also makes a save smaller, which is a nice-to-have rather than the
+   * reason.
+   */
+  push(c: Command, record = true): void {
     this.pending.push({ ...c, seq: this.seq++ });
-    this.log.push(c);
+    if (record) this.log.push(c);
   }
 
   /** Load a log without re-issuing it — used when replaying a save. */
