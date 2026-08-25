@@ -567,8 +567,8 @@ export class Renderer {
   /** How overcast it is, 0..1. Read by the client for the sky. */
   cloud = 0.5;
 
-  /** How far into the night, 0..1. Read by the glow pass. */
-  private night = 0;
+  /** How far into the night, 0..1. Read by the glow pass, and by the clock. */
+  night = 0;
   private readonly clear = new Color();
   private readonly sunRGB: [number, number, number] = [0, 0, 0];
 
@@ -927,7 +927,18 @@ export class Renderer {
         seen = { x, z, a: want };
         this.smooth.set(id, seen);
       } else {
-        const k = Math.min(1, dt * 14);
+        /*
+         * A softer filter, because a lag filter *is* a corner-rounder.
+         *
+         * At 14 the drawn position sat almost exactly on the simulated one, so
+         * the vehicle pivoted at junctions along with it. At 7 it trails by a
+         * fraction of a tile and cuts the corner — which is what a lorry does,
+         * and which is the whole of the fix for the simulated fleet. The ambient
+         * traffic gets a real Bézier because there the path is mine to shape;
+         * here the path belongs to the simulation and this is the honest way to
+         * smooth it without lying about where the lorry is.
+         */
+        const k = Math.min(1, dt * 7);
         seen.x += (x - seen.x) * k;
         seen.z += (z - seen.z) * k;
         // Shortest way round, or a lorry turning from west to north spins 270
@@ -935,7 +946,7 @@ export class Renderer {
         let d = want - seen.a;
         while (d > Math.PI) d -= Math.PI * 2;
         while (d < -Math.PI) d += Math.PI * 2;
-        seen.a += d * Math.min(1, dt * 9);
+        seen.a += d * Math.min(1, dt * 6);
       }
       this.smooth.set(id, seen);
       this.tmp.position.set(seen.x, y, seen.z);

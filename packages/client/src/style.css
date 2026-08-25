@@ -830,3 +830,53 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .mine-mark.busy { background: #4ab0d0; }
 .mine-mark:hover { transform: translate(-50%, -100%) scale(1.35); }
 .bubble .veh-thumb { width: 34px; height: 34px; flex: 0 0 34px; }
+
+/* The readout, split in two.
+ *
+ * Money where the eye already goes; the clock on the far side, because it is
+ * ambient. One grey bar with the brand, the money, the date and two counts in it
+ * was the thing being complained about, and the fix is not styling — it is that
+ * two different kinds of information were sharing a box. */
+.hud {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 14px 18px;
+  pointer-events: none;
+  gap: 12px;
+}
+.purse, .clock {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 14px;
+  border-radius: 14px;
+  background: rgba(247, 243, 234, 0.9);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 18px rgba(30, 40, 30, 0.18);
+  color: var(--ink);
+}
+.purse-icon { color: #8a7a46; flex: 0 0 20px; }
+.purse-sum {
+  font-size: 19px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.clock-text { display: flex; flex-direction: column; align-items: flex-end; }
+.clock-date { font-size: 13px; font-weight: 700; }
+.clock-sub { font-size: 11px; color: #8b8577; }
+
+/* The day, as a ring. A cycle drawn as a circle, because a bar that jumps from
+   its right-hand end back to the left is the same discontinuity the sun had. */
+.ring { flex: 0 0 32px; }
+.ring-track { fill: none; stroke: rgba(0, 0, 0, 0.10); stroke-width: 4; }
+.ring-lit { fill: none; stroke: #f0c04a; stroke-width: 4; stroke-linecap: round; }
+.ring-now { fill: #2f2a22; stroke: #fff; stroke-width: 1.6; }
+.ring-moon { fill: rgba(120, 140, 190, 0.85); }
+
+.row-icon { width: 26px; flex: 0 0 26px; display: grid; place-items: center; }

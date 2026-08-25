@@ -25,6 +25,8 @@ import { Ambient, areaDemand } from './ambient.ts';
 import { Fleet, Yard } from './Fleet.tsx';
 import { Planning } from './Planning.tsx';
 import { Dock } from './Dock.tsx';
+import { Owned, Contracts } from './Owned.tsx';
+import { Status } from './Status.tsx';
 import { Driver } from './Driver.tsx';
 import { Place, type PlaceActions } from './Place.tsx';
 import './style.css';
@@ -108,7 +110,9 @@ type Panel =
   | { k: 'yard'; yard: number }
   | { k: 'vehicles' }
   | { k: 'planning' }
-  | { k: 'driver'; vehicle: number };
+  | { k: 'driver'; vehicle: number }
+  | { k: 'owned' }
+  | { k: 'contracts' };
 
 /**
  * Map the content's way classes onto the three the renderer draws.
@@ -128,7 +132,10 @@ function roadClassOf(cls: number, names: string[]): RoadClass {
 export function App(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [ready, setReady] = useState(false);
-  const [hud, setHud] = useState({ date: '', vehicles: 0, fps: 0, tris: 0, cash: 0, free: 0 });
+  const [hud, setHud] = useState({
+    date: '', vehicles: 0, fps: 0, tris: 0, cash: 0, free: 0,
+    dayFraction: 0, night: 0, weather: 0,
+  });
   /*
    * Whether the last HUD refresh brought more money than the one before.
    *
@@ -1033,6 +1040,9 @@ export function App(): JSX.Element {
           tris: st.triangles,
           cash: world.companies.cash[world.player],
           free,
+          dayFraction: src.dayFraction,
+          night: renderer.night,
+          weather: renderer.cloud,
         });
       }
     };
@@ -1111,6 +1121,32 @@ export function App(): JSX.Element {
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
+      {live && panel.k === 'owned' && (
+        <Owned
+          world={live.world}
+          onGoSite={(site) => {
+            lookAt(live.world.sites.x[site] + 0.5, live.world.sites.y[site] + 0.5);
+            setPanel({ k: 'place', site });
+          }}
+          onGoYard={(yard) => {
+            lookAt(live.world.yards.x[yard] + 0.5, live.world.yards.y[yard] + 0.5);
+            setPanel({ k: 'yard', yard });
+          }}
+          onBuild={() => { setBuilding(true); setNote(''); setPanel({ k: 'none' }); }}
+          onClose={() => setPanel({ k: 'none' })}
+        />
+      )}
+      {live && panel.k === 'contracts' && (
+        <Contracts
+          world={live.world}
+          onGoSite={(site) => {
+            lookAt(live.world.sites.x[site] + 0.5, live.world.sites.y[site] + 0.5);
+            setPanel({ k: 'place', site });
+          }}
+          onGoDriver={(vehicle) => setPanel({ k: 'driver', vehicle })}
+          onClose={() => setPanel({ k: 'none' })}
+        />
+      )}
       {live && panel.k === 'planning' && (
         <Planning
           world={live.world}
@@ -1141,50 +1177,53 @@ export function App(): JSX.Element {
         />
       )}
       <div className="hud">
-        <span className="brand">Interchange</span>
-        <span className={`money ${paid ? 'paid' : ''}`} key={hud.cash}>
-          {money(hud.cash)}
-        </span>
-        <span>{hud.date}</span>
-        <span className="dim">{hud.vehicles} out · {hud.free} idle</span>
+        {live && (
+          <Status
+            cash={hud.cash}
+            date={hud.date}
+            out={hud.vehicles}
+            idle={hud.free}
+            dayFraction={hud.dayFraction}
+            night={hud.night}
+            weather={hud.weather}
+          />
+        )}
       </div>
       {live && (
         <Dock
           items={[
             {
-              key: 'yard',
-              label: 'Yard',
-              icon: 'yard',
-              on: panel.k === 'yard',
-              onClick: () => {
-                if (live.world.yards.count === 0) return;
-                if (panel.k === 'yard') { setPanel({ k: 'none' }); return; }
-                lookAt(live.world.yards.x[0] + 0.5, live.world.yards.y[0] + 0.5);
-                setPanel({ k: 'yard', yard: 0 });
-              },
+              key: 'owned',
+              label: 'Business',
+              icon: 'builders-merchant',
+              on: panel.k === 'owned',
+              onClick: () => setPanel(panel.k === 'owned' ? { k: 'none' } : { k: 'owned' }),
             },
             {
               key: 'fleet',
               label: 'Vehicles',
-              icon: 'terminal',
+              icon: 'yard',
               on: panel.k === 'vehicles',
               onClick: () => setPanel(
                 panel.k === 'vehicles' ? { k: 'none' } : { k: 'vehicles' },
               ),
             },
             {
-              key: 'depot',
-              label: building ? 'Cancel' : 'Build',
-              icon: 'builders-merchant',
-              on: building,
-              onClick: () => {
-                setBuilding(!building);
-                setNote('');
-                setPanel({ k: 'none' });
-              },
+              key: 'contracts',
+              label: 'Contracts',
+              icon: 'terminal',
+              on: panel.k === 'contracts',
+              onClick: () => setPanel(
+                panel.k === 'contracts' ? { k: 'none' } : { k: 'contracts' },
+              ),
             },
-            // The parish appears when the parish would notice you, and not
-            // before. See planning.ts.
+            /*
+             * The parish appears when the parish would notice you, and not
+             * before (planning.ts). Build is *not* here: it is one action inside
+             * Businesses, because a permanent slot for a thing you do three
+             * times in a game is a slot spent badly — and it read as a mode with
+             * nothing behind it.
+             */
             ...(live.world.planningOpen() ? [{
               key: 'parish',
               label: 'Parish',

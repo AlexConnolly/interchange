@@ -142,6 +142,7 @@ export class Ambient {
       const to = this.pick(this.places);
       if (to === undefined || to === fromTile) continue;
       const path = this.roads.route(fromTile, to);
+      // Three tiles minimum for a Bézier; six so a journey is a journey.
       if (path.length < 6) continue;
       w.path = path;
       w.leg = 0;
@@ -169,7 +170,7 @@ export class Ambient {
     w.livery = Math.floor(this.rnd() * 4) % 4;
     if (!this.dispatch(w, start)) return false;
     // Somewhere along its journey rather than all of them at the start line.
-    w.leg = Math.floor(this.rnd() * Math.max(1, w.path.length - 2));
+    w.leg = 1 + Math.floor(this.rnd() * Math.max(1, w.path.length - 3));
     return true;
   }
 
@@ -217,7 +218,9 @@ export class Ambient {
         while (w.t >= 1) {
           w.t -= 1;
           w.leg++;
-          if (w.leg >= w.path.length - 1) {
+          // One short of the end: `leg` indexes the tile a curve is drawn
+          // *inside*, and the last tile has no outgoing edge to curve toward.
+          if (w.leg >= w.path.length - 2) {
             // Arrived. Stand for a moment, then go somewhere else — starting
             // from where it actually is, so journeys chain into a working day
             // rather than teleporting between unrelated trips.
@@ -228,37 +231,71 @@ export class Ambient {
           }
         }
       }
-      if (w.path.length < 2) continue;
+      if (w.path.length < 3) continue;
 
-      const leg = Math.min(w.leg, w.path.length - 2);
-      const a = w.path[leg];
-      const b = w.path[leg + 1];
-      if (!this.roads.usable(a)) { w.path = []; continue; }
+      /*
+       * Corners are arcs, not pivots.
+       *
+       * Interpolating straight between tile centres means the direction of
+       * travel changes in a single frame at every junction, and the vehicle
+       * spins on the spot — "I hate that things turn on the spot". Easing the
+       * *heading* did not fix it, because the position was still turning
+       * instantly and the body was merely late.
+       *
+       * A quadratic Bézier per tile fixes it exactly. The curve inside tile *k*
+       * runs from the midpoint of the edge it came in on, through the tile
+       * centre as the control point, to the midpoint of the edge it leaves by.
+       * On a straight run those three points are collinear, so it *is* a
+       * straight line and costs nothing; at a corner it is a proper arc through
+       * the junction. And because the heading comes from the curve's own
+       * derivative, position and facing cannot disagree at any point along it.
+       *
+       * `leg` therefore indexes a *tile* now rather than an edge, which is why
+       * the path needs three tiles rather than two.
+       */
+      const leg = Math.max(1, Math.min(w.leg, w.path.length - 2));
+      const here = w.path[leg];
+      if (!this.roads.usable(here)) { w.path = []; continue; }
 
-      const fx = a % size;
-      const fz = (a / size) | 0;
-      const dx = (b % size) - fx;
-      const dz = ((b / size) | 0) - fz;
+      const cx = (here % size) + 0.5;
+      const cz = ((here / size) | 0) + 0.5;
+      const px = (w.path[leg - 1] % size) + 0.5;
+      const pz = ((w.path[leg - 1] / size) | 0) + 0.5;
+      const nx2 = (w.path[leg + 1] % size) + 0.5;
+      const nz2 = ((w.path[leg + 1] / size) | 0) + 0.5;
 
       // Out of sight: park it and let it be reused nearer the camera.
-      if (Math.abs(fx + 0.5 - nearX) > reach * 1.5
-        || Math.abs(fz + 0.5 - nearZ) > reach * 1.5) { w.path = []; continue; }
-
+      if (Math.abs(cx - nearX) > reach * 1.5
+        || Math.abs(cz - nearZ) > reach * 1.5) { w.path = []; continue; }
       if (n >= vx.length) break;
+
+      const u = w.dwell > 0 ? 1 : w.t;
+      const inX = (px + cx) / 2;
+      const inZ = (pz + cz) / 2;
+      const outX = (cx + nx2) / 2;
+      const outZ = (cz + nz2) / 2;
+      const v = 1 - u;
+      const bx = v * v * inX + 2 * v * u * cx + u * u * outX;
+      const bz = v * v * inZ + 2 * v * u * cz + u * u * outZ;
+      // The tangent, which is the heading and also which way "left" is.
+      const tx = 2 * v * (cx - inX) + 2 * u * (outX - cx);
+      const tz = 2 * v * (cz - inZ) + 2 * u * (outZ - cz);
+      const tl = Math.hypot(tx, tz) || 1;
+
       /*
        * Keep to the left. It is 1985 in England.
        *
        * A sixth of a tile off the centreline, perpendicular to travel — which
        * also means two vehicles passing do so on the correct sides, for free,
-       * with no traffic model at all. Without it they drive through one another
-       * down the middle of the road.
+       * with no traffic model at all. Taken from the curve's normal rather than
+       * the edge direction, so the offset follows the vehicle round the bend
+       * instead of jumping sides at the apex.
        */
-      const frac = w.dwell > 0 ? 1 : w.t;
-      vx[n] = fx + 0.5 + dx * frac + -dz * 0.16;
-      vz[n] = fz + 0.5 + dz * frac + dx * 0.16;
+      vx[n] = bx + (-tz / tl) * 0.16;
+      vz[n] = bz + (tx / tl) * 0.16;
       // Heading in turns, matching the simulation: 0 is north (-Z), increasing
-      // clockwise. From the same vector as the position, so they cannot disagree.
-      vHeading[n] = (Math.atan2(dx, -dz) / (Math.PI * 2) + 1) % 1;
+      // clockwise. From the curve's own tangent, so the two cannot disagree.
+      vHeading[n] = (Math.atan2(tx / tl, -tz / tl) / (Math.PI * 2) + 1) % 1;
       vLivery[n] = w.livery;
       vModel[n] = w.model;
       // Negative ids, so the renderer's smoothing keys these apart from the
