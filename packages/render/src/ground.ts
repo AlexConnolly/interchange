@@ -39,6 +39,17 @@ export interface GroundSource {
   /** True where a road covers the tile, so hedges leave a gap. */
   hasRoad: (tile: number) => boolean;
   isWater: (tile: number) => boolean;
+  /**
+   * A stream or a river, as opposed to the sea.
+   *
+   * Asked separately because they are not the same thing to look at and were
+   * being drawn as the same thing — which is to say, as grass. The terrain has
+   * carved watercourses since the beginning (see `carveRivers`), five of them,
+   * a few hundred tiles between them, complete with graded banks. Nothing ever
+   * drew them: `isWater` tested the sea level and nothing tested the flag, so
+   * every stream in the district was a dry valley with a green floor.
+   */
+  isStream: (tile: number) => boolean;
   /** 0 outside your influence, 1 well inside. The world fades out beyond it. */
   influence: (tile: number) => number;
 }
@@ -149,6 +160,21 @@ export function buildGround(
       let colour: RGB;
       if (src.isWater(tile)) {
         colour = LAND.water;
+      } else if (src.isStream(tile)) {
+        /*
+         * The water, and a wet edge where it meets the field.
+         *
+         * A tile with dry land on any side of it is the bank, and gets the
+         * paler gravel colour. Nothing in England has a hard edge between water
+         * and grass, and at this scale a stream two tiles wide with a hard edge
+         * reads as a painted stripe — the one tile of shallows is most of what
+         * makes it read as water lying in a channel instead.
+         */
+        const bank = (x > 0 && !src.isStream(tile - 1))
+          || (x + 1 < s && !src.isStream(tile + 1))
+          || (y > 0 && !src.isStream(tile - s))
+          || (y + 1 < s && !src.isStream(tile + s));
+        colour = bank ? LAND.shallow : LAND.stream;
       } else {
         const p = src.parcel[tile];
         colour = p === NO_PARCEL ? CROP[6] : (CROP[src.crop[tile]] ?? CROP[6]);

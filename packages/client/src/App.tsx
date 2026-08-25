@@ -14,8 +14,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  createWorld, Crop, Mode, NO_WAY, TICKS_PER_DAY, facilitiesFor, isWood,
-  type World,
+  createWorld, Crop, Mode, NO_WAY, TICKS_PER_DAY, TileFlag, facilitiesFor,
+  isWood, type World,
 } from '@interchange/sim';
 import { loadContent } from '@interchange/data';
 import {
@@ -569,6 +569,17 @@ export function App(): JSX.Element {
       crop: world.terrain.fields.crop,
       hasRoad: (t) => roadClass[t] >= 0,
       isWater: (t) => world.terrain.height[t] <= 0,
+      /*
+       * The flag the terrain has been setting since the beginning and nothing
+       * has ever read.
+       *
+       * Road tiles are deliberately *not* excluded: a stream does not stop at a
+       * bridge, it goes under it. The road surface is drawn over the top and the
+       * water shows either side of the parapets, which is the whole of how a
+       * bridge is drawn — see `buildRoads`.
+       */
+      isStream: (t) => (world.terrain.flags[t] & TileFlag.River) !== 0
+        && world.terrain.height[t] > 0,
       influence: (t) => world.influence.at(t),
       roadClass,
       level: layer.level,

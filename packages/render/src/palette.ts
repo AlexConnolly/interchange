@@ -83,6 +83,18 @@ export const LAND = {
   scree: hex('#9a958c'),
   beach: hex('#ddd0a8'),
   water: hex('#5f93b8'),
+  /*
+   * A stream, which is not the sea in a smaller size.
+   *
+   * Inland water takes its colour from what is under it and what is over it — a
+   * bed of silt and gravel, and a bank of trees — where the sea takes its colour
+   * from the sky. So it is browner, greener, darker and much less saturated, and
+   * that difference is what stops a beck across a field looking like an inlet.
+   */
+  stream: hex('#5d7d84'),
+  /** Wet gravel at the edge of it, a tile wide. Nothing in England has a hard
+   *  edge between water and grass. */
+  shallow: hex('#6f8a7f'),
   waterDeep: hex('#3f6f92'),
   river: hex('#6fa3c4'),
 };

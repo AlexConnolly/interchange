@@ -24,7 +24,7 @@
  */
 
 import { Mesh } from './geometry.ts';
-import { ROAD, GLOW, type RGB } from './palette.ts';
+import { ROAD, GLOW, WALL, type RGB } from './palette.ts';
 import { HEIGHT_TO_WORLD } from './ground.ts';
 
 /**
@@ -63,6 +63,8 @@ export interface RoadSource {
   /** The formation level per tile, if the way was graded. 0 means follow the
    *  ground. */
   level: Int16Array;
+  /** Water under the road: a road tile that is also a watercourse is a bridge. */
+  isStream: (tile: number) => boolean;
   influence: (tile: number) => number;
 }
 
@@ -228,6 +230,44 @@ export function buildRoads(
       quadAt(m, cornerY, x, z,
              sx0 - v, sz0 - v, sx1 + v, sz1 + v, -0.008, faded(ROAD.verge, inf));
       quadAt(m, cornerY, x, z, sx0, sz0, sx1, sz1, 0, faded(st.surface, inf));
+
+      /*
+       * A bridge, which is a road tile with water under it and a parapet on it.
+       *
+       * There is no bridge *object* anywhere and there does not need to be. The
+       * terrain already carves the channel, the road network already routes
+       * across it, and the deck is the road surface that was going to be drawn
+       * here regardless — so the only thing actually missing was the low wall
+       * that tells you it is a bridge rather than a ford.
+       *
+       * That wall is doing a surprising amount of work. Without it the road
+       * simply changes colour where it crosses the beck and the eye reads a
+       * puddle; with it, at twenty pixels, you get the little humpbacked stone
+       * bridge that is on the front of every book about the English countryside.
+       * Two boxes.
+       */
+      if (src.isStream(tile)) {
+        const deck = (cornerY(x, z) + cornerY(x + 1, z)
+          + cornerY(x, z + 1) + cornerY(x + 1, z + 1)) / 4;
+        const wall = faded(WALL.stone, inf);
+        const cap = faded(WALL.shadow, inf);
+        const h = 0.115;
+        const th = 0.038;
+        // Along whichever way the road runs, and both at a crossing — which is
+        // rare and looks right when it happens.
+        if (openX) {
+          for (const side of [sz0 - v - th, sz1 + v + th]) {
+            m.box(x + 0.5, deck + h / 2, z + side, 0.5, h / 2, th, 0.012,
+                  wall, cap, wall);
+          }
+        }
+        if (openZ) {
+          for (const side of [sx0 - v - th, sx1 + v + th]) {
+            m.box(x + side, deck + h / 2, z + 0.5, th, h / 2, 0.5, 0.012,
+                  wall, cap, wall);
+          }
+        }
+      }
 
       if (st.worn && inf > 0.18) {
         /*

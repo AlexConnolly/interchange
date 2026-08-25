@@ -258,7 +258,15 @@ export function generateTerrain(cfg: WorldConfig): Terrain {
   deepenOffshore(t);
 
   // ---- 2. rivers ---------------------------------------------------------
-  carveRivers(t, rng, Math.max(5, Math.round(size / 128) * 4));
+  /*
+   * Rather more of them, now that they are streams instead of rivers.
+   *
+   * Five wide rivers is a map with a barrier on it; sixteen narrow ones is a map
+   * with drainage, which is what lowland England looks like from the air — every
+   * few fields there is a ditch or a beck, and half of them you only notice
+   * because of the line of willows along them.
+   */
+  carveRivers(t, rng, Math.max(12, Math.round(size / 128) * 12));
 
   // ---- 3. biomes and buildability ---------------------------------------
   classify(t, cfg.seed);
@@ -337,9 +345,23 @@ function carveRivers(t: Terrain, rng: Rng, count: number): void {
     let sx = 0;
     let sy = 0;
     let best = -1;
+    /*
+     * Anywhere on the map, and it used to be only the top half.
+     *
+     * `rng.range(4, (size >> 1) - 5)` confined every source to the northern
+     * quarter of the district, so every watercourse ran out of the north and the
+     * south had none at all. Measured on the shipping seed: 438 stream tiles, the
+     * nearest one 39.6 tiles from where the game opens, and *zero* of them inside
+     * the player's influence — so the water was real, drainable, and had never
+     * been seen by anybody.
+     *
+     * Sampling the whole map costs nothing: the "highest of forty candidates"
+     * below is what makes a river start on a ridge, and that works wherever the
+     * ridges are.
+     */
     for (let k = 0; k < 40; k++) {
       const x = rng.range(4, size - 5);
-      const y = rng.range(4, (size >> 1) - 5);
+      const y = rng.range(4, size - 5);
       const h = t.height[y * size + x];
       if (h > best) {
         best = h;
@@ -347,7 +369,15 @@ function carveRivers(t: Terrain, rng: Rng, count: number): void {
         sy = y;
       }
     }
-    if (best < 900) continue;
+    /*
+     * A source wants high ground, but not *that* high.
+     *
+     * At 900 a district whose hills happen to be gentle got no watercourses at
+     * all — the threshold was written against one map and silently deleted the
+     * feature on others. Six hundred is a shoulder rather than a summit, which
+     * is where a spring is anyway.
+     */
+    if (best < 600) continue;
 
     let x = sx;
     let y = sy;
@@ -358,8 +388,17 @@ function carveRivers(t: Terrain, rng: Rng, count: number): void {
       visited.add(i);
       if (t.height[i] <= SEA_LEVEL) break;
 
-      // Widen as it descends: a stream on the moor, an estuary at the coast.
-      const width = Math.min(2, Math.trunc(step / Math.max(1, size >> 2)));
+      /*
+       * Widen as it descends: a trickle on the moor, a beck by the village.
+       *
+       * Capped at one rather than two. Two gives a channel five tiles across,
+       * which at five tiles to a field is not a stream — it is a river, and it
+       * cuts the district in half wherever it runs. "Small rivers/streams, just
+       * small ones" is right, and it is also what most of England actually has:
+       * the water you cross without noticing, on a bridge you would not look at
+       * twice.
+       */
+      const width = Math.min(1, Math.trunc(step / Math.max(1, size >> 2)));
       carveAt(t, x, y, width);
 
       // Steepest descent among eight neighbours, with a positional jitter so a
@@ -426,7 +465,17 @@ function carveAt(t: Terrain, x: number, y: number, width: number): void {
       if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
       const j = ny * size + nx;
       const r2 = dx * dx + dy * dy;
-      if (r2 <= width * width + 1) {
+      /*
+       * The channel. A width of nought is one tile and not five.
+       *
+       * `r2 <= width * width + 1` is what rounds the blob off at every other
+       * width, and at nought it quietly becomes a plus five tiles across — so
+       * the narrowest possible headwater was three tiles wide and there was no
+       * way to ask for a ditch. A brook you can step over is the commonest
+       * watercourse in England and it needs to be expressible.
+       */
+      const channel = width === 0 ? r2 === 0 : r2 <= width * width + 1;
+      if (channel) {
         if (t.height[j] > SEA_LEVEL) t.height[j] = Math.min(t.height[j], bed);
         t.flags[j] |= TileFlag.River;
       } else if (r2 <= bank * bank + 1 && t.height[j] > SEA_LEVEL) {
