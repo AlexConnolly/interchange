@@ -10,6 +10,7 @@
  */
 
 import { AUTHORITY, DIR_BIT, DIR_DX, DIR_DY, DIR_OPPOSITE, Mode } from './constants.ts';
+import { generateSeaLanes, connectToSea } from './seaair.ts';
 import { NONE } from './network.ts';
 import { Deposit, SEA_LEVEL, TileFlag, type Terrain } from './terrain.ts';
 import { SiteState } from './sites.ts';
@@ -269,6 +270,42 @@ function buildPublicRoads(w: World): void {
   for (let i = 0; i < w.towns.count; i++) {
     connect(w, layer, w.towns.tile[i], trackCls, track.publicCharge, track.buildCost);
     w.townAccessTile[i] = w.towns.tile[i];
+  }
+
+  generateSeaways(w);
+}
+
+/**
+ * The sea, and the quays that reach it.
+ *
+ * seaair.md's point, restated in seaair.ts: the sea is already there. What
+ * gets built is the terminal, and the network between terminals exists for
+ * free — which is why a seaway costs nothing to lay and why it is generated
+ * here rather than placed by anybody. Air corridors work the same way but wait
+ * for era three, so they are laid when the first airport appears rather than
+ * at worldgen.
+ *
+ * The consequence for the ownership spine is the interesting half. Nobody owns
+ * the sea, so nobody charges for it, but everybody owns their own quay — port
+ * dues are exactly as real as a turnpike toll, and the money in sea trade is
+ * in the terminal rather than the route. That is a different shape of business
+ * from road and rail, and noticing it is part of what Act IV is for.
+ */
+function generateSeaways(w: World): void {
+  const c = w.content;
+  const seawayCls = c.wayIndex.get('seaway');
+  if (seawayCls === undefined) return;
+  const layer = w.layers[Mode.Water];
+  const laid = generateSeaLanes(w.terrain, layer, w.assets, seawayCls, 0);
+  if (laid === 0) return;
+
+  // Every coastal town and every site on the shore gets an approach channel,
+  // which is what makes it a port rather than a place near some water.
+  for (let i = 0; i < w.towns.count; i++) {
+    connectToSea(w.terrain, layer, w.assets, seawayCls, w.towns.tile[i], 26, AUTHORITY, 0);
+  }
+  for (let s = 0; s < w.sites.count; s++) {
+    connectToSea(w.terrain, layer, w.assets, seawayCls, w.sites.tile[s], 20, AUTHORITY, 0);
   }
 }
 

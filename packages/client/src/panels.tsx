@@ -14,6 +14,8 @@ import {
   CHARTER_NAMES, Cmd, ContractState, LINE_IS_INCOME, LINE_NAMES, Line,
   STATE_NAMES, StopAction, TICKS_PER_DAY, MAX_STOPS, NONE, VState,
   CHARTER_REQUIREMENTS,
+  Intervention, INTERVENTION_NAMES, DOMINANCE_TILES, DOMINANCE_TRADE,
+  PATIENCE_DAYS,
 } from '@interchange/sim';
 import { content } from '@interchange/data';
 import { money, num, pct, shortMoney, signClass, tonnes, days } from './format.ts';
@@ -640,6 +642,59 @@ export function CharterPanel({ engine }: { engine: Engine }): JSX.Element {
             </div>
           );
         })}
+      </div>
+      <RegulatorNotice engine={engine} />
+    </div>
+  );
+}
+
+/**
+ * How the authority sees you.
+ *
+ * Only drawn once there is something to see, because a panel that says 'no
+ * action is being taken against you' every day for forty years is furniture.
+ * But once the pressure is building it must be visible and it must be
+ * quantified, because the whole claim of design.md 3.7 is that regulation is
+ * *earned*, and a consequence the player could not see coming is not earned,
+ * it is a random event. The two shares here are the two the regulator
+ * actually measures — no hidden third term.
+ */
+function RegulatorNotice({ engine }: { engine: Engine }): JSX.Element | null {
+  const w = engine.world;
+  const p = w.player;
+  const level = w.regulator.level[p];
+  const tiles = w.regulator.tileShare[p];
+  const trade = w.regulator.tradeShare[p];
+  const watched = tiles > DOMINANCE_TILES * 100 || trade > DOMINANCE_TRADE * 100;
+  if (level === Intervention.None && !watched) return null;
+
+  const pressure = Math.min(1, w.regulator.pressure[p] / (PATIENCE_DAYS * TICKS_PER_DAY));
+  return (
+    <div className="body" style={{ borderTop: '1px solid var(--line)' }}>
+      <div className="row">
+        <div className="grow">
+          <div className="title">
+            The authority{' '}
+            <span className={level > Intervention.Referral ? 'chip neg' : 'chip'}>
+              {INTERVENTION_NAMES[level]}
+            </span>
+          </div>
+          <div className="sub">
+            You hold {tiles}% of the region&rsquo;s way and {trade}% of its carrying trade.
+          </div>
+          {level < Intervention.CompulsoryPurchase && (
+            <>
+              <div className="sub" style={{ marginTop: 4 }}>
+                {watched
+                  ? 'A referral is being prepared. Sell, or charge less, and it lapses.'
+                  : 'No longer dominant. The case against you is being wound down.'}
+              </div>
+              <div className="meter" style={{ marginTop: 4 }}>
+                <div style={{ width: `${pressure * 100}%`, background: 'var(--bad)' }} />
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

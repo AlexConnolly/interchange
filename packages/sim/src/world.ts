@@ -22,6 +22,8 @@ import {
 } from './economy.ts';
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
 import { Hasher } from './hash.ts';
+import { generateAirCorridors } from './seaair.ts';
+import { RegulatorTable, stepRegulator, accessChargeFor, Intervention, INTERVENTION_NAMES } from './regulation.ts';
 import {
   AssetTable, Graph, NONE, NO_WAY, WayLayer, hashNetwork, rebuildGraph,
 } from './network.ts';
@@ -117,6 +119,11 @@ export class World {
   private vehicleMode = new Uint8Array(256);
   private cargoPrice = new Int32Array(64);
   private recipes: RecipeTables;
+  /** The authority's competition powers, and how far it has had to use them
+   *  against each company. design.md 3.7. */
+  readonly regulator = new RegulatorTable();
+  private lastEra = 0;
+  private airLaid = false;
   private cargoRateWeight = new Float64Array(256).fill(1);
   private townDemandPerThousand: Float64Array;
   private townWant: Record<string, number> = {};
@@ -463,6 +470,7 @@ export class World {
 
   private stepDay(): void {
     const b = this.content.balance;
+    this.checkEraTurn();
 
     // running costs, breakdowns, and obsolescence
     const year = this.year;
@@ -541,6 +549,7 @@ export class World {
     this.stepObjectives();
     if (this.dayOfMonth === 0 && this.day > 0) this.companies.closeMonth();
     if (this.tick % TICKS_PER_YEAR === 0 && this.tick > 0) this.companies.closeYear();
+    this.stepRegulation();
     this.checkCharters();
   }
 
@@ -721,7 +730,7 @@ export class World {
     this.assets.passes[asset]++;
     if (owner === payer) return;
     const tiles = this.graph.linkChainLen[link] - 1;
-    const charge = this.assets.charge[asset] * tiles;
+    const charge = accessChargeFor(this.regulator, this.assets, asset) * tiles;
     if (charge <= 0) return;
     this.companies.post(payer, Line.AccessPaid, charge);
     this.assets.revenue[asset] += charge;
@@ -1327,7 +1336,7 @@ export class World {
             for (const asset of this.conveyorGrid.grids[gi].assets) {
               const lineOwner = this.assets.owner[asset];
               if (lineOwner === owner) continue;
-              const fee = Math.round((moved * this.assets.charge[asset]) / 4);
+              const fee = Math.round((moved * accessChargeFor(this.regulator, this.assets, asset)) / 4);
               if (fee <= 0) continue;
               this.companies.post(owner, Line.AccessPaid, fee);
               if (lineOwner !== AUTHORITY) this.companies.post(lineOwner, Line.AccessCharged, fee);
@@ -1436,6 +1445,79 @@ export class World {
    * that you have run a real business at the current level, not that a
    * timer expired.
    */
+  /**
+   * Things that happen once, when the century turns a page.
+   *
+   * Air is the clearest case. There is no sky to build, only aerodromes, so
+   * the corridors between them cannot be laid at worldgen — in 1860 there is
+   * nowhere for them to go — and they cannot be laid by the player either,
+   * because nobody builds a flight path. They come into existence when the
+   * era does, between the places big enough to have an aerodrome, which is
+   * the same argument seaair.ts makes about the sea and for the same reason.
+   */
+  private checkEraTurn(): void {
+    const era = this.era;
+    if (era === this.lastEra) return;
+    const was = this.lastEra;
+    this.lastEra = era;
+    if (was === 0) return;
+
+    const airCls = this.content.wayIndex.get('airway');
+    if (airCls !== undefined && this.content.ways[airCls].era <= era && !this.airLaid) {
+      // The four largest towns get an aerodrome. Fewer and there is no network;
+      // more and every village in the region has an airport, which is silly and
+      // also makes the air graph enormous for no gain.
+      const order = Array.from({ length: this.towns.count }, (_, i) => i)
+        .sort((a, b) => this.towns.population[b] - this.towns.population[a]);
+      const airports = order.slice(0, 4).map((t) => this.towns.tile[t]);
+      if (airports.length >= 2) {
+        const laid = generateAirCorridors(
+          this.terrain, this.layers[Mode.Air], this.assets, airCls, airports, this.tick,
+        );
+        if (laid > 0) {
+          this.airLaid = true;
+          this.rebuild();
+          this.onEvent?.('era', 'Aerodromes have opened at the four largest towns, and the corridors between them are open to anybody with an aeroplane.');
+        }
+      }
+    }
+  }
+
+  /**
+   * The regulator, once a day.
+   *
+   * Everything it decides is announced, because an intervention the player
+   * only discovers by noticing their tolls have stopped earning is a bug they
+   * will report rather than an antagonist they will respect.
+   */
+  private stepRegulation(): void {
+    const report = stepRegulator(
+      this.regulator, this.assets, this.companies, this.era, this.tick,
+      this.content.balance.valuationPct,
+      (asset, from, price) => {
+        this.assets.owner[asset] = AUTHORITY;
+        this.assets.forSale[asset] = 0;
+        this.assets.charge[asset] = this.content.ways[this.assets.cls[asset]].publicCharge;
+        this.companies.post(from, Line.AssetTrade, price);
+        this.router.invalidate();
+        if (from === this.player) {
+          this.onEvent?.('regulator', 'The authority has compulsorily purchased one of your ways for public benefit. You have been paid the market valuation.');
+        }
+      },
+    );
+    for (const c of report.changed) {
+      if (c.company !== this.player) continue;
+      this.onEvent?.(
+        'regulator',
+        c.up
+          ? `The authority has escalated to: ${INTERVENTION_NAMES[c.level]}.`
+          : c.level === Intervention.None
+            ? 'The authority has closed its case against you.'
+            : `The authority has stepped back to: ${INTERVENTION_NAMES[c.level]}.`,
+      );
+    }
+  }
+
   private checkCharters(): void {
     for (let c = 1; c < this.companies.count; c++) {
       if (this.companies.bankrupt[c]) continue;
@@ -1961,6 +2043,12 @@ export class World {
     hashNetwork(h, this.graph, this.assets);
     hashSites(h, this.sites, this.towns);
     hashEconomy(h, this.companies, this.contracts, this.services);
+    // The regulator is state that steers future state, so a divergence in it
+    // has to show up here rather than a decade later when a charge cap lands
+    // on one client and not the other.
+    h.array(this.regulator.level, this.companies.count);
+    h.array(this.regulator.pressure, this.companies.count);
+    h.array(this.regulator.relief, this.companies.count);
     h.int(this.vehicles.count);
     for (let i = 0; i < this.vehicles.count; i++) {
       if (!this.vehicles.alive[i]) {

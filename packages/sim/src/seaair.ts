@@ -159,15 +159,21 @@ export function connectToSea(
       layer.tileCount++;
       laid++;
     }
-    // The quay itself sits on land and is the terminal, so it joins the water
-    // network without becoming water.
-    if (prev !== fromTile || layer.cls[fromTile] !== 255) {
-      if (prev === fromTile) {
-        layer.cls[prev] = cls;
-        layer.asset[prev] = asset;
-        layer.tileCount++;
-        laid++;
-      }
+    /*
+     * The quay itself sits on land, and it still has to be *on* the water
+     * layer, because a terminal that is merely next to the network is not on
+     * it: the graph tracer walks tiles that carry a class, so a quay with no
+     * class gets no node, and a town with no node cannot be routed to. This
+     * condition used to be written so that it only fired when the tile
+     * already had a class, which is to say never — twelve thousand tiles of
+     * sea lane were generated and not one town or industry in the region
+     * could reach any of it.
+     */
+    if (prev === fromTile && layer.cls[prev] === 255) {
+      layer.cls[prev] = cls;
+      layer.asset[prev] = asset;
+      layer.tileCount++;
+      laid++;
     }
     const dx = (prev % size) - (cur % size);
     const dy = ((prev / size) | 0) - ((cur / size) | 0);

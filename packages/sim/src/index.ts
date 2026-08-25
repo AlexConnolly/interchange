@@ -43,3 +43,4 @@ export function createWorld(config: Partial<WorldConfig> = {}, content?: Content
   generateWorld(w);
   return w;
 }
+export * from './regulation.ts';
