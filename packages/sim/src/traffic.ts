@@ -57,6 +57,23 @@ export interface NodeGeometry {
   phaseOf: Int32Array;
 }
 
+/**
+ * How fast the whole road network runs, as a percentage of the posted limits.
+ *
+ * One dial for every vehicle on every road, applied to the final limit rather
+ * than to the vehicle or the way - so it catches whichever of the two was
+ * binding, and a road in poor condition stays proportionally slower than a good
+ * one.
+ *
+ * Fifty, because the district reads as calm at half the speed it was authored at
+ * and frantic at full. Worth being explicit that this is a *look* and not a
+ * balance change: halving how fast a lorry moves halves how many loads it carries
+ * in an afternoon, so the haulage rate is raised to leave the ladder exactly
+ * where it was. The second van still arrives at the same minute; it simply gets
+ * there behind a lorry that is not hurtling.
+ */
+const ROAD_PACE = 50;
+
 const KERB_OFFSET = Math.round(0.22 * FX_ONE);
 const ARM_RADIUS = FX_ONE;
 
@@ -443,6 +460,9 @@ export function stepTraffic(
       const pct = conditions(link, id);
       if (pct < 100) limit = ((limit * pct) / 100) | 0;
     }
+    // And the district's pace, applied last so it catches whichever of the way,
+    // the vehicle or the conditions was the binding constraint.
+    limit = ((limit * ROAD_PACE) / 100) | 0;
 
     // Look ahead. `free` is how many cells are clear in front; a vehicle with
     // the full lookahead clear runs at the limit, and one with none stops.

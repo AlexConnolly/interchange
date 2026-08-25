@@ -71,7 +71,16 @@ describe('tractors', () => {
     // report working must be one of the field's own. A tractor that ploughed
     // the lane it drove down would be very obvious and very wrong.
     const worked = new Set<number>();
-    run(400, worked);
+    /*
+     * Long enough for a full visit at the district's *current* pace.
+     *
+     * Four hundred seconds was enough until the machines were halved in speed,
+     * at which point this failed at thirty-eight tiles of forty-eight — which is
+     * the test doing its job: it is tied to a tuning constant and it said so the
+     * moment the constant moved. Doubled, with room to spare, so the next change
+     * of pace does not fail it for the same uninteresting reason.
+     */
+    run(1200, worked);
     /*
      * Every tile of the field, not "more than six".
      *

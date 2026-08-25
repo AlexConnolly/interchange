@@ -215,7 +215,9 @@ export class Ambient {
      * frame in ten seconds — motorway speed on a country lane. Three quarters of
      * a tile to a tile and a half reads as a drive.
      */
-    w.speed = 0.75 + this.rnd() * 0.7;
+    // Half what it was. A car crossing a twenty-six tile frame in twenty seconds
+    // is motorway pace on a country lane; forty seconds is a lane.
+    w.speed = 0.38 + this.rnd() * 0.35;
     w.model = this.models[Math.floor(this.rnd() * this.models.length) % this.models.length];
     w.livery = Math.floor(this.rnd() * 4) % 4;
     if (!this.dispatch(w, start)) return false;

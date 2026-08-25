@@ -539,8 +539,23 @@ export const RATE_WEIGHT_BY_TIER: Record<string, number> = { passenger: 0.11 };
  * a couple of months of play - fast enough that the loop turns over, slow enough
  * that the purchase is a decision. At 560 a 7.5-tonne load over twenty-six tiles
  * paid a hundred and seventeen pounds, which was about half of what that needs.
+ *
+ * Raised from 15,750 when the roads were slowed to half speed. That was a change
+ * to the *look* of the district and it had no business being a change to the
+ * economy - but halving how fast a lorry moves halves how many loads it carries
+ * in an afternoon, and the probe said so immediately: the first five minutes fell
+ * from three thousand pounds to sixteen hundred and the second van slipped from
+ * twelve minutes to sixteen.
+ *
+ * Twenty-four thousand puts the second van back at twelve minutes exactly, which
+ * is the rung that matters - it is the first decision the game asks for, and the
+ * minute it arrives at is the one thing about the opening that has been tuned by
+ * playing it. The five-minute figure lands a little lower than before because
+ * halving the speed changes the *shape* of the curve as well as its height: fewer
+ * deliveries, each worth more, so the cash arrives in bigger steps. One dial
+ * cannot hold both, and the rung is the one worth holding.
  */
-export const HAUL_BASE = 15750;
+export const HAUL_BASE = 24000;
 
 /**
  * How much dearer a business is than its build cost.

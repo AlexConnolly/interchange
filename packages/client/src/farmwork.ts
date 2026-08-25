@@ -290,7 +290,10 @@ export class Farmwork {
      * wrong before you have worked out why.
      */
     const pace = t.job === 'combine' ? 1.25 : t.job === 'spray' ? 1.5 : 1;
-    t.speed = (0.55 + this.rnd() * 0.25) * pace;
+    // Half, with the same district-wide slowdown as the roads. The relative paces
+    // are kept: a combine still moves through a crop faster than a plough through
+    // soil, both of them at half of what they were.
+    t.speed = (0.28 + this.rnd() * 0.13) * pace;
     // Which way the furrows run: along the longer side, so a field is worked in
     // few long passes rather than many short ones. Which is both what happens and
     // what looks purposeful.
