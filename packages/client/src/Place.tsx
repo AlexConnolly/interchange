@@ -32,6 +32,8 @@ export interface PlaceActions {
   accept: (contract: number, vehicle: number) => void;
   /** Draw a run on the map, or clear it with an empty list. */
   preview: (from: number, to: number) => void;
+  /** Take the camera to a place. Only ever called for one you can see. */
+  goTo: (site: number) => void;
   close: () => void;
 }
 
@@ -50,6 +52,8 @@ export function Place({
   const price = world.priceOf(site);
   const cash = world.companies.cash[world.player];
   const reachable = world.influence.usable(world.siteAccessTile[site] ?? -1);
+  const verdict = world.canBuySite(site);
+  const supplies = world.suppliersFor(site);
 
   const stock = (id: string): { name: string; colour: string; have: number; cargo: number } | null => {
     const ci = C.cargoIndex.get(id);
@@ -161,6 +165,21 @@ export function Place({
           </>
         )}
 
+        {supplies.length > 0 && (
+          <>
+            <div className="head">Supplied by</div>
+            {supplies.map((g) => (
+              <Supply
+                key={g.cargo}
+                world={world}
+                group={g}
+                onGo={actions.goTo}
+                onHover={(to) => actions.preview(to, site)}
+              />
+            ))}
+          </>
+        )}
+
         {!mine && (
           <>
             <div className="head">Buy it</div>
@@ -174,14 +193,10 @@ export function Place({
               </div>
               <button
                 className="btn primary block"
-                disabled={cash < price || !reachable}
+                disabled={!verdict.ok}
                 onClick={() => actions.buy(site)}
               >Buy it</button>
-              {(cash < price || !reachable) && (
-                <div className="why">
-                  {!reachable ? 'You have no standing out there yet.' : 'Not enough in the bank.'}
-                </div>
-              )}
+              {!verdict.ok && <div className="why">{verdict.reason}</div>}
             </div>
           </>
         )}
@@ -232,6 +247,85 @@ function Drivers({
         </button>
       ))}
       <button className="btn block" onClick={onCancel}>Not now</button>
+    </div>
+  );
+}
+
+/**
+ * One input, and who could supply it.
+ *
+ * Three states per candidate and they are deliberately very different to look
+ * at, because the whole point of the panel is to answer "what do I have to do
+ * next":
+ *
+ *   **Yours** — a tick. The requirement is met and there is nothing to do.
+ *   **In sight** — the place, named, its distance, and clicking takes you
+ *   there. Hovering draws the run it would make on the map.
+ *   **Unknown** — three question marks, not a button.
+ *
+ * That last one is the important one. A supplier under fog must not be named:
+ * the influence area exists to make the district reveal itself as you earn it,
+ * and a panel that tells you "the creamery at Ashcombe" while Ashcombe is
+ * invisible hands you the map for free. Saying "two somewhere out there" is
+ * better than a name and better than silence — it tells you the chain
+ * continues, and that finding it is the game.
+ */
+function Supply({
+  world, group, onGo, onHover,
+}: {
+  world: World;
+  group: {
+    cargo: number; owned: boolean;
+    candidates: { site: number; distance: number; visible: boolean }[];
+    hidden: number;
+  };
+  onGo: (site: number) => void;
+  onHover: (site: number) => void;
+}): JSX.Element {
+  const cargo = C.cargo[group.cargo];
+  return (
+    <div className={`card supply ${group.owned ? 'met' : ''}`}>
+      <div className="card-line">
+        <span className="swatch" style={{ background: cargo.colour }} />
+        <strong>{cargo.name}</strong>
+        {group.owned
+          ? <span className="have">✓ yours</span>
+          : <span className="to">needed</span>}
+      </div>
+      {group.candidates.map((c) => {
+        const yours = world.sites.owner[c.site] === world.player;
+        return (
+          <button
+            key={c.site}
+            className={`driver ${yours ? 'mine' : ''}`}
+            onClick={() => onGo(c.site)}
+            onMouseEnter={() => onHover(c.site)}
+            onMouseLeave={() => onHover(-1)}
+          >
+            <span className="grow">
+              <span className="driver-name">
+                {C.industries[world.sites.def[c.site]].name}
+              </span>
+              <span className="driver-where">
+                {c.distance} tiles{yours ? ' · yours' : ''}
+              </span>
+            </span>
+            <span className="driver-no">{yours ? '✓' : 'go'}</span>
+          </button>
+        );
+      })}
+      {group.hidden > 0 && (
+        <div className="unknown">
+          {group.candidates.length > 0 ? 'and ' : ''}
+          <span className="qm">???</span>
+          {group.hidden === 1
+            ? ' one more, somewhere out of reach'
+            : ` ${group.hidden} more, somewhere out of reach`}
+        </div>
+      )}
+      {group.candidates.length === 0 && group.hidden === 0 && (
+        <div className="why">Nothing in the district makes it.</div>
+      )}
     </div>
   );
 }

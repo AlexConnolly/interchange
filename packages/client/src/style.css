@@ -320,3 +320,23 @@ html, body, #root, .app {
   padding: 2px 6px;
   border-radius: 5px;
 }
+
+/* Suppliers.
+ *
+ * A met requirement recedes and an unmet one does not, which is the only
+ * hierarchy this panel needs: the eye should land on what is still to do. */
+.supply.met { opacity: 0.62; }
+.supply .have { color: #3f8a5a; font-weight: 600; font-size: 12px; }
+.driver.mine { border-color: rgba(63, 138, 90, 0.45); }
+.unknown {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 9px; font-size: 12px; color: #8b8577;
+}
+/* Three question marks, and they are the interface for a place you have not
+ * earned the right to know about. Monospace so they read as a redaction rather
+ * than as a word. */
+.qm {
+  font-family: ui-monospace, monospace; letter-spacing: 2px;
+  color: #b0a795; background: rgba(0, 0, 0, 0.05);
+  padding: 1px 5px; border-radius: 4px;
+}

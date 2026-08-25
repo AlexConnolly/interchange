@@ -22,7 +22,7 @@ import {
 } from '@interchange/render';
 import { ContractPanel, Pins, money } from './Pins.tsx';
 import { Vehicles, Yard } from './Fleet.tsx';
-import { Place } from './Place.tsx';
+import { Place, type PlaceActions } from './Place.tsx';
 import './style.css';
 
 loadContent();
@@ -48,8 +48,10 @@ export function App(): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [ready, setReady] = useState(false);
   const [hud, setHud] = useState({ date: '', vehicles: 0, fps: 0, tris: 0, cash: 0, free: 0 });
-  const [live, setLive] = useState<{ world: World; renderer: Renderer } | null>(null);
+  const [live, setLive] = useState<
+    { world: World; renderer: Renderer; src: RenderSource } | null>(null);
   const [open, setOpen] = useState(-1);
+  const [place, setPlace] = useState(-1);
   const [screen, setScreen] = useState<'none' | 'vehicles' | 'yard'>('none');
   const [revision, setRevision] = useState(0);
   const bump = useCallback(() => setRevision((r) => r + 1), []);
@@ -72,6 +74,49 @@ export function App(): JSX.Element {
     if (!live) return;
     if (live.world.addFacility(yard, facility)) bump();
   }, [live, bump]);
+
+  /*
+   * Everything the place panel can do.
+   *
+   * `preview` is the one worth reading. "26 tiles" is not an answer to where a
+   * run goes — the player asked for the route drawn on the map, and drawn in
+   * two colours, because a haulage job is two journeys: out from the yard to
+   * the pickup, which earns nothing, and pickup to drop, which pays. Drawn as
+   * one line they look like one journey, which hides exactly the thing you are
+   * choosing between when two yards both have a spare tanker.
+   */
+  const placeActions: PlaceActions = {
+    buy: useCallback((site: number): void => {
+      if (!live) return;
+      if (live.world.buySite(site).ok) bump();
+    }, [live, bump]),
+    supply: useCallback((from: number, to: number, cargo: number): void => {
+      if (!live) return;
+      if (live.world.supply(from, to, cargo)) bump();
+    }, [live, bump]),
+    accept: useCallback((contract: number, vehicle: number): void => {
+      if (!live) return;
+      if (live.world.acceptContract(contract, live.world.player, vehicle)) bump();
+    }, [live, bump]),
+    preview: useCallback((from: number, to: number): void => {
+      if (!live) return;
+      live.renderer.showRoute(
+        from < 0 || to < 0 ? [] : [{
+          tiles: live.world.previewRoute(from, to), colour: RUN.loaded,
+        }],
+        live.src,
+      );
+    }, [live]),
+    goTo: useCallback((site: number): void => {
+      if (!live) return;
+      // Straight to it. A supplier you can see is a place you can go, and the
+      // click is the whole reason the panel names it rather than describing it.
+      live.renderer.camX = live.world.sites.x[site] + 0.5;
+      live.renderer.camZ = live.world.sites.y[site] + 0.5;
+      setPlace(site);
+    }, [live]),
+    close: useCallback((): void => setPlace(-1), []),
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -326,10 +371,14 @@ export function App(): JSX.Element {
     let dragging = false;
     let lastX = 0;
     let lastY = 0;
+    let downX = 0;
+    let downY = 0;
     const down = (e: PointerEvent): void => {
       dragging = true;
       lastX = e.clientX;
       lastY = e.clientY;
+      downX = e.clientX;
+      downY = e.clientY;
       canvas.setPointerCapture(e.pointerId);
     };
     const move = (e: PointerEvent): void => {
@@ -348,6 +397,32 @@ export function App(): JSX.Element {
     const up = (e: PointerEvent): void => {
       dragging = false;
       if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+      /*
+       * A click, not a drag.
+       *
+       * Four pixels of travel is the threshold, and it has to exist: panning is
+       * a press-and-move on the same surface that selects, so without it every
+       * pan ends by opening whatever place the pointer happened to stop over.
+       */
+      if (Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) > 4) return;
+      const tile = renderer.pick(e.clientX, e.clientY, src);
+      if (tile < 0) return;
+      // The nearest business to where you clicked, within a couple of tiles.
+      // Clicking a farmyard should open the farm, and the farmyard is several
+      // tiles wide.
+      const cx = tile % DISTRICT;
+      const cz = Math.floor(tile / DISTRICT);
+      let found = -1;
+      let bestD = 9;
+      for (let i = 0; i < world.sites.count; i++) {
+        const at = world.siteAccessTile[i];
+        if (at < 0 || !world.influence.usable(at)) continue;
+        const dx = (at % DISTRICT) - cx;
+        const dz = Math.floor(at / DISTRICT) - cz;
+        const d = dx * dx + dz * dz;
+        if (d < bestD) { bestD = d; found = i; }
+      }
+      if (found >= 0) setPlace(found);
     };
     const wheel = (e: WheelEvent): void => {
       e.preventDefault();
@@ -478,7 +553,7 @@ export function App(): JSX.Element {
       }
     };
     raf = requestAnimationFrame(loop);
-    setLive({ world, renderer });
+    setLive({ world, renderer, src });
     setReady(true);
 
     return () => {
@@ -502,6 +577,9 @@ export function App(): JSX.Element {
           revision={revision}
           onOpen={setOpen}
         />
+      )}
+      {live && place >= 0 && (
+        <Place world={live.world} site={place} actions={placeActions} />
       )}
       {live && open >= 0 && (
         <ContractPanel

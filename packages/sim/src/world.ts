@@ -2342,6 +2342,118 @@ export class World {
   }
 
   /**
+   * Who could supply this place, input by input.
+   *
+   * The mirror of `buyersFor`, and the same observation read the other way: a
+   * supplier is a place with an output, which is a contract seen from the near
+   * end. Neither needs a new table.
+   *
+   * Grouped **by input cargo** rather than returned as one flat list, because
+   * the rule below is per-cargo: a village shop wants meat *and* dairy, and
+   * owning two abattoirs does not get you the dairy. Several places can supply
+   * the same input and any one of them counts, which is what makes the ladder a
+   * choice rather than a corridor.
+   *
+   * `visible` is the influence test. A supplier you cannot see must not be
+   * named — the interface shows it as an unknown, because telling the player
+   * "you need the creamery at Ashcombe" while Ashcombe is under fog hands them
+   * the map for free and empties the influence area of its whole purpose.
+   */
+  suppliersFor(site: number): {
+    cargo: number;
+    owned: boolean;
+    candidates: { site: number; distance: number; visible: boolean }[];
+    /** How many exist in the district but cannot be seen yet. */
+    hidden: number;
+  }[] {
+    const out: {
+      cargo: number; owned: boolean;
+      candidates: { site: number; distance: number; visible: boolean }[];
+      hidden: number;
+    }[] = [];
+    if (site < 0 || site >= this.sites.count) return out;
+    const ins = this.recipes.inputs[this.sites.def[site]];
+    for (let i = 0; i < ins.length; i += 2) {
+      const cargo = ins[i];
+      const candidates: { site: number; distance: number; visible: boolean }[] = [];
+      let owned = false;
+      let hidden = 0;
+      for (let b = 0; b < this.sites.count; b++) {
+        if (b === site) continue;
+        const outs = this.recipes.outputs[this.sites.def[b]];
+        let makes = false;
+        for (let k = 0; k < outs.length; k += 2) if (outs[k] === cargo) { makes = true; break; }
+        if (!makes) continue;
+        const tile = this.siteAccessTile[b];
+        const visible = tile !== NONE && this.influence.usable(tile);
+        if (this.sites.owner[b] === this.player) owned = true;
+        if (!visible) { hidden++; continue; }
+        const dx = this.sites.x[b] - this.sites.x[site];
+        const dy = this.sites.y[b] - this.sites.y[site];
+        candidates.push({
+          site: b,
+          distance: Math.round(Math.sqrt(dx * dx + dy * dy)),
+          visible,
+        });
+      }
+      candidates.sort((a, b) => a.distance - b.distance);
+      out.push({ cargo, owned, candidates, hidden });
+    }
+    return out;
+  }
+
+  /**
+   * Can this place be bought?
+   *
+   * **You must already own a supplier for every input.** A creamery takes milk,
+   * so you cannot buy the creamery until you own something that makes milk.
+   *
+   * This is the rule that turns the ladder from a suggestion into the shape of
+   * the game. Before it, "buy production" was one move you could make anywhere
+   * you could afford, and the sensible play was to save up and buy the most
+   * valuable thing in sight — which skips the middle of the game entirely. With
+   * it, the chain has to be built from the bottom: a farm first, because a farm
+   * has no inputs, then the creamery it feeds, then the shop the creamery
+   * feeds. You cannot buy the top of a chain you do not own the bottom of.
+   *
+   * It also makes the refusal say something useful. "You need a supplier of
+   * milk" is a goal; "not enough money" is only a wait. And the places with no
+   * inputs at all — the farms, the quarry, the forestry — are exactly the ones
+   * you can always buy, which is the right first rung and needed no special
+   * case to become one.
+   */
+  canBuySite(site: number): { ok: boolean; reason: string; needs: number[] } {
+    const needs: number[] = [];
+    if (site < 0 || site >= this.sites.count) {
+      return { ok: false, reason: 'No such place.', needs };
+    }
+    if (this.sites.owner[site] === this.player) {
+      return { ok: false, reason: 'Already yours.', needs };
+    }
+    const tile = this.siteAccessTile[site];
+    if (tile === NONE || !this.influence.usable(tile)) {
+      return { ok: false, reason: 'Too far out. You have no standing there yet.', needs };
+    }
+    for (const group of this.suppliersFor(site)) {
+      if (!group.owned) needs.push(group.cargo);
+    }
+    if (needs.length > 0) {
+      const names = needs.map((c) => this.content.cargo[c].name.toLowerCase());
+      const list = names.length === 1 ? names[0]
+        : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+      return {
+        ok: false,
+        reason: `You supply none of its ${list}. Own that first.`,
+        needs,
+      };
+    }
+    if (this.companies.cash[this.player] < this.priceOf(site)) {
+      return { ok: false, reason: 'Not enough in the bank.', needs };
+    }
+    return { ok: true, reason: '', needs };
+  }
+
+  /**
    * Buy a place.
    *
    * This is the pivot of the whole game (design.md §3, rung 2). Taking a
@@ -2354,16 +2466,12 @@ export class World {
    * the same one.
    */
   buySite(site: number): { ok: boolean; reason: string } {
-    if (site < 0 || site >= this.sites.count) return { ok: false, reason: 'No such place.' };
-    if (this.sites.owner[site] === this.player) return { ok: false, reason: 'Already yours.' };
-    const tile = this.siteAccessTile[site];
-    if (tile === NONE || !this.influence.usable(tile)) {
-      return { ok: false, reason: 'Too far out. You have no standing there yet.' };
-    }
+    // Every condition lives in `canBuySite`, so the button's greyed-out reason
+    // and the actual refusal cannot drift apart — which is the commonest way a
+    // rule like this ends up lying to the player.
+    const verdict = this.canBuySite(site);
+    if (!verdict.ok) return { ok: false, reason: verdict.reason };
     const price = this.priceOf(site);
-    if (this.companies.cash[this.player] < price) {
-      return { ok: false, reason: 'Not enough in the bank.' };
-    }
     this.companies.post(this.player, Line.AssetTrade, price);
     this.sites.owner[site] = this.player;
     this.refreshInfluence();
