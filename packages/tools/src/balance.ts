@@ -226,13 +226,30 @@ const dead: string[] = [];
 const unserved: string[] = [];
 const notYet: string[] = [];
 
-/** The earliest era any industry makes this cargo. */
-const earliestMaker = (id: string): number => {
-  let best = 99;
+/**
+ * The earliest era this cargo can have both a producer and a consumer.
+ *
+ * Both halves, not just the maker. An aluminium smelter arrives in era three
+ * and the electronics plant that consumes aluminium in era five, so a
+ * hundred-year run — which ends in 1960, era four — has smelters making
+ * aluminium and nowhere on earth for it to go. Reporting that as dead content
+ * is reporting the calendar as a bug, which is what this did.
+ */
+const earliestChain = (id: string): number => {
+  let makes = 99;
+  let takes = 99;
   for (const ind of C.industries) {
-    if (ind.recipe.outputs[id] !== undefined && ind.fromEra < best) best = ind.fromEra;
+    if (ind.recipe.outputs[id] !== undefined && ind.fromEra < makes) makes = ind.fromEra;
+    if (ind.recipe.inputs[id] !== undefined && ind.fromEra < takes) takes = ind.fromEra;
   }
-  return best;
+  // A town is a consumer too, and for passengers and post also the producer.
+  const probe = createWorld({ seed: 1, size: 128, townCount: 4, companyCount: 2 });
+  const ci = C.cargoIndex.get(id);
+  if (ci !== undefined) {
+    if (probe.townDemandFor(ci) > 0) takes = 1;
+    if (probe.townProduces(ci)) makes = 1;
+  }
+  return Math.max(makes, takes);
 };
 const eraAtEnd = C.eras.reduce((n, e) => (e.from <= 1860 + YEARS ? e.n : n), 1);
 const live: { name: string; share: number }[] = [];
@@ -249,12 +266,11 @@ for (let k = 0; k < C.cargo.length; k++) {
     live.push({ name: cargo.name, share });
   } else if (results.some((r) => r.reachable[k])) {
     unserved.push(cargo.name);
-  } else if (earliestMaker(cargo.id) > eraAtEnd) {
+  } else if (earliestChain(cargo.id) > eraAtEnd) {
     /*
-     * Nothing in the region makes it yet, and nothing was ever going to
-     * within the years this sweep covers. A distribution centre arrives in
-     * era six; a hundred-and-twenty-year run ends in 1980, which is era five.
-     * Calling that dead content would be calling the calendar a bug.
+     * Nothing in the region can make it *and* consume it yet, and nothing was
+     * ever going to within the years this sweep covers. Calling that dead
+     * content would be calling the calendar a bug.
      */
     notYet.push(cargo.name);
   } else {
