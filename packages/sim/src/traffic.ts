@@ -398,6 +398,10 @@ export function stepTraffic(
   geometry: (NodeGeometry | null)[],
   onArrive: (vehicle: number, node: number) => void,
   onEnterLink: (vehicle: number, link: number) => void,
+  /** Percentage of the posted limit this link allows today, for weather and
+   *  flooding. Passed as a function rather than a table because it depends on
+   *  where the link is, not only what class it is. */
+  conditions: ((link: number, company: number) => number) | null,
 ): TrafficStats {
   const stats = scratchStats;
   stats.moving = 0;
@@ -427,6 +431,10 @@ export function stepTraffic(
     }
     const own = vehicleSpeed[v.type[id]];
     if (own < limit) limit = own;
+    if (conditions !== null) {
+      const pct = conditions(link, v.company[id]);
+      if (pct < 100) limit = ((limit * pct) / 100) | 0;
+    }
 
     // Look ahead. `free` is how many cells are clear in front; a vehicle with
     // the full lookahead clear runs at the limit, and one with none stops.

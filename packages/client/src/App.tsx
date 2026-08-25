@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { SPEED_STEPS, CHARTER_NAMES, TICKS_PER_DAY, Cmd, Mode, createWorld } from '@interchange/sim';
+import {
+  SPEED_STEPS, CHARTER_NAMES, TICKS_PER_DAY, Cmd, Mode, createWorld,
+  SEASON_NAMES, WEATHER_NAMES, Weather,
+} from '@interchange/sim';
 import { OverlayMode } from '@interchange/render';
 import { content } from '@interchange/data';
 import { Engine } from './engine.ts';
@@ -289,6 +292,17 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
               <div className="value neg">{money(debt)}</div>
             </div>
           )}
+          <div className="cell">
+            {/* The sky, only when it is doing something. Rain in the status bar
+                every other week is furniture; snow over a pass is a reason the
+                lorries are late, and the player should not have to guess. */}
+            <div className="label">{SEASON_NAMES[w.climate.season(w.day)]}</div>
+            <div className="value small">
+              {w.climate.weather === Weather.Clear
+                ? 'Clear'
+                : `${WEATHER_NAMES[w.climate.weather]}${w.climate.severity > 70 ? ' (hard)' : ''}`}
+            </div>
+          </div>
           <div className="cell">
             <div className="label">Charter</div>
             <div className="value small">{CHARTER_NAMES[w.companies.charter[w.player]]}</div>

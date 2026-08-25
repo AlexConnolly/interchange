@@ -44,3 +44,4 @@ export function createWorld(config: Partial<WorldConfig> = {}, content?: Content
   return w;
 }
 export * from './regulation.ts';
+export * from './weather.ts';

@@ -23,6 +23,10 @@ import {
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
 import { Hasher } from './hash.ts';
 import { generateAirCorridors } from './seaair.ts';
+import {
+  Climate, EventTable, stepEvents, floodSeverity, strikePercent,
+  runningCostPercent, ratePercent, FLOOD_LINE, EVENT_NAMES, EventKind, WEATHER_NAMES, Weather,
+} from './weather.ts';
 import { RegulatorTable, stepRegulator, accessChargeFor, Intervention, INTERVENTION_NAMES } from './regulation.ts';
 import {
   AssetTable, Graph, NONE, NO_WAY, WayLayer, hashNetwork, rebuildGraph,
@@ -122,6 +126,9 @@ export class World {
   /** The authority's competition powers, and how far it has had to use them
    *  against each company. design.md 3.7. */
   readonly regulator = new RegulatorTable();
+  /** The sky, and the things that go wrong under it. features.md 11 and 15. */
+  readonly climate = new Climate();
+  readonly events = new EventTable();
   private lastEra = 0;
   private airLaid = false;
   private cargoRateWeight = new Float64Array(256).fill(1);
@@ -435,6 +442,7 @@ export class World {
       this.vehicleSpeed, this.waySpeed, this.tick, this.config.size, this.geometry,
       (v, node) => this.onArrive(v, node),
       (v, link) => this.onEnterLink(v, link),
+      (link, company) => this.linkConditions(link, company),
     );
 
     // 5. production
@@ -474,10 +482,13 @@ export class World {
 
     // running costs, breakdowns, and obsolescence
     const year = this.year;
+    const fuelPct = runningCostPercent(this.events);
     for (let id = 0; id < this.vehicles.count; id++) {
       if (!this.vehicles.alive[id]) continue;
       const type = this.vehicles.type[id];
-      const cost = this.vehicleRunning[type];
+      // Fuel and fodder go up and down, and a running cost that never moves is
+      // a running cost the player stops thinking about.
+      const cost = (this.vehicleRunning[type] * fuelPct) / 100;
       this.companies.post(this.vehicles.company[id], Line.RunningCosts, cost);
       this.vehicles.costs[id] += cost;
       const svc = this.vehicles.service[id];
@@ -549,6 +560,7 @@ export class World {
     this.stepObjectives();
     if (this.dayOfMonth === 0 && this.day > 0) this.companies.closeMonth();
     if (this.tick % TICKS_PER_YEAR === 0 && this.tick > 0) this.companies.closeYear();
+    this.stepWeather();
     this.stepRegulation();
     this.checkCharters();
   }
@@ -1096,7 +1108,10 @@ export class World {
      * reason.
      */
     const dist = Math.max(direct, Math.min(this.vehicles.haulDistance[vehicle], direct * HAUL_ALLOWANCE));
-    const pence = haulageRate(this.cargoPrice[cargo], dist, this.cargoRateWeight[cargo]) * tonnes;
+    const boom = ratePercent(this.events, cargo);
+    const pence = Math.round(
+      (haulageRate(this.cargoPrice[cargo], dist, this.cargoRateWeight[cargo]) * tonnes * boom) / 100,
+    );
     this.companies.post(company, Line.Haulage, pence);
     this.movedByCargo[company * this.content.cargo.length + cargo] += tonnes;
     this.vehicles.revenue[vehicle] += pence;
@@ -1481,6 +1496,84 @@ export class World {
         }
       }
     }
+  }
+
+  /**
+   * The sky, once a day.
+   *
+   * Both halves are announced. A player whose lorries have slowed by a third
+   * and who has not been told why will look for the bug, and they are right
+   * to: an unexplained number is indistinguishable from a broken one.
+   */
+  private stepWeather(): void {
+    /*
+     * Only the weather that changes a decision is worth a line.
+     *
+     * Announcing every front produced ten notices a year, at which point the
+     * player stops reading the log — and the log is also where the regulator
+     * writes, so the cost of the noise is not the noise. Rain and fog are
+     * atmosphere and belong in the palette; snow and a storm can shut a pass,
+     * which is news.
+     */
+    const changed = this.climate.step(this.tick, this.day, this.rng);
+    const notable = this.climate.weather === Weather.Snow || this.climate.weather === Weather.Storm;
+    if (changed && notable && this.climate.severity > 62) {
+      this.onEvent?.('weather', `${WEATHER_NAMES[this.climate.weather]} has set in across the region.`);
+    }
+    const live: number[] = [];
+    for (let c = 0; c < this.content.cargo.length; c++) {
+      // Electricity and water travel down a wire and a pipe. A boom in them
+      // is not a boom in carriage, and announcing one is a promise of work
+      // that does not exist.
+      if (this.content.cargo[c].tier === 'networked') continue;
+      if (this.recipes.cargoFromEra[c] <= this.era) live.push(c);
+    }
+    const { opened, closed } = stepEvents(this.events, {
+      tick: this.tick, day: this.day, era: this.era,
+      companyCount: this.companies.count, cargoCount: this.content.cargo.length,
+      liveCargo: live, climate: this.climate,
+    }, this.rng);
+    for (const i of opened) {
+      const subject = this.events.kind[i] === EventKind.Boom
+        ? ` (${this.content.cargo[this.events.subject[i]].name.toLowerCase()})`
+        : this.events.kind[i] === EventKind.Strike
+          ? ` (${this.companies.names[this.events.subject[i]]})`
+          : '';
+      this.onEvent?.('disruption', `${EVENT_NAMES[this.events.kind[i]]}${subject}: ${this.events.text[i]}`);
+    }
+    for (const i of closed) {
+      this.onEvent?.('disruption', `${EVENT_NAMES[this.events.kind[i]]} is over.`);
+    }
+  }
+
+  /**
+   * What today is doing to this link, as a percentage of the posted limit.
+   *
+   * Everything that slows a vehicle without being traffic ends up here: the
+   * weather over the ground the link crosses, a river out of its banks, and
+   * the drivers being on strike. Kept as one function so the interactions are
+   * visible rather than three separate multipliers applied in three files.
+   *
+   * The height term is what makes snow a *route* decision rather than a
+   * seasonal tax. A player who took the pass to save eight tiles finds out in
+   * January; one who went round the long way does not.
+   */
+  private linkConditions(link: number, company: number): number {
+    // The midpoint of the link, which is the honest place to sample: a pass
+    // is defined by its summit, not by the valley floor it starts in.
+    const start = this.graph.linkChainStart[link];
+    const len = this.graph.linkChainLen[link];
+    const tile = this.graph.chain[start + (len >> 1)];
+    const height = this.terrain.height[tile] ?? 0;
+    let pct = this.climate.speedPercent(height);
+
+    const flood = floodSeverity(this.events);
+    if (flood > 0 && height < FLOOD_LINE) {
+      pct = Math.min(pct, Math.max(0, 100 - flood));
+    }
+    const strike = strikePercent(this.events, company);
+    if (strike < 100) pct = (pct * strike) / 100;
+    return pct;
   }
 
   /**
@@ -2049,6 +2142,11 @@ export class World {
     h.array(this.regulator.level, this.companies.count);
     h.array(this.regulator.pressure, this.companies.count);
     h.array(this.regulator.relief, this.companies.count);
+    h.int(this.climate.weather).int(this.climate.severity);
+    h.int(this.events.count);
+    h.array(this.events.active, this.events.count);
+    h.array(this.events.kind, this.events.count);
+    h.array(this.events.ends, this.events.count);
     h.int(this.vehicles.count);
     for (let i = 0; i < this.vehicles.count; i++) {
       if (!this.vehicles.alive[i]) {
