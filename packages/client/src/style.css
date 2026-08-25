@@ -34,22 +34,35 @@ html, body, #root, .app {
 
 /* One bar, floating, translucent. Pastel and light, matching the frame rather
    than the old build's near-black chrome. */
+/*
+ * The top strip is a *layout*, and nothing else.
+ *
+ * It used to be one pill in the corner holding the brand, the money, the date
+ * and two counts, so the pill's own background lived on `.hud`. Splitting the
+ * readout in two turned `.hud` into a full-width flex row — and that background
+ * came with it, stretching a translucent bar right across the top of the frame.
+ * "That bar across the top is horrific. Absolutely horrific." It was.
+ *
+ * The lesson is small and worth keeping: when a container's *role* changes from
+ * "the thing you can see" to "where things go", every visual property on it has
+ * to be moved to the children, not inherited by accident. `.purse` and `.clock`
+ * carry the glass now; this carries nothing at all.
+ */
 .hud {
   position: absolute;
-  top: 14px;
-  left: 14px;
+  left: 0;
+  right: 0;
+  top: 0;
   display: flex;
-  gap: 18px;
-  align-items: baseline;
-  padding: 10px 16px;
-  border-radius: 12px;
-  background: rgba(246, 241, 230, 0.86);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 2px 14px rgba(30, 40, 30, 0.14);
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
   color: var(--ink);
   font-size: 13px;
   letter-spacing: 0.01em;
   user-select: none;
+  pointer-events: none;
 }
 
 .brand {
@@ -834,21 +847,8 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 /* The readout, split in two.
  *
  * Money where the eye already goes; the clock on the far side, because it is
- * ambient. One grey bar with the brand, the money, the date and two counts in it
- * was the thing being complained about, and the fix is not styling — it is that
- * two different kinds of information were sharing a box. */
-.hud {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 14px 18px;
-  pointer-events: none;
-  gap: 12px;
-}
+ * ambient. Two different kinds of information were sharing a box, and the glass
+ * belongs on each of them rather than on the strip that holds them. */
 .purse, .clock {
   display: flex;
   align-items: center;
