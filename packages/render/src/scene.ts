@@ -1537,7 +1537,18 @@ export class Renderer {
          * here the path belongs to the simulation and this is the honest way to
          * smooth it without lying about where the lorry is.
          */
-        const k = Math.min(1, dt * 7);
+        /*
+         * A shorter lag than the seven it was.
+         *
+         * The drawn position trails the simulated one by roughly speed over this
+         * figure, and that trail is what cuts a corner: the further behind it is,
+         * the wider the arc it draws through a junction and the more its own
+         * direction of travel swings while getting round. Now that the facing is
+         * *derived* from that motion, a long lag does not merely look loose — it
+         * exaggerates every turn. Eleven keeps the smoothing that the uneven
+         * arrival of ticks needs and takes most of the swing out.
+         */
+        const k = Math.min(1, dt * 11);
         /*
          * It faces the way it is actually moving. That is the whole fix for the
          * drifting, and the drifting was mine.

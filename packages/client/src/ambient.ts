@@ -364,8 +364,10 @@ export class Ambient {
        * the edge direction, so the offset follows the vehicle round the bend
        * instead of jumping sides at the apex.
        */
-      const atX = bx + (-tz / tl) * 0.16;
-      const atZ = bz + (tx / tl) * 0.16;
+      // Left of travel is `(dz, -dx)`, because north is -Z. The other way round —
+      // which is what this was — is the right-hand side of the road.
+      const atX = bx + (tz / tl) * 0.16;
+      const atZ = bz + (-tx / tl) * 0.16;
       /*
        * Anything close in front? Then stop, next frame.
        *

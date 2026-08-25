@@ -999,10 +999,39 @@ export function App(): JSX.Element {
       sprayer: modelNames.length - 2,
       combine: modelNames.length - 1,
     };
+    const CAR_SALOON = modelNames.length - 6;
+    const CAR_ESTATE = modelNames.length - 5;
+
     /** Every model that is a farm machine, for the engine note. */
     const FARM_MODELS = new Set<number>([
       MACHINES.plough, MACHINES.drill, MACHINES.sprayer, MACHINES.combine,
     ]);
+    /**
+     * How big each model sounds, 0 for the smallest and 1 for an artic.
+     *
+     * From the vehicle's own length in cells, which is the closest thing the
+     * content has to a size — a Transit is one and an artic is four. Built once,
+     * because it is a property of the model list and not of the frame.
+     *
+     * Cars and farm machinery are not in the content's vehicle list at all, so
+     * they are given figures by hand: a car is the lightest thing on the road, a
+     * tractor sits between a van and a lorry, and a combine is the biggest engine
+     * in the district and should sound like it.
+     */
+    const BULK = new Float32Array(modelNames.length);
+    {
+      let widest = 1;
+      for (const v of world.content.vehicles) widest = Math.max(widest, v.cells);
+      for (let i = 0; i < world.content.vehicles.length; i++) {
+        BULK[i] = (world.content.vehicles[i].cells - 1) / Math.max(1, widest - 1);
+      }
+      BULK[CAR_SALOON] = 0;
+      BULK[CAR_ESTATE] = 0.05;
+      BULK[MACHINES.plough] = 0.45;
+      BULK[MACHINES.drill] = 0.45;
+      BULK[MACHINES.sprayer] = 0.4;
+      BULK[MACHINES.combine] = 0.9;
+    }
     /*
      * What the traffic is made of, and it is not all cars.
      *
@@ -1014,8 +1043,6 @@ export function App(): JSX.Element {
      */
     const byId = (id: string): number =>
       Math.max(0, world.content.vehicles.findIndex((v) => v.id === id));
-    const CAR_SALOON = modelNames.length - 6;
-    const CAR_ESTATE = modelNames.length - 5;
     const ambientModels = [
       CAR_SALOON, CAR_SALOON, CAR_SALOON,
       CAR_ESTATE, CAR_ESTATE,
@@ -1641,6 +1668,7 @@ export function App(): JSX.Element {
            * only place in the client that needs to know, which is why it has not
            * earned a table of its own.
            */
+          bulk: BULK[model] ?? 0.5,
           engine: FARM_MODELS.has(model)
             ? 'tractor'
             : (model === CAR_SALOON || model === CAR_ESTATE)

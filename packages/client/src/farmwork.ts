@@ -352,7 +352,7 @@ export class Farmwork {
     const tx = 2 * v * (cx - inX) + 2 * u * (outX - cx);
     const tz = 2 * v * (cz - inZ) + 2 * u * (outZ - cz);
     const tl = Math.hypot(tx, tz) || 1;
-    return { x: bx + (-tz / tl) * 0.16, z: bz + (tx / tl) * 0.16 };
+    return { x: bx + (tz / tl) * 0.16, z: bz + (-tx / tl) * 0.16 };
   }
 
   /**
@@ -569,8 +569,9 @@ export class Farmwork {
           const tx = 2 * v * (cx - inX) + 2 * u * (outX - cx);
           const tz = 2 * v * (cz - inZ) + 2 * u * (outZ - cz);
           const tl = Math.hypot(tx, tz) || 1;
-          t.x = bx + (-tz / tl) * 0.16;
-          t.z = bz + (tx / tl) * 0.16;
+          // Left of travel; see the note in `ambient.ts`.
+          t.x = bx + (tz / tl) * 0.16;
+          t.z = bz + (-tx / tl) * 0.16;
           t.heading = (Math.atan2(tx / tl, -tz / tl) / (Math.PI * 2) + 1) % 1;
           /*
            * A tractor on a lane gives way to everything.

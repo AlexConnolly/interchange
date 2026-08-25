@@ -81,6 +81,15 @@ export type SoundName = keyof typeof MANIFEST;
 const VOICES = 6;
 
 /**
+ * How loud an engine is when you are right on top of it.
+ *
+ * Down from 0.55, which with six voices at once summed to over three and was the
+ * other half of "far too loud". Six engines can all be audible at once now
+ * without the district shouting.
+ */
+const ENGINE_LEVEL = 0.3;
+
+/**
  * How far a sound carries, in tiles.
  *
  * Beyond this it is not attenuated to a whisper, it is *not played* — "if you're
@@ -127,6 +136,14 @@ export interface Heard {
   x: number;
   z: number;
   engine: Engine;
+  /**
+   * How big it is, 0 for a van and 1 for an artic.
+   *
+   * Drives the pitch, so the note carries information rather than only variety:
+   * a forty-four tonne artic idles well below a Transit, and hearing which one is
+   * coming before it is on screen is most of what engine noise is *for*.
+   */
+  bulk: number;
 }
 
 export class Sound {
@@ -230,10 +247,23 @@ export class Sound {
     for (let i = 0; i < VOICES; i++) {
       const panner = ctx.createPanner();
       panner.panningModel = 'HRTF';
+      /*
+       * The panner places it; the gain node decides how loud it is.
+       *
+       * `rolloffFactor = 0` turns the panner's own distance attenuation off, and
+       * that is deliberate. Its linear model is far too flat to be believed —
+       * halfway to the horizon a lorry was still at two thirds volume, which is
+       * why "vehicles are far too loud for no apparent reason": the reason was
+       * that distance was barely doing anything. Web Audio's alternative, the
+       * inverse model, goes the other way and makes anything close deafening.
+       *
+       * Doing it in the gain instead costs one multiply and buys the curve I
+       * actually want — see `aim`.
+       */
       panner.distanceModel = 'linear';
-      panner.refDistance = 2;
+      panner.refDistance = 1;
       panner.maxDistance = EARSHOT;
-      panner.rolloffFactor = 1;
+      panner.rolloffFactor = 0;
       const gain = ctx.createGain();
       gain.gain.value = 0;
       panner.connect(gain);
@@ -333,7 +363,7 @@ export class Sound {
       const still = v.free ? undefined : inRange.find((e) => e.h.id === v.id);
       if (still) {
         claimed.add(v.id);
-        this.aim(v, still.h);
+        this.aim(v, still.h, still.d);
       } else {
         v.free = true;
         v.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.25);
@@ -345,7 +375,7 @@ export class Sound {
       const free = this.voices.find((v) => v.free);
       if (!free) break;
       claimed.add(e.h.id);
-      this.play(free, e.h);
+      this.play(free, e.h, e.d);
     }
   }
 
@@ -355,7 +385,7 @@ export class Sound {
     return 'engine';
   }
 
-  private play(v: Voice, h: Heard): void {
+  private play(v: Voice, h: Heard, d: number): void {
     const ctx = this.ctx;
     if (!ctx) return;
     const want = this.clipFor(h);
@@ -380,19 +410,45 @@ export class Sound {
      * against each other, and it is stable per vehicle so one does not wobble in
      * pitch as it drives.
      */
+    /*
+     * Pitch by what it is, then a little by which one it is.
+     *
+     * The old figure was a flat eight per cent either way from the id and nothing
+     * else — enough to stop two copies of one recording beating against each
+     * other and not enough to tell a van from an artic. It was also unhearable
+     * while the voice pool was collapsed onto a single vehicle, since there was
+     * never a second engine to compare it with.
+     *
+     * `bulk` does the work now: an artic runs a fifth lower than a Transit, which
+     * is roughly the real interval between a big six-cylinder diesel at idle and
+     * a four. The per-vehicle jitter stays on top, widened, so two artics are
+     * still not the same artic.
+     */
     const seed = ((h.id * 2654435761) >>> 0) / 4294967296;
-    source.playbackRate.value = 0.92 + seed * 0.16;
+    source.playbackRate.value = 1.06 - h.bulk * 0.22 + (seed - 0.5) * 0.16;
     source.connect(v.panner);
     source.start(0, seed * buffer.duration);
     v.source = source;
     v.clip = want;
     v.id = h.id;
     v.free = false;
-    this.aim(v, h);
-    v.gain.gain.setTargetAtTime(0.55 * this.effectsLevel, ctx.currentTime, 0.35);
+    this.aim(v, h, d);
   }
 
-  private aim(v: Voice, h: Heard): void {
+  /**
+   * How loud a vehicle is at a given distance, 0..1.
+   *
+   * Squared, so it falls away quickly at first and then tails off — which is
+   * both what a point source does and what stops a dozen distant engines summing
+   * into a wash. At half of earshot a lorry is a quarter as loud as one alongside
+   * you, where the panner's linear model had it at two thirds.
+   */
+  private static level(d: number): number {
+    const near = Math.max(0, 1 - d / EARSHOT);
+    return near * near;
+  }
+
+  private aim(v: Voice, h: Heard, d: number): void {
     const ctx = this.ctx;
     if (!ctx) return;
     if (v.panner.positionX) {
@@ -404,8 +460,11 @@ export class Sound {
       (v.panner as unknown as { setPosition: (a: number, b: number, c: number) => void })
         .setPosition(h.x, 0, h.z);
     }
+    v.gain.gain.setTargetAtTime(
+      ENGINE_LEVEL * Sound.level(d) * this.effectsLevel, ctx.currentTime, 0.12,
+    );
     // A vehicle that changed kind — the pool reassigned an id — restarts.
-    if (v.clip !== this.clipFor(h)) this.play(v, h);
+    if (v.clip !== this.clipFor(h)) this.play(v, h, d);
   }
 
   /**
