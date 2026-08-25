@@ -24,6 +24,7 @@ export * from './worldgen.ts';
 export * from './construction.ts';
 export * from './junction.ts';
 export * from './snapshot.ts';
+export * from './fittings.ts';
 
 import { loadContent, type Content } from '@interchange/data';
 import { DEFAULT_CONFIG, type WorldConfig } from './terrain.ts';

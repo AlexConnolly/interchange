@@ -28,12 +28,16 @@ import { InfluenceField, type InfluenceSource } from './influence.ts';
 import {
   Facility, FACILITY_COST, YardTable, canBase, facilitiesFor, refusalText,
 } from './yards.ts';
+import {
+  Fitting, FITTING_COST, SNOW_STOPS, snowCover, stoppedBySnow,
+} from './fittings.ts';
 import { AmenityField, stepAmenity, REMEDIATION_PRICE, REMEDIATION_FROM_ERA } from './amenity.ts';
 import {
   AssetTable, Graph, NONE, NO_WAY, WayLayer, hashNetwork, rebuildGraph,
 } from './network.ts';
 import { Router, type RouteCosts } from './pathfinding.ts';
 import { TileRouter } from './tilerouter.ts';
+import { Heap } from './heap.ts';
 import { Rng } from './rng.ts';
 import {
   IndustryKind, SiteState, SiteTable, TownTable, hashSites, stepSiteDecay, ageSites,
@@ -171,6 +175,8 @@ export class World {
 
   /** Access tiles, so sites and towns survive a graph rebuild. */
   siteAccessTile: Int32Array;
+  /** What each vehicle has fitted. A `Fitting` bitmask. */
+  vehicleFittings: Int32Array;
   townAccessTile: Int32Array;
   /** Reverse lookups for delivery: node id to site or town. */
   private nodeSiteOf = new Map<number, number>();
@@ -218,6 +224,15 @@ export class World {
     this.sites = new SiteTable(content.cargo.length);
     this.towns = new TownTable(content.cargo.length);
     this.siteAccessTile = new Int32Array(4000).fill(NONE);
+    /*
+     * Fittings live beside the vehicle table rather than in it.
+     *
+     * `VehicleTable` is the hot loop's data — position, cell, speed, route —
+     * and it is laid out to be walked linearly sixty times a second. A field
+     * read once a tick per vehicle by one predicate does not belong in that
+     * cache line. Same reasoning as `vehicleYard`.
+     */
+    this.vehicleFittings = new Int32Array(this.vehicles.x.length);
     this.movedByCargo = new Float64Array(MAX_COMPANIES * content.cargo.length);
     this.townAccessTile = new Int32Array(64).fill(NONE);
 
@@ -510,7 +525,7 @@ export class World {
       this.vehicleSpeed, this.waySpeed, this.tick, this.config.size, this.geometry,
       (v, node) => this.onArrive(v, node),
       (v, link) => this.onEnterLink(v, link),
-      (link, company) => this.linkConditions(link, company),
+      (link, vehicle) => this.linkConditions(link, vehicle),
     );
 
     // 5. production
@@ -1342,21 +1357,108 @@ export class World {
    * seasonal tax. A player who took the pass to save eight tiles finds out in
    * January; one who went round the long way does not.
    */
-  private linkConditions(link: number, company: number): number {
+  private linkConditions(link: number, vehicle: number): number {
     /*
-     * Nothing slows a way down any more.
+     * The winter, and it is the only thing on this hook.
      *
-     * This used to be the whole of weather: snow on a pass, a river over its
-     * banks, a strike at a depot. Weather events went with `cut.md`'s events
-     * cut, and the hook is kept rather than removed because the *shape* of
-     * "this link is slower than its posted limit for a reason" is the thing
-     * gradient and surface condition will want next, and threading it back
-     * through every caller later is worse than leaving one function returning
-     * a hundred.
+     * The hook was kept through the events cut on the grounds that the *shape*
+     * of "this link is slower than its posted limit for a reason" would be
+     * wanted again. This is that, and it turned out to want the vehicle rather
+     * than the company: winter tyres are fitted to a lorry.
+     *
+     * Zero, not a fraction. A vehicle that is not fitted for snow stops where
+     * it is — see fittings.ts for why stopping is worth more than slowing. It
+     * keeps its route and its load and resumes at the thaw, or when you buy it
+     * some tyres, which is the point.
      */
     void link;
-    void company;
+    if (stoppedBySnow(this.vehicleFittings[vehicle], this.snow)) return 0;
     return 100;
+  }
+
+  /**
+   * How deep the snow is, 0..1. The renderer paints it and the traffic obeys
+   * it, so there is exactly one source for both.
+   *
+   * Cached per day rather than recomputed per vehicle per tick: `linkConditions`
+   * is called for every moving vehicle on every tick, and a cosine and a
+   * smoothstep in that loop is real work for a number that changes once a day.
+   */
+  get snow(): number {
+    const d = this.day;
+    if (d !== this.snowDay) {
+      this.snowDay = d;
+      this.snowCached = snowCover(d);
+    }
+    return this.snowCached;
+  }
+
+  private snowDay = -1;
+  private snowCached = 0;
+
+  /**
+   * Fit something to a vehicle.
+   *
+   * Permanent, and one purchase. There is deliberately no un-fitting and no
+   * seasonal swap: the decision worth making is which of your lorries you can
+   * afford to keep running through the winter, not clicking twice a year on all
+   * of them.
+   */
+  fitVehicle(vehicle: number, fitting: number): { ok: boolean; reason: string } {
+    if (vehicle < 0 || vehicle >= this.vehicles.count || !this.vehicles.alive[vehicle]) {
+      return { ok: false, reason: 'No such vehicle.' };
+    }
+    if (this.vehicles.company[vehicle] !== this.player) {
+      return { ok: false, reason: 'Not yours.' };
+    }
+    if ((this.vehicleFittings[vehicle] & fitting) !== 0) {
+      return { ok: false, reason: 'Already fitted.' };
+    }
+    const cost = FITTING_COST[fitting] ?? 0;
+    if (this.companies.cash[this.player] < cost) {
+      return { ok: false, reason: 'Not enough in the bank.' };
+    }
+    this.companies.post(this.player, Line.AssetTrade, cost);
+    this.vehicleFittings[vehicle] |= fitting;
+    return { ok: true, reason: '' };
+  }
+
+  /**
+   * Which of your vehicles cannot do its job, and why.
+   *
+   * One list, because a badge over a stopped lorry is how this rule is
+   * communicated and the client needs to know where to put them. Returning the
+   * reason as a sentence rather than a code keeps the wording in the simulation
+   * beside the rule that causes it — the yard refusals are done the same way,
+   * and it is why they read as English rather than as error states.
+   */
+  blockedVehicles(): { vehicle: number; x: number; z: number; reason: string }[] {
+    const out: { vehicle: number; x: number; z: number; reason: string }[] = [];
+    const snow = this.snow;
+    if (snow < SNOW_STOPS) return out;
+    for (let v = 0; v < this.vehicles.count; v++) {
+      if (!this.vehicles.alive[v]) continue;
+      if (this.vehicles.company[v] !== this.player) continue;
+      if (!stoppedBySnow(this.vehicleFittings[v], snow)) continue;
+      /*
+       * A parked lorry has no position.
+       *
+       * `projectVehicles` only writes x and y for vehicles on a link, so one
+       * sitting in its yard between jobs is at the origin — and the badge for it
+       * went to the top corner of the district, which is to say nowhere. Falling
+       * back to its yard is not a patch: a lorry that is not on the road *is* at
+       * its yard, and that is where the player will look for it.
+       */
+      let x = this.vehicles.x[v] / 65536;
+      let z = this.vehicles.y[v] / 65536;
+      const yard = this.vehicleYard[v] ?? NONE;
+      if (this.vehicles.link[v] === NONE && yard !== NONE && yard >= 0) {
+        x = this.yards.x[yard] + 0.5;
+        z = this.yards.y[yard] + 0.5;
+      }
+      out.push({ vehicle: v, x, z, reason: 'No winter tyres' });
+    }
+    return out;
   }
 
 
@@ -2683,9 +2785,142 @@ export class World {
     const a = this.siteAccessTile[fromSite];
     const b = this.siteAccessTile[toSite];
     if (a === NONE || b === NONE) return [];
-    const path = this.tileRouter.route(a, b);
-    return path ? Array.from(path) : [];
+    return this.roadRoute(a, b);
   }
+
+  /**
+   * A route between two tiles, **along the roads**.
+   *
+   * This replaces a straightforward and badly wrong reuse of `tileRouter`. That
+   * class is the *way-building* planner: it costs terrain — gradient squared,
+   * water, slope — to answer "where would a new road go if we laid one". Asking
+   * it for a route produced a line straight over the hills between two places,
+   * ignoring every road in the district, which is exactly what it was built to
+   * do and not remotely what a route preview means.
+   *
+   * The two questions look alike and are opposites. One is about ground that
+   * has no road on it. The other is only allowed to touch ground that does.
+   *
+   * Plain A* over road tiles, four-connected. The whole district has on the
+   * order of a thousand road tiles, so this is a search over a thousand nodes
+   * with a Manhattan heuristic — well under a millisecond, which matters because
+   * it runs on hover.
+   */
+  roadRoute(from: number, to: number): number[] {
+    const size = this.config.size;
+    const n = size * size;
+    if (from < 0 || to < 0 || from >= n || to >= n) return [];
+    const layer = this.layers[Mode.Road];
+    const isRoad = (t: number): boolean => layer.cls[t] !== NO_WAY;
+    // Snap to the network. An access tile is normally on it by construction,
+    // but a site whose lane was never laid would otherwise fail silently and
+    // draw nothing, which reads as a bug in the preview rather than in the map.
+    const start = isRoad(from) ? from : this.nearestRoadTile(from);
+    const goal = isRoad(to) ? to : this.nearestRoadTile(to);
+    if (start === NONE || goal === NONE) return [];
+    if (start === goal) return [start];
+
+    if (this.routeCameFrom.length < n) {
+      this.routeCameFrom = new Int32Array(n);
+      this.routeCost = new Float64Array(n);
+      this.routeSeen = new Int32Array(n);
+    }
+    const cameFrom = this.routeCameFrom;
+    const cost = this.routeCost;
+    const seen = this.routeSeen;
+    const stamp = ++this.routeStamp;
+
+    const gx = goal % size;
+    const gy = (goal / size) | 0;
+    const heuristic = (t: number): number =>
+      Math.abs((t % size) - gx) + Math.abs(((t / size) | 0) - gy);
+
+    const open = new Heap(1024);
+    cost[start] = 0;
+    seen[start] = stamp;
+    cameFrom[start] = NONE;
+    open.push(heuristic(start), start);
+
+    let found = false;
+    while (open.size > 0) {
+      const cur = open.pop();
+      if (cur === goal) { found = true; break; }
+      const cx = cur % size;
+      const cy = (cur / size) | 0;
+      for (let d = 0; d < 4; d++) {
+        const nx = cx + DIR_DX[d];
+        const ny = cy + DIR_DY[d];
+        if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+        const nt = ny * size + nx;
+        if (!isRoad(nt)) continue;
+        /*
+         * A bigger road is cheaper per tile, so the line prefers the spine.
+         *
+         * Not for realism — because the drawn route should look like the route a
+         * driver would take, and a shortest-tile-count path happily threads a
+         * farm track through three fields to save one tile. Weighting by class
+         * makes the preview follow the A-road, which is both what happens and
+         * what reads as sensible.
+         */
+        const step = 1 + (layer.cls[nt] === NO_WAY ? 0 : this.classDetour[layer.cls[nt]] ?? 0);
+        const g = cost[cur] + step;
+        if (seen[nt] === stamp && g >= cost[nt]) continue;
+        seen[nt] = stamp;
+        cost[nt] = g;
+        cameFrom[nt] = cur;
+        open.push(g + heuristic(nt), nt);
+      }
+    }
+    if (!found) return [];
+
+    const out: number[] = [];
+    for (let t = goal; t !== NONE; t = cameFrom[t]) out.push(t);
+    out.reverse();
+    return out;
+  }
+
+  private nearestRoadTile(from: number): number {
+    const size = this.config.size;
+    const layer = this.layers[Mode.Road];
+    const fx = from % size;
+    const fy = (from / size) | 0;
+    // A short ring search. An access tile is at most a tile or two off the
+    // network, so six is generous and bounded.
+    for (let r = 1; r <= 6; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const x = fx + dx;
+          const y = fy + dy;
+          if (x < 0 || y < 0 || x >= size || y >= size) continue;
+          const t = y * size + x;
+          if (layer.cls[t] !== NO_WAY) return t;
+        }
+      }
+    }
+    return NONE;
+  }
+
+  /**
+   * Per-tile detour cost by way class, so the preview prefers the better road.
+   *
+   * Built from the content's own speed figures rather than named: a way that is
+   * half the speed costs twice as much to go along, which is the same statement
+   * the vehicle router makes and cannot drift from it.
+   */
+  private get classDetour(): number[] {
+    if (this.detourCache === null) {
+      const fastest = Math.max(1, ...Array.from(this.waySpeed));
+      this.detourCache = Array.from(this.waySpeed, (v) => fastest / Math.max(1, v) - 1);
+    }
+    return this.detourCache;
+  }
+
+  private detourCache: number[] | null = null;
+  private routeCameFrom = new Int32Array(0);
+  private routeCost = new Float64Array(0);
+  private routeSeen = new Int32Array(0);
+  private routeStamp = 0;
 
   /**
    * The empty run: from a yard out to the pickup.

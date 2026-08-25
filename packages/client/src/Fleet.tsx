@@ -14,9 +14,10 @@
 
 import {
   type World, Facility, FACILITY_NAMES, FACILITY_COST, facilitiesFor,
+  Fitting, FITTING_NAMES, FITTING_COST, SNOW_STOPS,
 } from '@interchange/sim';
 import { content } from '@interchange/data';
-import { money } from './Pins.tsx';
+import { money } from './Markers.tsx';
 
 const C = content();
 
@@ -70,11 +71,12 @@ export function Vehicles({
 }
 
 export function Yard({
-  world, yard, onAdd, onClose,
+  world, yard, onAdd, onFit, onClose,
 }: {
   world: World;
   yard: number;
   onAdd: (yard: number, facility: number) => void;
+  onFit: (vehicle: number, fitting: number) => void;
   onClose: () => void;
 }): JSX.Element | null {
   if (yard < 0 || yard >= world.yards.count) return null;
@@ -82,12 +84,20 @@ export function Yard({
   const cash = world.companies.cash[world.player];
 
   // Which of our vehicles live here, so the yard is a place with lorries in it
-  // rather than a row of tickboxes.
-  const fleet: string[] = [];
+  // rather than a row of tickboxes. This is also where a lorry is *fitted*, and
+  // it belongs here rather than on the Vehicles screen because that screen is a
+  // shop: it lists what exists, not what you own.
+  const fleet: { vehicle: number; name: string; winter: boolean }[] = [];
   for (let v = 0; v < world.vehicles.count; v++) {
     if (!world.vehicles.alive[v] || world.vehicleYard[v] !== yard) continue;
-    fleet.push(C.vehicles[world.vehicles.type[v]].name);
+    fleet.push({
+      vehicle: v,
+      name: C.vehicles[world.vehicles.type[v]].name,
+      winter: (world.vehicleFittings[v] & Fitting.WinterTyres) !== 0,
+    });
   }
+  const snow = world.snow;
+  const tyreCost = FITTING_COST[Fitting.WinterTyres] ?? 0;
 
   return (
     <div className="panel wide">
@@ -101,9 +111,39 @@ export function Yard({
         </dl>
         {fleet.length > 0 && (
           <div className="fleet-list">
-            {fleet.map((name, i) => <div key={i} className="sub">{name}</div>)}
+            {fleet.map((f) => (
+              <div key={f.vehicle} className="row">
+                <div className="grow">
+                  <div className="title">{f.name}</div>
+                  {/*
+                    * Say it before the snow, and say it louder once the snow is
+                    * down. A rule that only announces itself at the moment it
+                    * bites is a trap; one that warns you in November is a
+                    * decision.
+                    */}
+                  {!f.winter && (
+                    <div className={snow >= SNOW_STOPS ? 'why stopped' : 'why'}>
+                      {snow >= SNOW_STOPS
+                        ? 'Stopped — no winter tyres'
+                        : 'No winter tyres'}
+                    </div>
+                  )}
+                </div>
+                {f.winter ? <span className="have">❄</span> : (
+                  <>
+                    <div className="price">{money(tyreCost)}</div>
+                    <button
+                      className="btn tiny"
+                      disabled={cash < tyreCost}
+                      onClick={() => onFit(f.vehicle, Fitting.WinterTyres)}
+                    >Fit tyres</button>
+                  </>
+                )}
+              </div>
+            ))}
           </div>
         )}
+        {FITTING_NAMES.length === 0 && null}
         <div className="head">Facilities</div>
         {FACILITY_NAMES.map(([bit, name]) => {
           const have = world.yards.has(yard, bit);

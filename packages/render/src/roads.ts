@@ -189,6 +189,21 @@ export function buildRoads(
       quadAt(m, cornerY, x, z, sx0, sz0, sx1, sz1, 0, faded(st.surface, inf));
 
       if (st.worn && inf > 0.18) {
+        /*
+         * Two wheel tracks along whichever way the road runs — and they take no
+         * snow at all.
+         *
+         * This is the whole winter picture in one line. Everything else on the
+         * road takes snow, so a road under snow goes pale; the tracks do not, so
+         * they stay dark tarmac. The same two quads that draw worn asphalt in
+         * July draw swept ruts through the snow in January, and the geometry did
+         * not change — only what the surfaces say about themselves.
+         *
+         * It also means the ruts only appear where traffic goes, because `worn`
+         * is a property of lanes and spines and not of farm tracks. A back lane
+         * under snow is untouched white.
+         */
+        m.take = 0;
         // Two wheel tracks along whichever way the road runs.
         const w2 = st.half * 0.30;
         if (openX) {
@@ -202,6 +217,7 @@ export function buildRoads(
                    0.004, faded(ROAD.worn, inf));
           }
         }
+        m.take = 1;
       }
       if (st.lined && inf > 0.18 && ends === 2 && (openX !== openZ)) {
         // A dash down the middle of a straight run only. A junction with lining

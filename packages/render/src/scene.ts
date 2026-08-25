@@ -36,7 +36,7 @@ import { buildGround, toMesh, HEIGHT_TO_WORLD, type GroundSource } from './groun
 import { Mesh } from './geometry.ts';
 import { buildRoads, buildCatsEyes, type RoadSource } from './roads.ts';
 import type { Model } from './glb.ts';
-import { LIVERY, NIGHT, SKY, type RGB } from './palette.ts';
+import { LIVERY, NIGHT, SKY, SNOW, type RGB } from './palette.ts';
 
 export { HEIGHT_TO_WORLD };
 
@@ -81,6 +81,8 @@ export interface RenderSource extends GroundSource, RoadSource {
   pRot: Float32Array;
   /** 0..1 through the day, for the sun. */
   dayFraction: number;
+  /** 0..1 depth of snow. One number, and the same one the traffic obeys. */
+  snow: number;
 }
 
 interface Chunk {
@@ -96,6 +98,7 @@ export class Renderer {
   private readonly scene = new ThreeScene();
   private readonly camera: OrthographicCamera;
   private readonly material: MeshLambertMaterial;
+  private readonly roadMaterial: MeshLambertMaterial;
   /** Everything that emits: cat's eyes and lamps. Unlit, additive, and its
    *  opacity is how far into the night we are. */
   private readonly glow: MeshBasicMaterial;
@@ -155,8 +158,21 @@ export class Renderer {
      * told so; the shadow side is set to back so a double-sided surface does
      * not shadow-acne against itself.
      */
-    this.material = new MeshLambertMaterial({ vertexColors: true, side: DoubleSide });
-    this.material.shadowSide = BackSide;
+    this.material = litMaterial({});
+    /*
+     * Roads get their own material so they can go the other way in the snow.
+     *
+     * A cleared road is darker and wetter than a dry one, and the whole frame's
+     * contrast inverts for three months of every year: dark roads on a bright
+     * ground, where the rest of the year is pale roads on green. Mixing them
+     * toward white with everything else would erase the network exactly when it
+     * is at its most legible.
+     *
+     * 0.72 rather than 1 because a road is not perfectly swept, and the verges
+     * either side take full snow from `this.material` — so the ribbon reads as
+     * ploughed with white banks.
+     */
+    this.roadMaterial = litMaterial({ takes: 0.72, to: SNOW.wet });
 
     /*
      * The glow pass, and it is one material shared by every emitter in the
@@ -379,6 +395,18 @@ export class Renderer {
     this.glow.opacity = this.night;
   }
 
+  /**
+   * The season, in one write.
+   *
+   * Also cools and lifts the fill, because snow is an enormous reflector: the
+   * shaded side of everything is brighter in winter and bluer, and getting that
+   * wrong is what makes a white landscape look like a white filter.
+   */
+  private setSeason(snow: number): void {
+    SNOW_UNIFORM.value = snow;
+    this.fill.intensity *= 1 + snow * 0.35;
+  }
+
   /** How far into the night, 0..1. Read by the glow pass. */
   private night = 0;
   private readonly clear = new Color();
@@ -419,7 +447,7 @@ export class Renderer {
         const roadMesh = buildRoads(src, x0, z0, x1, z1);
         let roads: Chunk['roads'] = null;
         if (!roadMesh.isEmpty()) {
-          roads = toMesh(roadMesh, this.material);
+          roads = toMesh(roadMesh, this.roadMaterial);
           // A road receives shadow and does not cast one. A flat surface
           // casting onto itself is shadow acne and nothing else.
           roads.castShadow = false;
@@ -533,9 +561,8 @@ export class Renderer {
     // `livery` attribute the pipeline writes is left at whatever the model
     // says, which for these is nothing.
     this.placeBatches = models.map((model) => {
-      const mat = new MeshLambertMaterial({ vertexColors: true, side: DoubleSide });
-      mat.shadowSide = BackSide;
-      const mesh = new InstancedMesh(model.body, mat, capacity);
+      // Full snow: a roof under snow is most of what says it is winter.
+      const mesh = new InstancedMesh(model.body, litMaterial({}), capacity);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.frustumCulled = false;
@@ -564,7 +591,21 @@ export class Renderer {
       const tile = Math.min(src.size * src.size - 1,
         (Math.round(z) * src.size + Math.round(x)) | 0);
       const lv = src.level[tile];
-      const y = lv !== 0 ? HEIGHT_TO_WORLD(lv) : HEIGHT_TO_WORLD(src.height[tile]);
+      /*
+       * Sit on the *highest* corner of the tile, not on its centre height.
+       *
+       * The ground mesh puts each vertex at the mean of the four tiles meeting
+       * at that corner, so on any slope the visible surface is nowhere near the
+       * tile's own height value — and a building placed at the tile height sank
+       * into the hillside on the uphill side. Which is what it did: a farm half
+       * underground.
+       *
+       * The highest corner rather than the mean of them, because the failure is
+       * asymmetric. A building a few centimetres proud of the ground is
+       * invisible at this camera; a building a few centimetres into it has its
+       * doorway buried.
+       */
+      const y = lv !== 0 ? HEIGHT_TO_WORLD(lv) : this.groundTop(src, x, z);
       this.tmp.position.set(x, y, z);
       this.tmp.rotation.set(0, src.pRot[i] * Math.PI * 2, 0);
       this.tmp.updateMatrix();
@@ -576,6 +617,32 @@ export class Renderer {
       batch.visible = counts[mi] > 0;
       batch.instanceMatrix.needsUpdate = true;
     }
+  }
+
+  /**
+   * The highest of the four corner heights of the tile under a point, computed
+   * the same way `ground.ts` computes them so the two cannot disagree.
+   */
+  private groundTop(src: RenderSource, x: number, z: number): number {
+    const s = src.size;
+    const tx = Math.floor(x);
+    const tz = Math.floor(z);
+    let top = -Infinity;
+    for (let cz = tz; cz <= tz + 1; cz++) {
+      for (let cx = tx; cx <= tx + 1; cx++) {
+        let sum = 0;
+        for (let dz = -1; dz <= 0; dz++) {
+          for (let dx = -1; dx <= 0; dx++) {
+            const qx = Math.max(0, Math.min(s - 1, cx + dx));
+            const qz = Math.max(0, Math.min(s - 1, cz + dz));
+            sum += src.height[qz * s + qx];
+          }
+        }
+        const h = HEIGHT_TO_WORLD(sum / 4);
+        if (h > top) top = h;
+      }
+    }
+    return top === -Infinity ? 0 : top;
   }
 
   /** Bump to force the buildings to be laid out again — the caller does this
@@ -650,6 +717,7 @@ export class Renderer {
     this.updatePlaces(src);
     this.updateFleet(src);
     this.placeSun(src.dayFraction);
+    this.setSeason(src.snow);
     this.placeCamera();
     this.renderer.render(this.scene, this.camera);
   }
@@ -781,7 +849,88 @@ function lerpColour(into: Color, from: RGB, to: RGB, k: number): void {
 }
 
 /**
- * A lit material that tints only the bodywork.
+ * A lit material with the two shader terms this game adds to Lambert.
+ *
+ * **Snow**, on upward faces only. `objectNormal.y` rather than a world normal
+ * because nothing in this scene is rotated about anything but Y, so object-up
+ * *is* world-up — and it is available before three has transformed anything.
+ * Doing it in the shader rather than baking it into vertex colours is what
+ * makes the season continuous: snow arrives over a fortnight, and a chunk
+ * rebuild a day would stutter for a number that wants to change every frame.
+ *
+ * The upness ramp is the whole trick. A field goes white and a hedge's flanks
+ * do not, so a hedge under snow is a dark line with a white cap on it — which
+ * is what makes snow read as *depth* rather than as a filter over the picture.
+ * Roofs, verges, the tops of stacks and the flat of a lorry's box all get it
+ * for nothing.
+ *
+ * **Livery**, on the vertices the pipeline marked as bodywork. Tinting the
+ * whole instance instead — which is what this did first — turns the windows and
+ * the tyres the company colour too, and at forty pixels that reads as a solid
+ * lozenge. Which is exactly the failure the model's stepped silhouette was
+ * shaped to avoid, undone at the last step.
+ *
+ * @param takes how much of the snow term this material accepts, and `to` what
+ *   colour. Roads pass a low figure and the wet colour: they are ploughed, so
+ *   they get darker in winter, not lighter.
+ */
+function litMaterial(
+  { livery, takes = 1, to = SNOW.lit }:
+  { livery?: RGB; takes?: number; to?: RGB },
+): MeshLambertMaterial {
+  const mat = new MeshLambertMaterial({ vertexColors: true, side: DoubleSide });
+  mat.shadowSide = BackSide;
+  const tint = livery ? new Color(...livery) : null;
+  const snowColour = new Color(...to);
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uSnow = SNOW_UNIFORM;
+    shader.uniforms.uSnowTake = { value: takes };
+    shader.uniforms.uSnowColour = { value: snowColour };
+    let vs = `attribute float snowTake;
+uniform float uSnow;
+uniform float uSnowTake;
+uniform vec3 uSnowColour;
+${shader.vertexShader}`;
+    if (tint) {
+      shader.uniforms.uLivery = { value: tint };
+      vs = `attribute float livery;
+uniform vec3 uLivery;
+${vs}`.replace(
+        '#include <color_vertex>',
+        `#include <color_vertex>
+	vColor *= mix( vec3( 1.0 ), uLivery, livery );`,
+      );
+    }
+    // After beginnormal_vertex, which is where `objectNormal` exists.
+    shader.vertexShader = vs.replace(
+      '#include <beginnormal_vertex>',
+      `#include <beginnormal_vertex>
+	// abs, and it is not a shortcut. geometry.ts emits its triangles wound
+	// backwards -- see the DoubleSide note in the constructor -- so every
+	// surface this engine builds by hand has a normal pointing the wrong way.
+	// The first version of this used objectNormal.y directly, so snow landed
+	// on the roofs of the pipeline models, whose winding is correct, and on
+	// nothing else: white roofs over green fields in January. Taking the
+	// magnitude makes it agnostic to winding, which is the same compromise
+	// the double-sided material already makes.
+	float upness = smoothstep( 0.30, 0.82, abs( objectNormal.y ) );
+	vColor = mix( vColor, uSnowColour, clamp( uSnow * uSnowTake * snowTake * upness, 0.0, 1.0 ) );`,
+    );
+  };
+  return mat;
+}
+
+/**
+ * How deep the snow is, shared by every material in the scene.
+ *
+ * One uniform object handed to all of them, so setting the season is one write
+ * rather than a walk over every material a streamed chunk ever created — and it
+ * cannot get out of step between the ground and the road running over it.
+ */
+const SNOW_UNIFORM = { value: 0 };
+
+/**
+ * The old bodywork-only tint, kept as a name.
  *
  * The pipeline reserves a `livery` material slot and `glb.ts` turns it into a
  * per-vertex mask, so the information is already in the geometry — but three's
@@ -795,18 +944,7 @@ function lerpColour(into: Color, from: RGB, to: RGB, k: number): void {
  * the model's stepped silhouette was shaped to avoid, undone at the last step.
  */
 function liveryMaterial(body: RGB): MeshLambertMaterial {
-  const mat = new MeshLambertMaterial({ vertexColors: true, side: DoubleSide });
-  mat.shadowSide = BackSide;
-  const colour = new Color(...body);
-  mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uLivery = { value: colour };
-    shader.vertexShader = `attribute float livery;
-uniform vec3 uLivery;
-${shader.vertexShader}`.replace(
-      '#include <color_vertex>',
-      `#include <color_vertex>
-	vColor *= mix( vec3( 1.0 ), uLivery, livery );`,
-    );
-  };
-  return mat;
+  // A lorry is driven and swept, so it holds a little snow on the box roof and
+  // none anywhere else.
+  return litMaterial({ livery: body, takes: 0.30 });
 }

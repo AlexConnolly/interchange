@@ -143,6 +143,26 @@ export const SEMANTIC = {
   refused: hex('#d05050'),
 };
 
+// ------------------------------------------------------------------ the winter
+
+/**
+ * Snow.
+ *
+ * Not white. #ffffff on a lit surface clips the moment the sun is on it, and a
+ * field of clipped white has no form at all — every fold in the ground
+ * disappears. A touch below, and faintly blue, so the shaded side of a drift
+ * reads as blue-grey against the lit side rather than as grey against grey.
+ *
+ * `wet` is the other half and the part that makes the picture: a road under
+ * snow is *cleared*, so it is darker and shinier than in summer, and the whole
+ * frame's contrast inverts for three months — dark roads on a bright ground,
+ * where the rest of the year is pale roads on green.
+ */
+export const SNOW = {
+  lit: hex('#eef2f7'),
+  wet: hex('#3f454d'),
+};
+
 // ------------------------------------------------------------------ the night
 
 /**

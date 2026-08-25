@@ -160,6 +160,17 @@ BufferGeometry | null {
   g.setAttribute('color', new BufferAttribute(col, 3));
   g.setAttribute('emit', new BufferAttribute(emit, 1));
   g.setAttribute('livery', new BufferAttribute(livery, 1));
+  /*
+   * Snow response, one for everything in a pipeline model.
+   *
+   * A building's roof takes snow and its walls do not, but that difference is
+   * the *normal*, which the shader already has — a face pointing up gets snow
+   * and a face pointing sideways does not, with no help from the geometry. The
+   * attribute is here so pipeline models and hand-built meshes present the same
+   * interface to the material; per-surface variation is what `Mesh.take` is
+   * for, and only the roads need it.
+   */
+  g.setAttribute('snowTake', new BufferAttribute(new Float32Array(total).fill(1), 1));
   g.computeVertexNormals();
   g.computeBoundingSphere();
   return g;

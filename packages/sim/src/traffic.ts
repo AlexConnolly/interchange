@@ -398,10 +398,18 @@ export function stepTraffic(
   geometry: (NodeGeometry | null)[],
   onArrive: (vehicle: number, node: number) => void,
   onEnterLink: (vehicle: number, link: number) => void,
-  /** Percentage of the posted limit this link allows today, for weather and
-   *  flooding. Passed as a function rather than a table because it depends on
-   *  where the link is, not only what class it is. */
-  conditions: ((link: number, company: number) => number) | null,
+  /**
+   * Percentage of the posted limit this link allows for this vehicle right
+   * now: weather, flooding, road condition, what the lorry is fitted with.
+   *
+   * A function rather than a table because it depends on where the link is and
+   * *who is on it*, not only on what class the road is. It takes the vehicle
+   * rather than the company for the same reason — winter tyres are fitted to a
+   * lorry, not bought by a firm, so a fleet part-fitted for snow has some
+   * vehicles running and some standing still. Returning 0 stops the vehicle
+   * where it is, which is the intended behaviour and not an edge case.
+   */
+  conditions: ((link: number, vehicle: number) => number) | null,
 ): TrafficStats {
   const stats = scratchStats;
   stats.moving = 0;
@@ -432,7 +440,7 @@ export function stepTraffic(
     const own = vehicleSpeed[v.type[id]];
     if (own < limit) limit = own;
     if (conditions !== null) {
-      const pct = conditions(link, v.company[id]);
+      const pct = conditions(link, id);
       if (pct < 100) limit = ((limit * pct) / 100) | 0;
     }
 

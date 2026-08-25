@@ -77,7 +77,17 @@ html, body, #root, .app {
  * A map marker over a place with work going. Pointer-events on the button only,
  * so the pin is clickable and the world behind it still pans.
  */
-.pin {
+/* ---------------------------------------------------------------- markers
+ *
+ * One over every business you can see, always. The old build put a pin only
+ * where a contract was going, which left the rest of the district looking like
+ * scenery — there was no way to tell a farm you could click from a roof you
+ * could not.
+ *
+ * Icon and never a word: at twenty pixels from a moving camera you recognise
+ * the shape of a business long before you could read its name, and fourteen
+ * labels on screen is a wall of text pretending to be a map. */
+.mark {
   position: absolute;
   transform: translate(-50%, -100%);
   border: 0;
@@ -87,31 +97,69 @@ html, body, #root, .app {
   display: flex;
   flex-direction: column;
   align-items: center;
-  filter: drop-shadow(0 2px 4px rgba(30, 40, 30, 0.28));
+  filter: drop-shadow(0 2px 5px rgba(30, 40, 30, 0.30));
+  transition: transform 90ms ease-out;
 }
-.pin-body {
-  width: 26px;
-  height: 26px;
-  border-radius: 50% 50% 50% 50%;
-  background: #f0c04a;
-  color: #3a2f14;
-  font-weight: 700;
-  font-size: 14px;
-  line-height: 26px;
-  text-align: center;
-  border: 2px solid #fff8e4;
+.mark-face {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: rgba(250, 247, 238, 0.96);
+  color: #5b5344;
+  border: 2px solid rgba(255, 255, 255, 0.9);
 }
-/* The point of the marker. A triangle, so it indicates a spot rather than
-   hovering vaguely near one. */
-.pin-tail {
+/* Yours is gold, and it is the only colour coding on the map. */
+.mark.mine .mark-face {
+  background: #f4c95d;
+  color: #4a3c14;
+  border-color: #fff3d2;
+}
+/* Work going: a dot on the shoulder. Not a number and not a label — the panel
+   has the detail, and a marker that tried to carry it would be a spreadsheet
+   nailed to the sky. */
+.mark-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #4ab0d0;
+  border: 2px solid #fff;
+}
+.mark-tail {
   width: 0;
   height: 0;
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
-  border-top: 7px solid #fff8e4;
-  margin-top: -2px;
+  border-top: 7px solid rgba(255, 255, 255, 0.9);
+  margin-top: -1px;
 }
-.pin:hover .pin-body { background: #ffd469; }
+.mark:hover { transform: translate(-50%, -100%) scale(1.12); }
+.mark:hover .mark-face { color: #2f2a22; }
+.icon { display: block; }
+
+/* A lorry that cannot do its job, over the lorry. The whole communication of
+   the winter-tyre rule is this badge plus a white field. */
+.alert {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 6px;
+  border-radius: 8px;
+  background: #d05050;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(60, 20, 20, 0.35);
+}
+.alert .flake { font-size: 12px; }
 
 /* ----------------------------------------------------------------- panel */
 .panel {
@@ -340,3 +388,34 @@ html, body, #root, .app {
   color: #b0a795; background: rgba(0, 0, 0, 0.05);
   padding: 1px 5px; border-radius: 4px;
 }
+
+/* ------------------------------------------------------------------- jobs
+ *
+ * A contract is a row: where to, what it pays, what body it needs. Hovering it
+ * draws the route on the map, which is what replaced printing a distance —
+ * "26 tiles" was never an answer to where a job goes. */
+.jobs { display: flex; flex-direction: column; gap: 5px; padding: 0 10px 8px; }
+.job {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 9px;
+  border-radius: 9px;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.job:hover { background: #fff; border-color: rgba(0, 0, 0, 0.14); }
+.job.open { cursor: default; background: #fff; }
+.job-line { display: flex; align-items: center; gap: 7px; }
+.job-line .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pay { font-weight: 700; font-variant-numeric: tabular-nums; }
+.job-sub { font-size: 11px; color: #8b8577; padding-left: 17px; }
+.sheet-icon { display: grid; place-items: center; padding-right: 2px; }
+.supply-icon { display: grid; place-items: center; padding-right: 6px; }
+.why.stopped { color: #c04040; font-weight: 600; }
+.have { color: #3f8a5a; font-weight: 700; }

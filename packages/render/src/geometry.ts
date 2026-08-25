@@ -38,13 +38,31 @@ export class Mesh {
   private posBuf: Float32Array;
   private colBuf: Float32Array;
   private emitBuf: Float32Array;
+  private takeBuf: Float32Array;
   private n = 0;
+
+  /**
+   * How much snow the surfaces added from now on take, 0..1. A pen state.
+   *
+   * Set it, draw, set it again — the same way a plotter carries a colour. The
+   * alternative was an extra argument on `tri`, `quad`, `flat`, `box`, `wedge`,
+   * `roof`, `cyl` and `cylX`, nearly all of which would pass the default, in
+   * order to say something that changes about four times in the whole codebase.
+   *
+   * It exists for one picture: a road under snow, cleared to two dark wheel
+   * tracks. Everything on the road takes snow except the tracks, which take
+   * none, so the same geometry that draws worn tarmac in July draws swept ruts
+   * in January. The mechanic did not need new triangles; it needed the surfaces
+   * to say what they are.
+   */
+  take = 1;
 
   constructor(expectedVertices = 512) {
     const cap = Math.max(64, expectedVertices);
     this.posBuf = new Float32Array(cap * 3);
     this.colBuf = new Float32Array(cap * 3);
     this.emitBuf = new Float32Array(cap);
+    this.takeBuf = new Float32Array(cap);
   }
 
   get vertexCount(): number {
@@ -58,12 +76,15 @@ export class Mesh {
     const p = new Float32Array(cap * 3);
     const c = new Float32Array(cap * 3);
     const e = new Float32Array(cap);
+    const t = new Float32Array(cap);
     p.set(this.posBuf);
     c.set(this.colBuf);
     e.set(this.emitBuf);
+    t.set(this.takeBuf);
     this.posBuf = p;
     this.colBuf = c;
     this.emitBuf = e;
+    this.takeBuf = t;
   }
 
   private v(x: number, y: number, z: number, c: RGB, e: number): void {
@@ -75,6 +96,7 @@ export class Mesh {
     this.colBuf[i + 1] = c[1];
     this.colBuf[i + 2] = c[2];
     this.emitBuf[this.n] = e;
+    this.takeBuf[this.n] = this.take;
     this.n++;
   }
 
@@ -92,6 +114,7 @@ export class Mesh {
     }
     this.colBuf.set(other.colBuf.subarray(0, count * 3), o);
     this.emitBuf.set(other.emitBuf.subarray(0, count), this.n);
+    this.takeBuf.set(other.takeBuf.subarray(0, count), this.n);
     this.n += count;
   }
 
@@ -392,6 +415,7 @@ export class Mesh {
     g.setAttribute('position', new BufferAttribute(this.posBuf.subarray(0, this.n * 3), 3));
     g.setAttribute('color', new BufferAttribute(this.colBuf.subarray(0, this.n * 3), 3));
     g.setAttribute('emit', new BufferAttribute(this.emitBuf.subarray(0, this.n), 1));
+    g.setAttribute('snowTake', new BufferAttribute(this.takeBuf.subarray(0, this.n), 1));
     /*
      * Livery, as a per-vertex mask rather than a whole-mesh multiply.
      *

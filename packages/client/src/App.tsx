@@ -20,7 +20,7 @@ import { loadContent } from '@interchange/data';
 import {
   Renderer, RoadClass, TILES_ACROSS_DEFAULT, RUN, loadKit, type RenderSource,
 } from '@interchange/render';
-import { ContractPanel, Pins, money } from './Pins.tsx';
+import { Alerts, Markers, money } from './Markers.tsx';
 import { Vehicles, Yard } from './Fleet.tsx';
 import { Place, type PlaceActions } from './Place.tsx';
 import './style.css';
@@ -28,6 +28,13 @@ import './style.css';
 loadContent();
 
 const DISTRICT = 128;
+
+/** What is on screen over the map. Exactly one thing, or nothing. */
+type Panel =
+  | { k: 'none' }
+  | { k: 'place'; site: number }
+  | { k: 'yard'; yard: number }
+  | { k: 'vehicles' };
 
 /**
  * Map the content's way classes onto the three the renderer draws.
@@ -50,25 +57,44 @@ export function App(): JSX.Element {
   const [hud, setHud] = useState({ date: '', vehicles: 0, fps: 0, tris: 0, cash: 0, free: 0 });
   const [live, setLive] = useState<
     { world: World; renderer: Renderer; src: RenderSource } | null>(null);
-  const [open, setOpen] = useState(-1);
-  const [place, setPlace] = useState(-1);
-  const [screen, setScreen] = useState<'none' | 'vehicles' | 'yard'>('none');
+  /*
+   * One panel, ever.
+   *
+   * Three independent pieces of state — a contract id, a place id and a screen
+   * name — meant three windows could be open at once, stacked over each other
+   * and over the map. A single tagged value makes that unrepresentable rather
+   * than merely discouraged, which is the only way a rule like this holds: the
+   * eight-control budget is not a guideline if the shape of the state allows a
+   * breach.
+   */
+  const [panel, setPanel] = useState<Panel>({ k: 'none' });
   const [revision, setRevision] = useState(0);
   const bump = useCallback(() => setRevision((r) => r + 1), []);
-
-  const accept = useCallback((id: number): void => {
-    if (!live) return;
-    if (live.world.acceptContract(id, live.world.player)) {
-      setOpen(-1);
-      bump();
-    }
-  }, [live, bump]);
 
   const buy = useCallback((typeIndex: number): void => {
     if (!live) return;
     const r = live.world.buyVehicleAtYard(typeIndex);
     if (r.vehicle >= 0) bump();
   }, [live, bump]);
+
+  const fit = useCallback((vehicle: number, fitting: number): void => {
+    if (!live) return;
+    if (live.world.fitVehicle(vehicle, fitting).ok) bump();
+  }, [live, bump]);
+
+  /**
+   * Go to a place, and open it.
+   *
+   * The camera move is the point. "Where's my yard? I can't even see my yard"
+   * was a fair complaint about a Yard button that opened a panel about a place
+   * the player could not find on the map — a panel is not a location. Anything
+   * that names a place now also takes you to it.
+   */
+  const lookAt = useCallback((x: number, z: number): void => {
+    if (!live) return;
+    live.renderer.camX = x;
+    live.renderer.camZ = z;
+  }, [live]);
 
   const addFacility = useCallback((yard: number, facility: number): void => {
     if (!live) return;
@@ -107,15 +133,25 @@ export function App(): JSX.Element {
         live.src,
       );
     }, [live]),
+    previewDriver: useCallback((contract: number, vehicle: number): void => {
+      if (!live) return;
+      const { world, renderer, src } = live;
+      const b = world.contractBoard;
+      const yard = world.vehicleYard[vehicle] ?? -1;
+      // Two legs, two colours. The empty run out of the yard earns nothing and
+      // the loaded run pays, and a player choosing between two spare tankers at
+      // two yards is choosing between two amounts of unpaid driving.
+      renderer.showRoute([
+        { tiles: world.routeFromYard(yard, b.from[contract]), colour: RUN.empty },
+        { tiles: world.previewRoute(b.from[contract], b.to[contract]), colour: RUN.loaded },
+      ], src);
+    }, [live]),
     goTo: useCallback((site: number): void => {
       if (!live) return;
-      // Straight to it. A supplier you can see is a place you can go, and the
-      // click is the whole reason the panel names it rather than describing it.
-      live.renderer.camX = live.world.sites.x[site] + 0.5;
-      live.renderer.camZ = live.world.sites.y[site] + 0.5;
-      setPlace(site);
-    }, [live]),
-    close: useCallback((): void => setPlace(-1), []),
+      lookAt(live.world.sites.x[site] + 0.5, live.world.sites.y[site] + 0.5);
+      setPanel({ k: 'place', site });
+    }, [live, lookAt]),
+    close: useCallback((): void => setPanel({ k: 'none' }), []),
   };
 
   useEffect(() => {
@@ -166,6 +202,7 @@ export function App(): JSX.Element {
       pModel: new Uint8Array(320),
       pRot: new Float32Array(320),
       dayFraction: 0.62,
+      snow: 0,
     };
 
     /*
@@ -422,7 +459,7 @@ export function App(): JSX.Element {
         const d = dx * dx + dz * dz;
         if (d < bestD) { bestD = d; found = i; }
       }
-      if (found >= 0) setPlace(found);
+      if (found >= 0) setPanel({ k: 'place', site: found });
     };
     const wheel = (e: WheelEvent): void => {
       e.preventDefault();
@@ -521,6 +558,9 @@ export function App(): JSX.Element {
        * it looks in the sun.
        */
       src.dayFraction = ((world.tick + TICKS_PER_DAY * 0.46) % TICKS_PER_DAY) / TICKS_PER_DAY;
+      // One number, read by the renderer to paint the season and by the traffic
+      // to decide who can move. There is deliberately not a second one.
+      src.snow = world.snow;
 
       renderer.render(src);
 
@@ -571,29 +611,35 @@ export function App(): JSX.Element {
     <div className="app">
       <canvas ref={canvasRef} className="world" />
       {live && (
-        <Pins
+        <Markers
           world={live.world}
           renderer={live.renderer}
-          revision={revision}
-          onOpen={setOpen}
+          onOpenSite={(site) => setPanel({ k: 'place', site })}
+          onOpenYard={(yard) => {
+            lookAt(live.world.yards.x[yard] + 0.5, live.world.yards.y[yard] + 0.5);
+            setPanel({ k: 'yard', yard });
+          }}
         />
       )}
-      {live && place >= 0 && (
-        <Place world={live.world} site={place} actions={placeActions} />
+      {live && <Alerts world={live.world} renderer={live.renderer} />}
+      {live && panel.k === 'place' && (
+        <Place world={live.world} site={panel.site} actions={placeActions} />
       )}
-      {live && open >= 0 && (
-        <ContractPanel
+      {live && panel.k === 'vehicles' && (
+        <Vehicles
           world={live.world}
-          contract={open}
-          onClose={() => setOpen(-1)}
-          onAccept={accept}
+          onBuy={buy}
+          onClose={() => setPanel({ k: 'none' })}
         />
       )}
-      {live && screen === 'vehicles' && (
-        <Vehicles world={live.world} onBuy={buy} onClose={() => setScreen('none')} />
-      )}
-      {live && screen === 'yard' && (
-        <Yard world={live.world} yard={0} onAdd={addFacility} onClose={() => setScreen('none')} />
+      {live && panel.k === 'yard' && (
+        <Yard
+          world={live.world}
+          yard={panel.yard}
+          onAdd={addFacility}
+          onFit={fit}
+          onClose={() => setPanel({ k: 'none' })}
+        />
       )}
       <div className="hud">
         <span className="brand">Interchange</span>
@@ -602,11 +648,18 @@ export function App(): JSX.Element {
         <span className="dim">{hud.vehicles} out · {hud.free} idle</span>
         <button
           className="hud-btn"
-          onClick={() => setScreen(screen === 'yard' ? 'none' : 'yard')}
+          onClick={() => {
+            if (!live || live.world.yards.count === 0) return;
+            if (panel.k === 'yard') { setPanel({ k: 'none' }); return; }
+            // And *go* there. A button named after a place that does not move
+            // the camera to it is the thing that made the yard unfindable.
+            lookAt(live.world.yards.x[0] + 0.5, live.world.yards.y[0] + 0.5);
+            setPanel({ k: 'yard', yard: 0 });
+          }}
         >Yard</button>
         <button
           className="hud-btn"
-          onClick={() => setScreen(screen === 'vehicles' ? 'none' : 'vehicles')}
+          onClick={() => setPanel(panel.k === 'vehicles' ? { k: 'none' } : { k: 'vehicles' })}
         >Vehicles</button>
       </div>
       {!ready && <div className="loading">Surveying the district…</div>}

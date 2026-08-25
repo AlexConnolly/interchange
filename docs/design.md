@@ -304,6 +304,39 @@ line of code.
 That is the whole interface. If something does not fit on those five, it is not
 in the game yet.
 
+**One panel at a time, and never two.** Three separate pieces of state — a
+contract, a place, a screen — let three windows stack over the map at once. A
+single tagged value makes that unrepresentable, which is the only way the cap
+holds: the eight-control budget is not a rule if the shape of the state permits
+a breach.
+
+### The map is the interface
+
+Four rules, all learned by getting them wrong first:
+
+**Every business you can see carries a marker, always.** Not only the ones with
+work going. A place with no marker is indistinguishable from scenery, and a
+district of unmarked roofs is unclickable.
+
+**A marker is a pictogram and never a word.** At twenty pixels from a moving
+camera you recognise the *shape* of a business long before you could read its
+name, and fourteen labels on screen is a wall of text pretending to be a map. A
+marker says three things and no more: what it is, whether it is yours, whether
+there is work going.
+
+**Anything that names a place takes you to it.** A button called Yard that opens
+a panel about a place you cannot find on the map is worse than no button: a
+panel is not a location.
+
+**Draw the route; never print the distance.** "26 tiles" is not an answer to
+where a job goes. A contract is a row — where to, what it pays, what body it
+needs — and hovering it draws the run on the map. Hovering a *driver* draws
+both legs in two colours, because the choice between two spare tankers at two
+yards is a choice about unpaid miles and one line hides it.
+
+**And no explanatory prose.** If a rule needs a paragraph in the panel, the rule
+is wrong. If it does not, the paragraph is noise.
+
 The old build had fifteen buttons in one rail and twenty overlay modes. The cap
 here is a number and a breach is a bug: **no more than eight controls visible at
 once.**
