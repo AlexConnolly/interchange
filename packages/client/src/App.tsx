@@ -1668,6 +1668,11 @@ export function App(): JSX.Element {
       // Tractors, after the traffic. They share the vehicle arrays so they get
       // instanced drawing, headlamps at dusk, motion smoothing and engine sound
       // without any of those systems knowing tractors exist.
+      /*
+       * What time the farms think it is. Zero on the dial is six in the morning,
+       * which is where `HOUR` puts it and why the lit arc is one unbroken piece.
+       */
+      farmwork.hour = (src.dayFraction * 24 + 6) % 24;
       n = farmwork.step(
         dt, MACHINES, n,
         src.vx, src.vz, src.vHeading, src.vLivery, src.vModel, src.vId,

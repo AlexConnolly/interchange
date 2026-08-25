@@ -198,6 +198,35 @@ export class Farmwork {
     this.world = world;
   }
 
+  /**
+   * The hour of the day, written by the frame loop.
+   *
+   * A plain field rather than a step argument, like `Ambient.demand` and for the
+   * same reason: it is one number that changes every frame and is read in three
+   * places, and threading it through would mean touching every phase in the
+   * switch to reach the two that care.
+   */
+  hour = 12;
+
+  /**
+   * Is this machine's day over?
+   *
+   * Field work is daylight work. Tractors running plough and drill through the
+   * small hours was the single least believable thing in the district at night —
+   * a village with its lights off and a full harvest going on around it — and it
+   * also threw away the best thing about having a night at all, which is that the
+   * countryside is *supposed* to go still.
+   *
+   * The combine is the exception, and it is the exception in life too: when the
+   * crop is fit and the weather is holding you cut until you cannot see, and the
+   * headlamps of a combine working a field at eleven at night is one of the few
+   * genuinely dramatic sights in English farming. So it gets three more hours
+   * than everything else, which is the difference between a rule and a curfew.
+   */
+  private offShift(job: Job): boolean {
+    return this.hour < 6 || this.hour >= (job === 'combine' ? 23 : 20);
+  }
+
   private rnd(): number {
     this.seed = (this.seed * 1664525 + 1013904223) | 0;
     return ((this.seed >>> 8) & 0xffff) / 0x10000;
@@ -252,6 +281,19 @@ export class Farmwork {
     ) !== 'none');
     const field = this.pick(wanting.length > 0 ? wanting : idle);
     if (!field) return false;
+    /*
+     * What the job is, decided here rather than at the bottom of this function.
+     *
+     * It used to be read twice — once for the machine's pace and once to set
+     * `t.job` — and now the shift check needs it as well, which finally makes the
+     * duplication worth removing. It also has to be known *before* committing to
+     * the run: whether the yard sends anything out at nine at night depends
+     * entirely on whether the answer is `combine`.
+     */
+    const job = this.world.job(
+      Math.floor(field.entryZ) * this.world.size + Math.floor(field.entryX),
+    );
+    if (this.offShift(job)) return false;
     // A tractor already in its field still needs a way home, so the route is
     // required either way. Nothing else would notice until it tried to leave.
     const path = this.world.route(farm.tile, field.road);
@@ -280,16 +322,14 @@ export class Farmwork {
     t.leg = 1;
     t.t = 0;
     t.phase = 'out';
-    t.job = this.world.job(
-      Math.floor(field.entryZ) * this.world.size + Math.floor(field.entryX),
-    );
+    t.job = job;
     /*
      * A combine moves through a crop faster than a plough moves through soil,
      * and a sprayer faster than either. Not a detail: the machine and its pace
      * are the same observation, and a combine crawling like a plough looks
      * wrong before you have worked out why.
      */
-    const pace = t.job === 'combine' ? 1.25 : t.job === 'spray' ? 1.5 : 1;
+    const pace = job === 'combine' ? 1.25 : job === 'spray' ? 1.5 : 1;
     // Half, with the same district-wide slowdown as the roads. The relative paces
     // are kept: a combine still moves through a crop faster than a plough through
     // soil, both of them at half of what they were.
@@ -491,7 +531,13 @@ export class Farmwork {
             if (this.dispatch(t, straightToWork)) {
               if (straightToWork) this.opening--;
             } else {
-              t.wait = 2;
+              /*
+               * Longer through the night, when the answer cannot change for a
+               * while. Two seconds is right for "influence has not resolved yet";
+               * it is pointless for "it is three in the morning", and it is every
+               * tractor in the district asking fifty times a minute.
+               */
+              t.wait = this.offShift('combine') ? 8 : 2;
             }
           }
           // Nothing to draw: it is in the yard, behind the farm buildings.
@@ -772,9 +818,17 @@ export class Farmwork {
           t.along += (dt * t.speed) / Math.max(1, long);
           if (t.along >= 1) {
             t.along = 0;
-            if (t.pass + 1 >= t.passes) {
+            if (t.pass + 1 >= t.passes || this.offShift(t.job)) {
               /*
-               * Done. Plan the way home *now*, and aim the gate run at the exact
+               * Done — or knocking off, which takes the same route.
+               *
+               * At the end of a *pass*, never mid-furrow: a machine abandoned
+               * halfway across a field, or worse turned round in the middle of
+               * one, reads as a fault rather than as the end of a day. This is
+               * also why the shift end is a soft one — a tractor that started its
+               * last pass at five to eight finishes it, and gets home late.
+               *
+               * Plan the way home *now*, and aim the gate run at the exact
                * point that route will start from.
                *
                * The road phases put a vehicle on a quadratic through the tile it

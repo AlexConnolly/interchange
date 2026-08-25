@@ -28,7 +28,7 @@ const FIELD: FarmField = {
   entryZ: 12.5,
 };
 
-function district(worked?: Set<number>): Farmwork {
+function district(worked?: Set<number>, job: 'plough' | 'combine' = 'plough'): Farmwork {
   return new Farmwork({
     size: SIZE,
     farms: () => [{ tile: t(4, 10), x: 4.5, z: 10.5 }],
@@ -42,7 +42,7 @@ function district(worked?: Set<number>): Farmwork {
     // give-way rule never fires. The following rule is what these tests are
     // about; priority has its own test below.
     rank: () => 1,
-    job: () => 'plough' as const,
+    job: () => job,
   });
 }
 
@@ -305,5 +305,98 @@ describe('two machines never share a field', () => {
     }
     // And both fields did get visited, or the claim is simply blocking everything.
     expect(seen.size).toBe(2);
+  });
+});
+
+
+/**
+ * Field work is daylight work.
+ *
+ * Tractors ran round the clock, which meant a village with every light off and a
+ * full harvest going on in the dark around it, and it threw away the one thing a
+ * night is for: the countryside going still. The combine is the exception, in the
+ * game and in life — when the crop is fit you cut until you cannot see.
+ *
+ * These drive the clock directly rather than through the frame loop, because what
+ * is being pinned is the *rule* and not the plumbing: `hour` is a plain field
+ * precisely so it can be set to three in the morning without simulating a night.
+ */
+function machinesOut(hour: number, job: 'plough' | 'combine'): number {
+  const farm = district(undefined, job);
+  const cap = 64;
+  const vx = new Float32Array(cap);
+  const vz = new Float32Array(cap);
+  const vh = new Float32Array(cap);
+  const vl = new Uint8Array(cap);
+  const vm = new Uint8Array(cap);
+  const vi = new Int32Array(cap);
+  const dt = 1 / 30;
+  let most = 0;
+  // Two minutes, which is far longer than the second and a half the machines
+  // stagger their first dispatch over — so "none went out" means none ever will.
+  for (let k = 0; k < 120 * 30; k++) {
+    farm.hour = hour;
+    most = Math.max(most, farm.step(dt, MACHINES, 0, vx, vz, vh, vl, vm, vi));
+  }
+  return most;
+}
+
+describe('the working day', () => {
+  it('sends machines out in the afternoon', () => {
+    // The hour the game opens at, which had better be a district with work in it.
+    expect(machinesOut(17, 'plough')).toBeGreaterThan(0);
+  });
+
+  it('keeps them in the yard in the small hours', () => {
+    expect(machinesOut(3, 'plough')).toBe(0);
+    // Not even the combine, which is the whole point of it being three more
+    // hours rather than no limit at all.
+    expect(machinesOut(3, 'combine')).toBe(0);
+  });
+
+  it('stops the plough at eight but lets the combine cut on', () => {
+    expect(machinesOut(21, 'plough')).toBe(0);
+    expect(machinesOut(21, 'combine')).toBeGreaterThan(0);
+  });
+
+  it('brings a machine that is already out home when the day ends', () => {
+    /*
+     * The soft end, and the reason it has to be soft: a machine abandoned
+     * mid-furrow reads as a fault rather than as the end of a day. So it works
+     * until the shift is over, finishes the pass it is on, and drives home.
+     *
+     * Measured against its own baseline, which is the only way this can mean
+     * anything. The first version asserted simply that the field eventually
+     * emptied — and it passed with the rule disabled, because a machine that
+     * works all four passes and goes home does that too. What discriminates is
+     * *when*: knocking off has to be sooner than finishing.
+     */
+    const home = (endShiftAt: number): number => {
+      const farm = district(undefined, 'plough');
+      const cap = 64;
+      const vx = new Float32Array(cap);
+      const vz = new Float32Array(cap);
+      const vh = new Float32Array(cap);
+      const vl = new Uint8Array(cap);
+      const vm = new Uint8Array(cap);
+      const vi = new Int32Array(cap);
+      const dt = 1 / 30;
+      let out = 0;
+      for (let k = 0; k < 900 * 30; k++) {
+        // Afternoon until the given moment, then the day is over.
+        farm.hour = k / 30 < endShiftAt ? 17 : 22;
+        const n = farm.step(dt, MACHINES, 0, vx, vz, vh, vl, vm, vi);
+        // The first time the field is empty again *after* it had something in it.
+        if (out > 0 && n === 0) return k / 30;
+        out = Math.max(out, n);
+      }
+      return Infinity;
+    };
+    // Working the field, then sent home a minute in.
+    const knockedOff = home(60);
+    // The same run with the shift never ending: it finishes all four passes.
+    const finished = home(Infinity);
+    expect(finished).toBeLessThan(Infinity);
+    expect(knockedOff).toBeLessThan(finished);
   });
 });

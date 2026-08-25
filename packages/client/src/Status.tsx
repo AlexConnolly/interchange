@@ -11,10 +11,14 @@
  * come on — so it goes to the far side and carries the one thing the old bar
  * could not show at all: **where in the day you are**.
  *
- * That dial is doing real work now that a day is four minutes long and the night
- * is dark. "Is it about to get dark" is a question with consequences — a winter
- * evening is when an unfitted lorry stops — and the answer used to be somewhere
- * in the lighting.
+ * And the hour leads it, with the date underneath. "We focus so much on the time
+ * of year but wouldn't it be better to focus on the time of day" — yes, and the
+ * reason is that the two are read at completely different rates. The date changes
+ * every four minutes and matters a handful of times a year: it is the harvest, it
+ * is the winter fuel bill. The hour changes continuously and matters *now* — it is
+ * whether the lights are about to come on, whether the yard is open, whether the
+ * lorry you are watching is going to be caught out in the dark. A readout should
+ * lead with the figure you look at it *for*, and a week number is not it.
  */
 
 import { type JSX } from 'react';
@@ -55,6 +59,19 @@ function DayRing({ fraction, night }: { fraction: number; night: number }): JSX.
   );
 }
 
+/**
+ * The hour of the day, from the fraction the renderer already runs the sun on.
+ *
+ * Zero is six in the morning — see `HOUR` in `evening.ts`, which is where that
+ * offset is set and why: the day starts at dawn rather than at midnight so the
+ * lit arc on the ring is one unbroken piece.
+ */
+function clockTime(fraction: number): string {
+  const mins = Math.floor((((fraction % 1) + 1) % 1) * 1440 + 6 * 60) % 1440;
+  const h = Math.floor(mins / 60);
+  return `${h}:${String(mins % 60).padStart(2, '0')}`;
+}
+
 export function Status({
   cash, date, out, idle, dayFraction, night, weather, onMenu,
 }: {
@@ -84,6 +101,7 @@ export function Status({
 
       <div className="clock">
         <div className="clock-text">
+          <span className="clock-time">{clockTime(dayFraction)}</span>
           <span className="clock-date">{date}</span>
           <span className="clock-sub">
             {out} out · {idle} idle
