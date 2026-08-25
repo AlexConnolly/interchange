@@ -2212,6 +2212,11 @@ export class World {
       case Cmd.SetNodeControl:
         if (c.a < this.graph.nodeCount) this.graph.nodeControl[c.a] = c.b;
         break;
+      case Cmd.DeclareBankrupt:
+        // Only about yourself. A command that could bankrupt a rival would be
+        // the shortest griefing route in a shared world.
+        if (c.a === c.issuer) this.declareBankrupt(c.issuer);
+        break;
       case Cmd.GrantCharter:
         this.companies.charter[c.a] = c.b;
         break;

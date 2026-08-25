@@ -28,7 +28,10 @@ for (let i = 0; i < ticks; i++) w.step();
 const ms = Date.now() - t0;
 
 console.log(`${years} game years in ${ms} ms (${((ticks / ms) * 1000).toFixed(0)} ticks/s)`);
-console.log(`${decodeLog(w.queue.log.length ? JSON.stringify('') : '') ? '' : ''}commands issued: ${w.queue.log.length}`);
+// The log holds the player's decisions only — rival commands are regenerated
+// from the seed on replay rather than recorded, so counting the log here would
+// report eight commands for a region that issued thousands.
+console.log(`commands in the save log: ${w.queue.log.length} (rivals are not logged; see CommandQueue.push)`);
 console.log('');
 console.log('company                cash      revenue    rent   vehicles  services  assets  sites  bankrupt');
 for (let c = 1; c < w.companies.count; c++) {
