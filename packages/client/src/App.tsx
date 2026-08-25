@@ -516,8 +516,25 @@ export function App(): JSX.Element {
       ? ((asked % 1) + 1) % 1
       : 0.46;
 
+    /*
+     * The district seed, and it is 1986 rather than 1985 for a dull reason.
+     *
+     * The number is arbitrary — it was the year, which was a nice touch and
+     * nothing more. What it picks is a *district*, and 1985's turned out to be
+     * one of the two in twenty that generate no creamery. With no buyer for
+     * milk the opening job falls through to timber, which a cheap flatbed can
+     * carry rather than a refrigerated van, and the whole ladder shifts: a
+     * second vehicle within reach in four minutes against the twelve the economy
+     * is built on.
+     *
+     * The economy is tuned for the typical district, correctly — measured across
+     * milk districts it lands at twelve, twelve, twelve and eight minutes. So the
+     * fix is to open on a typical one rather than to re-tune the game around an
+     * unusual map, which is the same mistake as a threshold written against a
+     * single seed.
+     */
     const world = createWorld({
-      seed: 1985, size: DISTRICT, townCount: 3, companyCount: 1,
+      seed: 1986, size: DISTRICT, townCount: 3, companyCount: 1,
     });
     world.dayOffset = dayOffset;
     /*

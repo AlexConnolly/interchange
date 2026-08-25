@@ -1565,6 +1565,8 @@ export class World {
     let bestTo = NONE;
     let bestCargo = NONE;
     let bestScore = Infinity;
+    /** 0 for the cargo `balance.json` asks to open on, 1 for anything else. */
+    let bestRank = 2;
 
     for (let a = 0; a < this.sites.count; a++) {
       const ta = this.siteAccessTile[a];
@@ -1605,8 +1607,28 @@ export class World {
           const d = Math.sqrt(dx * dx + dy * dy);
           // Not on top of each other: the opening job has to be a drive.
           if (d < 5) continue;
-          const score = d * (easy ? 1 : 4) * (wanted ? 0.2 : 1);
-          if (score < bestScore) {
+          /*
+           * The named cargo wins outright, and then distance decides among them.
+           *
+           * It used to be a multiplier — a fifth of the score — which distance
+           * could and did outvote: a dairy farm forty tiles from its creamery
+           * scored worse than a forestry ten tiles from its sawmill, so the
+           * district opened on timber instead of milk. That matters more than it
+           * sounds. `openingCargo` is named in `balance.json` because the whole
+           * economy is tuned around that one job, and timber is carried by a
+           * cheap flatbed while milk needs a refrigerated van: measured, the
+           * timber opening put a second vehicle within reach in four minutes
+           * against the twelve the ladder is built on. A tuning anchor that any
+           * unlucky map layout can slide off is not an anchor.
+           *
+           * Still a preference and not a filter: a district with no dairy pair
+           * at all falls through to the ordinary scoring below, which is the
+           * point the original note was making and is still true.
+           */
+          const rank = wanted ? 0 : 1;
+          const score = d * (easy ? 1 : 4);
+          if (rank < bestRank || (rank === bestRank && score < bestScore)) {
+            bestRank = rank;
             bestScore = score;
             bestFrom = a;
             bestTo = b;

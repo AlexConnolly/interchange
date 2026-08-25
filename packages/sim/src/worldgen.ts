@@ -452,6 +452,11 @@ function nearestLand(t: Terrain, x: number, y: number, radius: number): [number,
   return null;
 }
 
+/** The order a site tries its neighbours in when its own tile will not do.
+ *  Fixed, so the search is deterministic and costs no random draws. */
+const NUDGE_X = [1, -1, 0, 0, 1, 1, -1, -1];
+const NUDGE_Y = [0, 0, 1, -1, 1, -1, 1, -1];
+
 /** Buildable ground in an annulus around a town, avoiding anything already
  *  occupied so two industries do not land on the same tile. */
 function findSiteSpot(
@@ -464,11 +469,46 @@ function findSiteSpot(
     const a = w.rng.int(4096);
     const dx = Math.round((r * Math.cos((a / 4096) * Math.PI * 2)));
     const dy = Math.round((r * Math.sin((a / 4096) * Math.PI * 2)));
-    const x = cx + dx;
-    const y = cy + dy;
+    let x = cx + dx;
+    let y = cy + dy;
     if (!t.inBounds(x, y) || !t.isLand(x, y)) continue;
-    const tile = t.idx(x, y);
-    if ((t.flags[tile] & TileFlag.Buildable) === 0) continue;
+    // Never on an island, or the track to it can never be laid and the business
+    // exists without ever being connected to anything.
+    if ((t.flags[t.idx(x, y)] & TileFlag.Mainland) === 0) continue;
+    /*
+     * Step off the water rather than give up on the spot.
+     *
+     * Watercourses stopped being buildable ground, which is right — a creamery
+     * standing in a beck is not a creamery. But this loop treated an unbuildable
+     * tile as a dead draw and moved on, so a district with proper drainage lost
+     * the industries whose annulus happened to cross a stream: seed 1985 lost its
+     * creamery, its brewery and both mills, and with the creamery gone there was
+     * no buyer for milk and the opening job fell through to something else
+     * entirely.
+     *
+     * A yard beside the water is what was wanted anyway — half the mills in
+     * England are on one. So a tile that fails takes the nearest neighbour that
+     * passes, in a fixed order, which costs no random draws at all: important,
+     * because consuming a different number of them would reshuffle every later
+     * decision in the district and make this impossible to measure.
+     */
+    let tile = t.idx(x, y);
+    if ((t.flags[tile] & TileFlag.Buildable) === 0) {
+      let moved = false;
+      for (let d = 0; d < 8 && !moved; d++) {
+        const nx = x + NUDGE_X[d];
+        const ny = y + NUDGE_Y[d];
+        if (!t.inBounds(nx, ny) || !t.isLand(nx, ny)) continue;
+        const nt = t.idx(nx, ny);
+        if ((t.flags[nt] & (TileFlag.Buildable | TileFlag.Mainland))
+          !== (TileFlag.Buildable | TileFlag.Mainland)) continue;
+        x = nx;
+        y = ny;
+        tile = nt;
+        moved = true;
+      }
+      if (!moved) continue;
+    }
     if (taken.has(tile)) continue;
     let clear = true;
     for (const other of taken) {

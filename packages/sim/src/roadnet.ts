@@ -300,27 +300,56 @@ export function generateRoads(
   const network = new Uint8Array(n);
   const byWeight = [...settlements].sort((a, b) => b.weight - a.weight);
 
-  const seed = byWeight[0];
-  network[seed.y * s + seed.x] = 1;
-
   const refresh = (): void => {
     for (let i = 0; i < n; i++) if (ctx.cls[i] !== NO_WAY) network[i] = 1;
   };
 
+  /*
+   * And the seed itself is retried, because it was the last single point of
+   * failure left in here.
+   *
+   * Everything routes to whatever network already exists, and the network starts
+   * as one tile: the biggest settlement. So a district whose *biggest* settlement
+   * happens to sit somewhere nothing can reach — a spit, a pocket ringed by
+   * water, the wrong side of an estuary — fails every route in turn and lays no
+   * road anywhere. Not a thin network: none. Zero road tiles, every site without
+   * an access tile, no opening pair, and a game that starts with nothing to do.
+   *
+   * Measured across thirty seeds while doing something else entirely: it happens
+   * to *one district in three*. The note above says a generator that can be
+   * defeated by one bad placement is a generator that will be, and then left one
+   * placement able to defeat it.
+   *
+   * So if a seed connects nothing, try the next settlement as the seed. Nothing
+   * has been laid at that point — `lay` only runs on a successful route — so
+   * there is nothing to undo, and the tally is reset with it.
+   */
   let joined = 0;
-  for (let i = 1; i < byWeight.length; i++) {
-    const place = byWeight[i];
-    const tier: Tier = joined === 0 ? Tier.Spine : Tier.Lane;
-    const path = route(ctx, place.y * s + place.x, network, tier);
-    if (!path) {
-      tally.unreachable++;
-      continue;
+  for (let seedAt = 0; seedAt < byWeight.length; seedAt++) {
+    network.fill(0);
+    tally.unreachable = 0;
+    tally.spine = 0;
+    tally.lanes = 0;
+    joined = 0;
+    const seed = byWeight[seedAt];
+    network[seed.y * s + seed.x] = 1;
+
+    for (let i = 0; i < byWeight.length; i++) {
+      if (i === seedAt) continue;
+      const place = byWeight[i];
+      const tier: Tier = joined === 0 ? Tier.Spine : Tier.Lane;
+      const path = route(ctx, place.y * s + place.x, network, tier);
+      if (!path) {
+        tally.unreachable++;
+        continue;
+      }
+      lay(ctx, path, tier);
+      if (tier === Tier.Spine) tally.spine += path.length;
+      else tally.lanes += path.length;
+      joined++;
+      refresh();
     }
-    lay(ctx, path, tier);
-    if (tier === Tier.Spine) tally.spine += path.length;
-    else tally.lanes += path.length;
-    joined++;
-    refresh();
+    if (joined > 0) break;
   }
 
   // And a track to everything else that needs collecting from.
