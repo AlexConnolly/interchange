@@ -108,7 +108,12 @@ export const LIVERIES: Livery[] = [
   { name: 'Crimson', colour: hex('#9c2f38'), accent: hex('#e8d9b8'), pattern: 3 },
   { name: 'Indigo', colour: hex('#39518f'), accent: hex('#c9d4e8'), pattern: 2 },
   { name: 'Ochre', colour: hex('#a8712a'), accent: hex('#33291d'), pattern: 4 },
-  { name: 'Teal', colour: hex('#1f6b73'), accent: hex('#e0ded0'), pattern: 1 },
+  // Brightened away from Green. At #1f6b73 the two collapsed to a Lab
+  // distance of three under tritanopia — indistinguishable, and they share the
+  // band pattern, so a tritanope playing a six-company region had two rivals
+  // they could not tell apart at all. Found by the legibility check rather
+  // than by anybody looking at it, which is the point of having one.
+  { name: 'Teal', colour: hex('#5fbcc8'), accent: hex('#123c44'), pattern: 1 },
   { name: 'Plum', colour: hex('#6a3a63'), accent: hex('#ded0d8'), pattern: 3 },
   { name: 'Slate', colour: hex('#3f4a52'), accent: hex('#b9c2c8'), pattern: 2 },
   { name: 'Moss', colour: hex('#55632c'), accent: hex('#e2e0c0'), pattern: 4 },

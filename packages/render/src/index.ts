@@ -11,3 +11,4 @@ export * from './geometry.ts';
 export * from './models.ts';
 export * from './material.ts';
 export * from './scene.ts';
+export * from './legibility.ts';

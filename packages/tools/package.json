@@ -6,6 +6,7 @@
   "dependencies": {
     "@interchange/sim": "workspace:*",
     "@interchange/data": "workspace:*",
-    "@interchange/server": "workspace:*"
+    "@interchange/server": "workspace:*",
+    "@interchange/render": "workspace:*"
   }
 }

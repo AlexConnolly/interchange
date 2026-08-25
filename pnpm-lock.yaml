@@ -90,6 +90,9 @@ importers:
       '@interchange/data':
         specifier: workspace:*
         version: link:../data
+      '@interchange/render':
+        specifier: workspace:*
+        version: link:../render
       '@interchange/server':
         specifier: workspace:*
         version: link:../server

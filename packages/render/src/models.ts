@@ -149,6 +149,50 @@ function farVehicle(m: Mesh, p: ModelParams): Mesh {
 
 // ------------------------------------------------------------------- road
 
+/**
+ * The mark that says whose it is with the colour taken away.
+ *
+ * art-direction.md 10 asks that construction say what a thing is and livery
+ * say whose, and that both survive desaturation — so a livery is a pattern as
+ * well as a colour. Only two of the eleven vehicle models used to draw one,
+ * which meant nine of them said whose they were with colour alone, and for a
+ * colourblind player at fourteen pixels that is nothing at all.
+ *
+ * One helper rather than a branch inside each model, so a new vehicle gets
+ * the marks by calling it and cannot quietly forget to.
+ *
+ *   x, y, z   centre of the body it is going on
+ *   hw, hh, hd  half-extents of that body
+ */
+function liveryMark(
+  m: Mesh, L: Livery, x: number, y: number, z: number, hw: number, hh: number, hd: number,
+): void {
+  const a = L.accent;
+  // Standing slightly proud of the body, or z-fighting turns the mark into a
+  // shimmer, which is worse than not having one.
+  const out = 0.004;
+  switch (L.pattern) {
+    case 1: // band: a waistline stripe the full length
+      m.box(x, y, z, hw + out, Math.min(0.018, hh * 0.3), hd, 0, a);
+      break;
+    case 2: // roof panel: a flat cap, which reads best from directly above
+      m.box(x, y + hh - out, z, hw * 0.86, 0.007, hd * 0.9, 0, a);
+      break;
+    case 3: // diagonal flash: three descending blocks, a stripe at size
+      for (let i = 0; i < 3; i++) {
+        m.box(x, y - hh * 0.4 + i * hh * 0.42, z - hd * 0.4 + i * hd * 0.4,
+          hw + out, Math.min(0.016, hh * 0.26), hd * 0.24, 0, a);
+      }
+      break;
+    case 4: // twin stripe: two thin lines, unmistakable in silhouette
+      m.box(x, y + hh * 0.45, z, hw + out, 0.010, hd, 0, a);
+      m.box(x, y - hh * 0.35, z, hw + out, 0.010, hd, 0, a);
+      break;
+    default: // plain: the authority, which is meant to be anonymous
+      break;
+  }
+}
+
 function wheels(m: Mesh, count: number, z0: number, dz: number, r: number, halfWidth: number, y: number): void {
   for (let i = 0; i < count; i++) {
     const z = z0 + i * dz;
@@ -166,6 +210,9 @@ function dray(m: Mesh, p: ModelParams): void {
   m.box(0, 0.13, -0.03, w, 0.045, 0.20, 0.012, TIMBER, TIMBER_LIT, shade(TIMBER, 0.8));
   if (!p.far) {
     m.box(0, 0.175, -0.16, w * 0.95, 0.04, 0.045, 0.01, L.colour, L.accent, L.colour);
+    // The body is bare timber, so the mark goes on the painted seat board —
+    // which is where a carrier would have put their name in 1860 anyway.
+    liveryMark(m, L, 0, 0.175, -0.16, w * 0.95, 0.04, 0.045);
     // Shafts running forward to the horse.
     m.box(-w * 0.6, 0.135, 0.24, 0.008, 0.008, 0.10, 0, TIMBER);
     m.box(w * 0.6, 0.135, 0.24, 0.008, 0.008, 0.10, 0, TIMBER);
@@ -197,6 +244,7 @@ function lorry(m: Mesh, p: ModelParams): void {
       m.cyl(0, 0.30, 0.20, 0.022, 0.026, 0.12, 6, IRON, IRON_LIT);
       m.box(0, 0.14, 0.29, w * 0.7, 0.055, 0.05, 0.01, IRON, IRON_LIT);
       m.box(0, 0.255, 0.145, w * 0.55, 0.006, 0.055, 0, GLASS, GLASS, GLASS, 0.35);
+      liveryMark(m, L, 0, 0.16, -0.10, w, 0.09, 0.20);
     }
     wheels(m, 3, -0.20, 0.20, 0.058, w + 0.012, 0.0);
   } else {
@@ -205,9 +253,7 @@ function lorry(m: Mesh, p: ModelParams): void {
     m.box(0, 0.05 + bodyTop * 0.42, 0.20, w * 0.94, bodyTop * 0.42, 0.10, 0.02, shade(L.colour, 0.9), L.accent);
     if (!p.far) {
       m.box(0, 0.055 + bodyTop * 0.72, 0.288, w * 0.8, 0.028, 0.012, 0, GLASS, GLASS, GLASS, 0.4);
-      // Livery band, so the company reads with the colour removed.
-      if (L.pattern === 1) m.box(0, 0.055 + bodyTop * 0.55, -0.08, w + 0.004, 0.018, 0.22, 0, L.accent);
-      if (L.pattern === 2) m.box(0, 0.055 + bodyTop - 0.004, -0.08, w * 0.9, 0.008, 0.20, 0, L.accent);
+      liveryMark(m, L, 0, 0.055 + bodyTop / 2, -0.08, w, bodyTop / 2, 0.22);
       m.box(-w * 0.6, 0.10, 0.30, 0.016, 0.012, 0.006, 0, LAMP, LAMP, LAMP, 1);
       m.box(w * 0.6, 0.10, 0.30, 0.016, 0.012, 0.006, 0, LAMP, LAMP, LAMP, 1);
     }
@@ -225,15 +271,7 @@ function artic(m: Mesh, p: ModelParams): void {
   m.box(0, 0.245, 0.02, w, 0.115, 0.30, 0.02, L.colour, L.accent, shade(L.colour, 0.82));
   if (!p.far) {
     m.box(0, 0.29, 0.462, w * 0.78, 0.03, 0.014, 0, GLASS, GLASS, GLASS, 0.4);
-    if (L.pattern === 3) {
-      // Diagonal flash: three descending blocks read as a stripe at size and
-      // as a shape when the colour is taken away.
-      for (let i = 0; i < 3; i++) m.box(0, 0.20 + i * 0.035, -0.05 + i * 0.07, w + 0.004, 0.018, 0.035, 0, L.accent);
-    }
-    if (L.pattern === 4) {
-      m.box(0, 0.30, 0.02, w + 0.004, 0.012, 0.30, 0, L.accent);
-      m.box(0, 0.19, 0.02, w + 0.004, 0.012, 0.30, 0, L.accent);
-    }
+    liveryMark(m, L, 0, 0.245, 0.02, w, 0.115, 0.30);
     if (band === 2) m.box(0, 0.365, 0.30, w * 0.6, 0.03, 0.08, 0.02, shade(L.colour, 0.8));
   }
   wheels(m, 2, 0.30, 0.12, 0.05, w + 0.008, 0.0);
@@ -249,7 +287,10 @@ function bus(m: Mesh, p: ModelParams): void {
   if (!p.far) {
     // A window band is what makes a bus a bus rather than a van.
     m.box(0, 0.09 + h * 1.25, 0, w + 0.003, 0.030, 0.30, 0, GLASS, GLASS, GLASS, 0.35);
+    // A bus already carries a waistline stripe as part of being a bus, so the
+    // livery mark goes above it rather than replacing it.
     m.box(0, 0.09 + h * 0.55, 0, w + 0.004, 0.012, 0.34, 0, L.accent);
+    liveryMark(m, L, 0, 0.06 + h, 0, w, h, 0.36);
     if (band === 0) m.box(0, 0.06 + h * 2 + 0.012, 0, w * 0.9, 0.012, 0.32, 0, TIMBER);
   }
   wheels(m, 2, -0.22, 0.42, 0.05, w + 0.008, 0.0);
@@ -260,6 +301,7 @@ function tram(m: Mesh, p: ModelParams): void {
   const w = 0.11;
   m.box(0, 0.20, 0, w, 0.12, 0.44, 0.022, L.colour, L.accent, shade(L.colour, 0.82));
   if (!p.far) {
+    liveryMark(m, L, 0, 0.20, 0, w, 0.12, 0.44);
     m.box(0, 0.255, 0, w + 0.003, 0.032, 0.38, 0, GLASS, GLASS, GLASS, 0.35);
     // Pantograph: the one detail that says electric from directly above.
     m.box(0, 0.335, -0.06, 0.006, 0.012, 0.05, 0, IRON);
@@ -287,6 +329,8 @@ function loco(m: Mesh, p: ModelParams): void {
       m.box(0, 0.09, 0.285, w * 0.8, 0.03, 0.02, 0.006, IRON);
       m.box(0, 0.13, -0.34, w * 0.9, 0.055, 0.11, 0.015, TIMBER, TIMBER_LIT);
       m.box(0, 0.145, 0.30, 0.012, 0.012, 0.01, 0, LAMP, LAMP, LAMP, 1);
+      // On the cab side, where a railway painted its arms.
+      liveryMark(m, L, 0, 0.215, -0.16, w * 0.95, 0.105, 0.10);
     }
     wheels(m, 4, -0.16, 0.13, 0.062, w + 0.006, 0.0);
   } else if (band === 1) {
@@ -295,7 +339,7 @@ function loco(m: Mesh, p: ModelParams): void {
     if (!p.far) {
       m.box(0, 0.245, 0.30, w * 0.95, 0.045, 0.12, 0.02, shade(L.colour, 0.88), L.accent);
       m.box(0, 0.255, 0.418, w * 0.8, 0.026, 0.010, 0, GLASS, GLASS, GLASS, 0.4);
-      m.box(0, 0.135, 0, w + 0.004, 0.014, 0.44, 0, L.accent);
+      liveryMark(m, L, 0, 0.175, 0, w, 0.095, 0.46);
       m.box(0, 0.10, 0.474, w * 0.5, 0.014, 0.008, 0, LAMP, LAMP, LAMP, 1);
     }
     m.box(0, 0.075, 0, w * 0.92, 0.03, 0.44, 0.01, IRON);
@@ -305,6 +349,7 @@ function loco(m: Mesh, p: ModelParams): void {
     m.box(0, 0.175, -0.06, w, 0.095, 0.40, 0.035, L.colour, L.accent, shade(L.colour, 0.84));
     m.wedge(0, 0.175, 0.40, w, 0.095, 0.12, 0.45, shade(L.colour, 0.94), L.accent);
     if (!p.far) {
+      liveryMark(m, L, 0, 0.175, -0.06, w, 0.095, 0.40);
       m.box(0, 0.215, 0, w + 0.003, 0.026, 0.36, 0, GLASS, GLASS, GLASS, 0.3);
       m.box(0, 0.12, 0.50, w * 0.4, 0.012, 0.01, 0, LAMP, LAMP, LAMP, 1);
     }
@@ -321,6 +366,7 @@ function multipleUnit(m: Mesh, p: ModelParams): void {
   m.box(0, 0.185, 0, w, 0.105, len, band === 2 ? 0.045 : 0.025, L.colour, L.accent, shade(L.colour, 0.82));
   if (band === 2) m.wedge(0, 0.185, len + 0.09, w, 0.105, 0.10, 0.4, shade(L.colour, 0.94), L.accent);
   if (!p.far) {
+    liveryMark(m, L, 0, 0.185, 0, w, 0.105, len);
     m.box(0, 0.235, 0, w + 0.003, 0.034, len * 0.86, 0, GLASS, GLASS, GLASS, 0.35);
     m.box(0, 0.125, 0, w + 0.004, 0.014, len * 0.9, 0, L.accent);
     if (band >= 1) {
@@ -340,6 +386,7 @@ function barge(m: Mesh, p: ModelParams): void {
   m.box(0, 0.05, -0.05, w, 0.05, 0.42, 0.02, shade(L.colour, 0.7), L.colour);
   m.wedge(0, 0.05, 0.44, w, 0.05, 0.10, 0.35, shade(L.colour, 0.75), L.colour);
   if (!p.far) {
+    liveryMark(m, L, 0, 0.05, -0.05, w, 0.05, 0.42);
     m.box(0, 0.115, -0.34, w * 0.7, 0.045, 0.08, 0.015, TIMBER, TIMBER_LIT);
     m.box(0, 0.085, 0.05, w * 0.82, 0.02, 0.30, 0, [0.20, 0.17, 0.13]);
   }
@@ -354,6 +401,7 @@ function ship(m: Mesh, p: ModelParams, scale: number): void {
   m.box(0, 0.06, -0.08 * scale, w, 0.06, len * 0.7, 0.025, shade(L.colour, 0.55), shade(L.colour, 0.75));
   m.wedge(0, 0.06, len * 0.72 - 0.08 * scale, w, 0.06, len * 0.3, 0.28, shade(L.colour, 0.6), shade(L.colour, 0.8));
   if (!p.far) {
+    liveryMark(m, L, 0, 0.06, -0.08 * scale, w, 0.06, len * 0.7);
     // Superstructure aft, which is where it has been since about 1950 and is
     // most of what says "ship" rather than "boat" from above.
     m.box(0, 0.16, -len * 0.62, w * 0.7, 0.06, 0.10 * scale, 0.02, [0.86, 0.86, 0.84], [0.94, 0.94, 0.92]);
@@ -386,6 +434,7 @@ function aircraft(m: Mesh, p: ModelParams): void {
   m.cylX(0, 0.10, 0, fuse, 0.0, 6, L.colour);
   // The fuselage as a prism about Z rather than X, since the plane points +Z.
   m.box(0, 0.10, 0, fuse, fuse, len, fuse * 0.9, L.colour, L.accent, shade(L.colour, 0.86));
+  if (!p.far) liveryMark(m, L, 0, 0.10, 0, fuse, fuse, len);
   m.wedge(0, 0.10, len + 0.09, fuse, fuse * 0.9, 0.10, 0.25, shade(L.colour, 0.95), L.accent);
   m.box(0, 0.10, 0.02, span / 2, 0.012, 0.09, 0.01, [0.86, 0.87, 0.88], [0.94, 0.95, 0.96]);
   m.box(0, 0.10, -len * 0.9, span * 0.22, 0.010, 0.05, 0.008, [0.86, 0.87, 0.88]);
