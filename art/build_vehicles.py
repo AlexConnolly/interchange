@@ -427,8 +427,79 @@ def tractor():
                                        loc=(-L * 0.54, y, 0.030)),
                                (0.42, 0.43, 0.45, 1), 'trtine'))
 
-    parts += lamps('tr', L * 0.44, -L * 0.50, hw, 0.150)
+    parts += tractor_lamps(L, hw)
+    # And light on the ground. Shorter and much wider than a lorry's: a tractor
+    # crawls, and its lamps are low and splayed on the bonnet rather than set
+    # into a nose four feet up.
+    parts += beam('tr', L * 0.42, -L * 0.30, hw * 0.92, 0.55)
     return parts
+
+
+def tractor_lamps(L, hw):
+    """The tractor's own lamps, because the generic ones floated.
+
+    `lamps()` takes a nose, a tail and one height, which is exactly right for a
+    lorry: a slab with a flat front and a flat back, lamps let into both. A
+    tractor is not that shape. Its front is a narrow bonnet a third of the way up,
+    its back is the rear of a cab set well forward of the implement, and giving it
+    one height put the headlamps in the air above the bonnet and the tail lamps
+    in the air behind the cab - "the rendering on the tractors of the lights is
+    doing the same thing that it did with the lorries."
+
+    So they are placed on the tractor: headlamps on the nose of the bonnet, red
+    lamps on the back of the cab, and a pair of work lamps on the roof, which is
+    the thing that actually says *tractor* at night. A field being worked after
+    dark is lit from the cab roof, not from the front axle.
+    """
+    made = []
+    white = lib.material(lib.LAMP, LAMP_WHITE, emissive=3.0, rough=0.25)
+    red = lib.material(lib.LAMP + '_red', LAMP_RED, emissive=2.6, rough=0.25)
+    halo_w = lib.material(lib.LAMP + '_halo', (0.22, 0.20, 0.15, 1.0),
+                          emissive=1.0, rough=0.4)
+    halo_r = lib.material(lib.LAMP + '_halor', (0.24, 0.02, 0.01, 1.0),
+                          emissive=1.0, rough=0.4)
+
+    # Scaled to the tractor rather than reused from the lorries.
+    #
+    # A lorry's halo is 0.125 across on a body 0.28 wide - about forty-five per
+    # cent. Handing the same figures to a vehicle half as wide made the halo
+    # eighty per cent of it, which is a tractor with two floodlights strapped to
+    # the front rather than a tractor with lamps. The ratio is what carries over,
+    # never the numbers.
+    nose = L * 0.43
+    for i, side in enumerate((-1, 1)):
+        f = lib.box('tr_head%d' % i, (0.020, 0.032, 0.030),
+                    loc=(nose, side * hw * 0.66, 0.100))
+        f.data.materials.append(white)
+        made.append(f)
+        fh = lib.box('tr_headh%d' % i, (0.011, 0.064, 0.060),
+                     loc=(nose + 0.005, side * hw * 0.66, 0.100))
+        fh.data.materials.append(halo_w)
+        made.append(fh)
+
+        # Work lamps, on the front edge of the roof and pointing forward. A field
+        # being worked after dark is lit from the cab roof, not from the front
+        # axle, and it is the thing that makes a tractor recognisable at midnight
+        # across a field. Inside the roof's edge, which is at hw*0.92.
+        w = lib.box('tr_work%d' % i, (0.018, 0.030, 0.026),
+                    loc=(L * 0.02, side * hw * 0.74, 0.190))
+        w.data.materials.append(white)
+        made.append(w)
+        wh = lib.box('tr_workh%d' % i, (0.010, 0.060, 0.054),
+                     loc=(L * 0.02 + 0.005, side * hw * 0.74, 0.190))
+        wh.data.materials.append(halo_w)
+        made.append(wh)
+
+        # And red on the back of the cab, which ends at about x = -L*0.28.
+        r = lib.box('tr_tail%d' % i, (0.018, 0.034, 0.030),
+                    loc=(-L * 0.28, side * hw * 0.74, 0.115))
+        r.data.materials.append(red)
+        made.append(r)
+        rh = lib.box('tr_tailh%d' % i, (0.010, 0.068, 0.062),
+                     loc=(-L * 0.28 - 0.005, side * hw * 0.74, 0.115))
+        rh.data.materials.append(halo_r)
+        made.append(rh)
+    return made
 
 
 def _tr_paint(obj, rgba, name):

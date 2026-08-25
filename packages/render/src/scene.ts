@@ -44,6 +44,15 @@ import { LIVERY, NIGHT, SKY, SNOW, type RGB } from './palette.ts';
 
 export { HEIGHT_TO_WORLD };
 
+/**
+ * How far a lorry will reverse before it gives up and turns round.
+ *
+ * Long enough to back out of a farm spur, which is what it is for; short enough
+ * that a wrong heading on the open road is corrected within a lorry's length
+ * rather than carried across the district.
+ */
+const REVERSE_LIMIT = 3.5;
+
 /** Tiles per chunk. Small enough that one rebuild is cheap, large enough that a
  *  128² district is sixty-four draw calls rather than a thousand. */
 export const CHUNK = 16;
@@ -1309,7 +1318,8 @@ export class Renderer {
   private readonly tmp = new Object3D();
 
   /** Drawn position and facing per vehicle id, for easing. */
-  private readonly smooth = new Map<number, { x: number; z: number; a: number }>();
+  private readonly smooth = new Map<
+    number, { x: number; z: number; a: number; rev: number }>();
 
   private updateFleet(src: RenderSource, dt: number): void {
     if (this.batches.length === 0) return;
@@ -1366,6 +1376,7 @@ export class Renderer {
       if (seen !== undefined && src.vStopped[i] === 1) {
         // Standing at a stop: leave it exactly where it is. No easing toward a
         // target, because the target is no longer where the lorry is.
+        seen.rev = 0;
         this.tmp.position.set(seen.x, y, seen.z);
         this.tmp.rotation.set(0, seen.a, 0);
         this.tmp.updateMatrix();
@@ -1377,7 +1388,7 @@ export class Renderer {
       if (seen === undefined || Math.abs(seen.x - x) + Math.abs(seen.z - z) > 3) {
         // New, or teleported: snap. Easing across a jump of three tiles would
         // draw a lorry sliding across a field.
-        seen = { x, z, a: want };
+        seen = { x, z, a: want, rev: 0 };
         this.smooth.set(id, seen);
       } else {
         /*
@@ -1392,14 +1403,49 @@ export class Renderer {
          * smooth it without lying about where the lorry is.
          */
         const k = Math.min(1, dt * 7);
+        /*
+         * Reversing, when the road it is leaving on runs back the way it came.
+         *
+         * A farm or a dairy is on a spur, so a lorry arrives up the spur facing
+         * one way and its next link is the same spur facing the other. The
+         * heading therefore flips a hundred and eighty degrees at the stop, and
+         * easing that "the short way round" drew a lorry *spinning on the spot
+         * against the building* - which is what was reported as it aggressively
+         * bumming the thing for a second or two, and what "I hate that things
+         * turn on the spot" was about before that.
+         *
+         * A lorry does not pirouette at a farm gate. It reverses out to the
+         * road. So when the direction it is actually travelling opposes the
+         * direction it is facing, it keeps facing where it is and simply moves
+         * backwards. At the junction the new heading is across its nose rather
+         * than behind it, the test stops holding, and it swings round there -
+         * which is exactly where a driver would do it.
+         *
+         * Capped in tiles, because reversing is a manoeuvre and not a mode: a
+         * bad heading on the open road must still be corrected, and a spur long
+         * enough to exceed this is one worth turning round in.
+         */
+        const dxTravel = x - seen.x;
+        const dzTravel = z - seen.z;
+        const travelled = Math.hypot(dxTravel, dzTravel);
+        const backwards = travelled > 1e-4
+          && (Math.cos(seen.a) * dxTravel - Math.sin(seen.a) * dzTravel) / travelled < -0.4;
         seen.x += (x - seen.x) * k;
         seen.z += (z - seen.z) * k;
-        // Shortest way round, or a lorry turning from west to north spins 270
-        // degrees the wrong way.
-        let d = want - seen.a;
-        while (d > Math.PI) d -= Math.PI * 2;
-        while (d < -Math.PI) d += Math.PI * 2;
-        seen.a += d * Math.min(1, dt * 6);
+        if (backwards && seen.rev < REVERSE_LIMIT) {
+          // Reversing: hold the facing and let it travel backwards. The drawn
+          // position is already following normally, so there is nothing else to
+          // do — this is entirely a decision not to turn.
+          seen.rev += travelled * k;
+        } else {
+          seen.rev = 0;
+          // Shortest way round, or a lorry turning from west to north spins 270
+          // degrees the wrong way.
+          let d = want - seen.a;
+          while (d > Math.PI) d -= Math.PI * 2;
+          while (d < -Math.PI) d += Math.PI * 2;
+          seen.a += d * Math.min(1, dt * 6);
+        }
       }
       this.smooth.set(id, seen);
       this.tmp.position.set(seen.x, y, seen.z);
