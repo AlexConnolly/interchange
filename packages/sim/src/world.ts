@@ -136,6 +136,16 @@ export class World {
   /** Public road schemes the authority has in hand against dear private
    *  ways. features.md 12. */
   readonly schemes = new SchemeTable();
+  /*
+   * What each *tile* mostly carries, and how much.
+   *
+   * Kept per tile rather than per link because a link is not a stable thing:
+   * every road the authority lays renumbers them, and the cargo ribbons were
+   * wiped several times a decade by construction that had nothing to do with
+   * them. A tile is a tile for the whole game.
+   */
+  readonly tileCargo: Uint8Array;
+  readonly tileTonnes: Float32Array;
   readonly climate = new Climate();
   readonly events = new EventTable();
   private lastEra = 0;
@@ -307,6 +317,8 @@ export class World {
     this.rebuildTownBasket(1);
 
     this.routeCosts = { speedLimit: this.waySpeed, valueOfTime: content.balance.valueOfTime };
+    this.tileCargo = new Uint8Array(this.config.size * this.config.size).fill(255);
+    this.tileTonnes = new Float32Array(this.config.size * this.config.size);
     this.amenity = new AmenityField(this.config.size);
     this.router = new Router(MAX_COMPANIES, 100000);
   }
@@ -479,6 +491,11 @@ export class World {
       for (let l = 0; l < this.graph.linkCount; l++) {
         this.graph.linkFlowPrev[l] = this.graph.linkFlow[l];
         this.graph.linkFlow[l] = 0;
+        this.graph.linkTonnesPrev[l] = this.graph.linkTonnes[l];
+        this.graph.linkTonnes[l] = 0;
+        // Decay rather than reset, so the dominant cargo on a link is what has
+        // been going along it lately rather than whatever passed most recently.
+        this.graph.linkCargoTonnes[l] *= 0.6;
       }
       // A charge is only meaningful against settled traffic, so this is where
       // routing gets told the cost graph may have moved.
@@ -585,6 +602,7 @@ export class World {
     this.stepObjectives();
     if (this.dayOfMonth === 0 && this.day > 0) this.companies.closeMonth();
     if (this.tick % TICKS_PER_YEAR === 0 && this.tick > 0) this.companies.closeYear();
+    this.syncCargoRibbons();
     this.stepWeather();
     if (this.dayOfMonth === 0) this.stepAmenityField();
     this.stepRegulation();
@@ -763,6 +781,25 @@ export class World {
    * pay — which is the ache the construction charter is a reward for.
    */
   private onEnterLink(vehicle: number, link: number): void {
+    /*
+     * What is going along here, for the cargo ribbons overlay.
+     *
+     * Before the ownership check, not after: what a link carries is a fact
+     * about the link, and a stretch of way that happens to belong to nobody
+     * carries cargo exactly as much as one that does.
+     */
+    const load = this.vehicles.load[vehicle];
+    if (load > 0) {
+      const cargo = this.vehicles.cargo[vehicle];
+      this.graph.linkTonnes[link] += load;
+      if (this.graph.linkCargo[link] === cargo) {
+        this.graph.linkCargoTonnes[link] += load;
+      } else if (load > this.graph.linkCargoTonnes[link]) {
+        this.graph.linkCargo[link] = cargo;
+        this.graph.linkCargoTonnes[link] = load;
+      }
+    }
+
     const asset = this.graph.linkAsset[link];
     if (asset === NONE) return;
     const owner = this.assets.owner[asset];
@@ -1554,6 +1591,33 @@ export class World {
     });
     for (let s = 0; s < this.sites.count; s++) {
       this.sites.amenity[s] = this.amenity.at(this.sites.x[s], this.sites.y[s]);
+    }
+  }
+
+  /**
+   * Copy what each link carries onto its tiles, once a day.
+   *
+   * Daily rather than per pass because the ribbons are a picture of a trade
+   * route rather than of a lorry, and because doing it on every link entry
+   * would walk a hundred-tile chain each time. The tonnage fades rather than
+   * resetting, so a corridor that stops being used dims over a season instead
+   * of vanishing between one day and the next.
+   */
+  private syncCargoRibbons(): void {
+    const g = this.graph;
+    for (let i = 0; i < this.tileTonnes.length; i++) this.tileTonnes[i] *= 0.995;
+    for (let l = 0; l < g.linkCount; l += 2) {
+      const cargo = g.linkCargo[l];
+      if (cargo === 255) continue;
+      const moved = g.linkTonnes[l] + g.linkTonnesPrev[l];
+      if (moved <= 0) continue;
+      const start = g.linkChainStart[l];
+      const len = g.linkChainLen[l];
+      for (let i = 0; i < len; i++) {
+        const tile = g.chain[start + i];
+        this.tileCargo[tile] = cargo;
+        this.tileTonnes[tile] = Math.max(this.tileTonnes[tile], moved);
+      }
     }
   }
 

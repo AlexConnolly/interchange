@@ -77,6 +77,12 @@ export interface RenderSource {
   assetOwner: Int16Array;
   assetCondition: Uint8Array;
   linkFlowPrev: Int32Array;
+  /** What each *tile* mostly carries, and how much. Per tile rather than per
+   *  link because links are renumbered whenever anybody builds anything. */
+  tileCargo: Uint8Array;
+  tileTonnes: Float32Array;
+  /** The colour agreed for a cargo, from the content. */
+  cargoColourOf: (cargo: number) => RGB;
   linkCellCount: Int32Array;
   wayColourOf: (cls: number) => RGB;
   /** True for a way class that is a routing convenience rather than a built
@@ -477,6 +483,14 @@ export class Renderer {
            * player has asked to see the machinery.
            */
           if (src.invisibleWay(c) && this.overlay === OverlayMode.None) continue;
+          /*
+           * In the trade map, a way that carries nothing is not part of the
+           * trade. Drawing it put a lattice of empty sea lanes across the
+           * whole picture and a grey web of every lane nobody uses, which is
+           * the opposite of what the overlay is for — the point is to see
+           * where the region's goods actually go.
+           */
+          if (this.overlay === OverlayMode.Cargo && src.tileCargo[tile] === 255) continue;
           const groundY = HEIGHT_TO_WORLD(Math.max(0, src.height[tile]));
           // The formation, not the ground. A level of zero means the way was
           // laid before the profile existed, so fall back to the ground.
@@ -501,6 +515,33 @@ export class Renderer {
                 : sat >= 70 ? SEMANTIC.busy
                 : sat >= 30 ? SEMANTIC.congested
                 : SEMANTIC.jammed;
+            }
+          } else if (this.overlay === OverlayMode.Cargo) {
+            /*
+             * Cargo ribbons: every way coloured by what it mostly carries,
+             * brightening with how much of it went along last window.
+             *
+             * This is the overlay that turns a network into a *trade map*.
+             * Congestion says where the pressure is; ownership says whose it
+             * is; this says what the region actually does — coal down the
+             * valley, timber out of the forest, and the corridor everything
+             * shares, which is where a toll would pay.
+             */
+            const cargo = src.tileCargo[tile];
+            if (cargo === 255) {
+              colour = [0.19, 0.20, 0.22];
+            } else {
+              const base = src.cargoColourOf(cargo);
+              // Enough tonnage to read at all, then brighten with volume: a
+              // flat colour would say a lane with one dray a year matters as
+              // much as the main line.
+              const t = Math.min(1, (src.tileTonnes[tile] ?? 0) / 40);
+              const lift = 0.45 + t * 0.85;
+              colour = [
+                Math.min(1, base[0] * lift + t * 0.10),
+                Math.min(1, base[1] * lift + t * 0.10),
+                Math.min(1, base[2] * lift + t * 0.10),
+              ];
             }
           } else if (this.overlay === OverlayMode.Congestion) {
             const link = src.wayLink[mode][tile];

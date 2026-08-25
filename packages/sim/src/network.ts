@@ -212,6 +212,21 @@ export class Graph {
   readonly linkAsset = new Int32Array(MAX_LINKS);
   /** Rolling traffic count, for the congestion overlay and decay. */
   readonly linkFlow = new Int32Array(MAX_LINKS);
+  /*
+   * What this link mostly carries, and how much of it.
+   *
+   * A single dominant cargo rather than a full breakdown: a per-link tally of
+   * every cargo would be links times thirty-odd, which is megabytes of mostly
+   * zeroes to answer a question — "what moves along here" — that has one
+   * answer on almost every link in a real network. Coal goes down the valley
+   * and timber comes out of the forest, and a ribbon that says so is the
+   * whole feature.
+   */
+  readonly linkCargo = new Uint8Array(MAX_LINKS).fill(255);
+  readonly linkTonnes = new Float32Array(MAX_LINKS);
+  readonly linkTonnesPrev = new Float32Array(MAX_LINKS);
+  /** Tonnage of the current dominant cargo, so a heavier flow can displace it. */
+  readonly linkCargoTonnes = new Float32Array(MAX_LINKS);
   readonly linkFlowPrev = new Int32Array(MAX_LINKS);
   /**
    * How many vehicles the link may hold at once.
@@ -432,6 +447,10 @@ export function rebuildGraph(
       g.linkAsset[id] = uniform ? asset : NONE;
       g.linkFlow[id] = 0;
       g.linkFlowPrev[id] = 0;
+      g.linkCargo[id] = 255;
+      g.linkTonnes[id] = 0;
+      g.linkTonnesPrev[id] = 0;
+      g.linkCargoTonnes[id] = 0;
       g.linkOccupancy[id] = 0;
       cellCursor += cells;
     }

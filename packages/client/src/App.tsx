@@ -456,6 +456,7 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
           <RailButton label="Labour catchment" icon="☗" on={overlay === OverlayMode.Catchment} onClick={() => engine.setOverlay(overlay === OverlayMode.Catchment ? OverlayMode.None : OverlayMode.Catchment)} />
           <RailButton label="Power grid" icon="⚡" on={overlay === OverlayMode.Power} onClick={() => engine.setOverlay(overlay === OverlayMode.Power ? OverlayMode.None : OverlayMode.Power)} />
           <RailButton label="Water network" icon="≋" on={overlay === OverlayMode.Water} onClick={() => engine.setOverlay(overlay === OverlayMode.Water ? OverlayMode.None : OverlayMode.Water)} />
+          <RailButton label="Cargo flow — what each way carries" icon="⇉" on={overlay === OverlayMode.Cargo} onClick={() => engine.setOverlay(overlay === OverlayMode.Cargo ? OverlayMode.None : OverlayMode.Cargo)} />
           <RailButton label="Photo mode — hide the interface" icon="▣" on={photo} onClick={() => setPhoto(true)} />
         </div>
 
@@ -509,7 +510,7 @@ function Game({ engine: initialEngine }: { engine: Engine }): JSX.Element {
         </div>
       </div>
 
-      {overlay !== OverlayMode.None && <OverlayLegend mode={overlay} />}
+      {overlay !== OverlayMode.None && <OverlayLegend mode={overlay} engine={engine} />}
       {hover && <div className="tooltip" style={{ left: hover.x, top: hover.y - 10 }}>{hover.text}</div>}
       {showDepot && <Fleet engine={engine} onClose={() => setShowDepot(false)} />}
       {showReports && <Reports engine={engine} onClose={() => setShowReports(false)} />}
@@ -597,12 +598,34 @@ function RailButton({ label, icon, on, onClick }: { label: string; icon: string;
 
 /** Overlay modes recolour the world wholesale, so the legend is the only mark
  *  the mode adds — and it lives in the DOM, not the world (art-direction §14). */
-function OverlayLegend({ mode }: { mode: OverlayMode }): JSX.Element {
+/**
+ * The cargoes actually moving, not the whole cargo table.
+ *
+ * Thirty-odd swatches would be a colour chart rather than a legend. The ones
+ * a player is looking at are the ones on the map in front of them, so the
+ * legend is built from what the region is carrying and stays short.
+ */
+function cargoLegend(engine: Engine): string[][] {
+  const w = engine.world;
+  const tally = new Map<number, number>();
+  for (let t = 0; t < w.tileCargo.length; t++) {
+    const c = w.tileCargo[t];
+    if (c === 255) continue;
+    tally.set(c, (tally.get(c) ?? 0) + 1);
+  }
+  const top = [...tally].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  if (top.length === 0) return [['#31333a', 'nothing moving yet']];
+  return top.map(([c]) => [C.cargo[c]?.colour ?? '#888888', C.cargo[c]?.name.toLowerCase() ?? '?']);
+}
+
+function OverlayLegend({ mode, engine }: { mode: OverlayMode; engine: Engine }): JSX.Element {
   const items =
     mode === OverlayMode.Congestion
       ? [['#4fb477', 'free'], ['#e0b040', 'busy'], ['#d4632f', 'congested'], ['#c02f2f', 'jammed']]
       : mode === OverlayMode.Ownership
         ? [['#4fb477', 'yours'], ['#7c8288', 'the authority'], ['#c85a3c', 'a rival']]
+        : mode === OverlayMode.Cargo
+        ? cargoLegend(engine)
         : mode === OverlayMode.Catchment
           ? [['#b8a83c', 'many within a commute'], ['#1a2450', 'nobody']]
           : mode === OverlayMode.Power || mode === OverlayMode.Water
