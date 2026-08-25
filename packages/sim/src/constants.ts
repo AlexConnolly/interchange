@@ -50,7 +50,26 @@ export const TICKS_PER_SECOND = 20;
  * numbers the player *can* see are not absurd. Speeds are shown in mph as
  * flavour and never beside a duration.
  */
-export const TICKS_PER_DAY = 800;
+/*
+ * Four times what it was, and the *reason* it is this number and not the tick
+ * rate is the whole point.
+ *
+ * "The days need to be about four times as long as how they are now — things
+ * need to feel a lot longer." The obvious lever is the clock: run fewer ticks a
+ * second. But a tick is also how far a lorry moves, so slowing the clock slows
+ * the traffic, and slowing the traffic divides the money earned per real minute
+ * by four — undoing a balance pass done an hour earlier.
+ *
+ * Lengthening the *day* instead leaves ticks a second alone. Vehicles keep
+ * their speed and their earnings per real minute; everything expressed per day
+ * — production, upkeep, loading waits, the contract board — scales with the day
+ * and so is unchanged per tick. All that actually changes is how much of a day
+ * a journey is, which is exactly what was asked for: a haul used to be most of a
+ * day and is now an hour or two of one.
+ *
+ * A day is a little over four real minutes at thirteen ticks a second.
+ */
+export const TICKS_PER_DAY = 3200;
 export const DAYS_PER_WEEK = 6;
 export const WEEKS_PER_MONTH = 4;
 export const DAYS_PER_MONTH = DAYS_PER_WEEK * WEEKS_PER_MONTH;

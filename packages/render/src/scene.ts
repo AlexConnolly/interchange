@@ -90,6 +90,8 @@ export interface RenderSource extends GroundSource, RoadSource {
   pRot: Float32Array;
   /** 0..1 through the day, for the sun. */
   dayFraction: number;
+  /** Which day it is, so the weather is the same on the same day. */
+  dayNumber: number;
   /** 0..1 depth of snow. One number, and the same one the traffic obeys. */
   snow: number;
   /**
@@ -482,15 +484,34 @@ export class Renderer {
      * and tell a hedge from its own shadow, and the lamps still dominate
      * because nothing else is near white.
      */
-    this.sun.intensity = (2.5 + lit * 0.5) * day + 1.15 * this.night;
-    this.fill.intensity = (0.62 + (1 - lit) * 0.22) * day + 0.78 * this.night;
+    /*
+     * Night at about a sixth of the light of day, and this is the third go at it.
+     *
+     * The first was a fifth and the district went unreadably black. The second
+     * over-corrected to a half, which is a blue afternoon — "it doesn't get dark
+     * enough at night, no way, this doesn't feel like nighttime at all", and
+     * that was right: at half brightness the fields still read as green and
+     * nothing on screen was dark.
+     *
+     * What was wrong both times was treating readability and darkness as the
+     * same dial. They are not. A moonlit landscape *is* dark; what makes it
+     * legible is that the lit things — headlamps, cat's eyes, windows — are
+     * bright against it, and there were not enough of those to carry the frame.
+     * Now there are. So the ground can go properly dark, because the road is
+     * picked out in studs and the traffic is carrying lights.
+     */
+    this.sun.intensity = (2.5 + lit * 0.5) * day + 0.34 * this.night;
+    this.fill.intensity = (0.62 + (1 - lit) * 0.22) * day + 0.20 * this.night;
     lerpColour(this.fill.color, SKY.zenith, NIGHT.zenith, this.night);
     lerpColour(this.fill.groundColor, SKY.ground, NIGHT.ground, this.night);
     lerpColour(this.clear, SKY.horizon, NIGHT.horizon, this.night);
     this.renderer.setClearColor(this.clear);
 
     // And the one number that lights every lamp and every stud in the game.
-    this.glow.opacity = this.night;
+    // The lamps carry the night now, so they come up sooner and go brighter than
+    // the darkness alone would suggest: by the time the ground is properly dark
+    // the lights are already the brightest things on screen.
+    this.glow.opacity = Math.min(1, this.night * 1.25);
   }
 
   /**
@@ -508,6 +529,43 @@ export class Renderer {
     // did.
     this.fill.intensity *= 1 + snow * 0.12;
   }
+
+  /**
+   * The weather, and it moves whether anything else is happening or not.
+   *
+   * Drift is unbounded and deliberately so: the cloud field is periodic in the
+   * sines, so it never needs wrapping and cannot seam. Coverage wanders on a
+   * pair of slow sines of the *clock* rather than of real time, so the weather is
+   * the same on the same day for anyone watching — one fewer thing that changes
+   * when you look away and back.
+   *
+   * An overcast sky also flattens the sun and lifts the fill, because that is
+   * what cloud does. Without it the shadows stay knife-sharp under a covered sky
+   * and the cloud shadow reads as a stain on the ground rather than as weather.
+   */
+  private setWeather(dayFraction: number, dayNumber: number, dt: number): void {
+    this.drift += dt * 0.9;
+    const along = this.drift;
+    CLOUD_DRIFT.value[0] = along * 0.78;
+    CLOUD_DRIFT.value[1] = along * 0.41;
+
+    const slow = dayNumber + dayFraction;
+    const cover = 0.5
+      + 0.34 * Math.sin(slow * 0.9 + 0.4)
+      + 0.16 * Math.sin(slow * 2.7 + 2.1);
+    const amount = Math.max(0.06, Math.min(1, cover));
+    CLOUD_AMOUNT.value = amount;
+    this.cloud = amount;
+
+    // Cloud softens the sun and raises the ambient. A covered sky with hard
+    // shadows under it is the tell that weather has been painted on.
+    this.sun.intensity *= 1 - amount * 0.30;
+    this.fill.intensity *= 1 + amount * 0.34;
+  }
+
+  private drift = 0;
+  /** How overcast it is, 0..1. Read by the client for the sky. */
+  cloud = 0.5;
 
   /** How far into the night, 0..1. Read by the glow pass. */
   private night = 0;
@@ -945,6 +1003,7 @@ export class Renderer {
     this.updateFleet(src, dt);
     this.placeSun(src.dayFraction);
     this.setSeason(src.snow);
+    this.setWeather(src.dayFraction, src.dayNumber, dt);
     this.placeCamera();
     this.renderer.render(this.scene, this.camera);
   }
@@ -1172,10 +1231,13 @@ function litMaterial(
     shader.uniforms.uSnow = SNOW_UNIFORM;
     shader.uniforms.uSnowTake = { value: takes };
     shader.uniforms.uSnowColour = { value: snowColour };
+    shader.uniforms.uCloud = CLOUD_AMOUNT;
+    shader.uniforms.uDrift = CLOUD_DRIFT;
     let vs = `attribute float snowTake;
 uniform float uSnow;
 uniform float uSnowTake;
 uniform vec3 uSnowColour;
+varying vec3 vSkyPos;
 ${shader.vertexShader}`;
     if (tint) {
       shader.uniforms.uLivery = { value: tint };
@@ -1187,6 +1249,55 @@ ${vs}`.replace(
 	vColor *= mix( vec3( 1.0 ), uLivery, livery );`,
       );
     }
+    /*
+     * World position out to the fragment shader, instancing included.
+     *
+     * `transformed` is the vertex before the instance matrix is applied, so a
+     * naive `modelMatrix * transformed` gives every tree in a wood the same
+     * world position — and therefore the same cloud shadow, which is the one
+     * mistake here that would be invisible in a still and glaring in motion.
+     */
+    vs = vs.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+#ifdef USE_INSTANCING
+	vSkyPos = ( modelMatrix * instanceMatrix * vec4( transformed, 1.0 ) ).xyz;
+#else
+	vSkyPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
+#endif`,
+    );
+
+    /*
+     * Cloud shadow, in the fragment shader.
+     *
+     * Three sine layers at incommensurable frequencies — not a texture, because
+     * a texture is a fetch and a download and this is two dozen instructions.
+     * At these wavelengths (twenty to eighty tiles) it reads as broken cloud
+     * rather than as a pattern, and the eye cannot find the repeat because the
+     * three periods do not share one.
+     *
+     * It darkens rather than tinting: a cloud shadow is the sun being *absent*,
+     * so the right operation is a multiply toward the ambient, and a shaded field
+     * should still be a green field. Capped at a third, because full shadow on a
+     * pastel palette looks like a bruise.
+     */
+    shader.fragmentShader = `uniform float uCloud;
+uniform vec2 uDrift;
+varying vec3 vSkyPos;
+
+float cloudAt( vec2 p ) {
+	float a = sin( p.x * 0.047 + p.y * 0.029 );
+	float b = sin( p.x * 0.019 - p.y * 0.041 + 1.7 );
+	float c = sin( ( p.x + p.y ) * 0.011 + 3.1 );
+	return a * 0.46 + b * 0.34 + c * 0.20;
+}
+${shader.fragmentShader}`.replace(
+      '#include <color_fragment>',
+      `#include <color_fragment>
+	float cloud = smoothstep( 0.02, 0.62, cloudAt( vSkyPos.xz + uDrift ) );
+	diffuseColor.rgb *= 1.0 - cloud * uCloud * 0.34;`,
+    );
+
     // After beginnormal_vertex, which is where `objectNormal` exists.
     shader.vertexShader = vs.replace(
       '#include <beginnormal_vertex>',
@@ -1231,6 +1342,24 @@ ${vs}`.replace(
  * cannot get out of step between the ground and the road running over it.
  */
 const SNOW_UNIFORM = { value: 0 };
+
+/**
+ * Weather, which is three numbers and the best value for money in the file.
+ *
+ * The district was correct and inert: a fixed sun, a fixed sky, and nothing
+ * between the two. What was missing is not a rain system, it is *movement in the
+ * light* — the thing that makes even a cloudless afternoon feel like weather
+ * rather than a diagram. Cloud shadow drifting over a valley is that, and it
+ * costs a varying and nine lines of arithmetic.
+ *
+ * `amount` is how overcast it is, which drifts over game-hours. `drift` is where
+ * the clouds have got to, which moves continuously. `wind` sets the direction,
+ * fixed for a district so the shadows always come from the same quarter — clouds
+ * that changed direction would read as a bug in a way that a slow change in
+ * coverage does not.
+ */
+const CLOUD_AMOUNT = { value: 0.5 };
+const CLOUD_DRIFT = { value: [0, 0] as [number, number] };
 
 /**
  * The old bodywork-only tint, kept as a name.

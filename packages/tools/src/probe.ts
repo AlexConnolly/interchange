@@ -107,23 +107,32 @@ console.log(`  accepted ${took}`);
 
 const van = w.content.vehicles[vi].cost;
 const started = w.companies.cash[w.player];
+/*
+ * Milestones in *real minutes*, not game days.
+ *
+ * A game day is a number the design deliberately hides, and it has changed
+ * length twice; what the player judges the game on is how long they have been
+ * sitting there. So the yardstick is minutes at the client's tick rate, and
+ * lengthening a day no longer silently rewrites every figure in this file.
+ */
+const TICKS_PER_SECOND = 13;
+const minuteOf = (day: number): number => (day * TICKS_PER_DAY) / TICKS_PER_SECOND / 60;
 let secondVan = -1;
-for (let day = 1; day <= 260; day++) {
-  if (day === 6) {
-    // Five game days is about five real minutes at 13 ticks a second, which is
-    // the window the player actually judged the game on.
-    console.log(`  first five days: earned £`
+for (let day = 1; day <= 400; day++) {
+  if (minuteOf(day - 1) < 5 && minuteOf(day) >= 5) {
+    console.log(`  first five real minutes: earned £`
       + `${((w.companies.cash[w.player] - started) / 100).toFixed(0)}`);
   }
   for (let t = 0; t < TICKS_PER_DAY; t++) w.step();
   w.takeEarnings();
   if (secondVan < 0 && w.companies.cash[w.player] >= van) secondVan = day;
 }
-console.log(`  a second van affordable on day ${secondVan}`);
+console.log(`  a second van affordable after ${minuteOf(secondVan).toFixed(0)} real minutes`);
 if (opening.from >= 0) {
   console.log(`  the dairy farm costs £${(w.priceOf(opening.from) / 100).toFixed(0)}`);
 }
-console.log(`  after 260 days: £${(w.companies.cash[w.player] / 100).toFixed(0)}`
+console.log(`  after ${minuteOf(400).toFixed(0)} real minutes: `
+  + `£${(w.companies.cash[w.player] / 100).toFixed(0)}`
   + `, approval ${w.approval.toFixed(1)}, fleet ${w.fleetSize()}`);
 
 // ---- rung 6: the distribution centre ---------------------------------------

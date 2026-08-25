@@ -12,6 +12,7 @@
 import { ACCESS_SCALE, AUTHORITY, DIR_BIT, DIR_DX, DIR_DY, DIR_OPPOSITE, Mode } from './constants.ts';
 import { NONE } from './network.ts';
 import { generateRoads } from './roadnet.ts';
+import { Crop } from './fields.ts';
 import { Deposit, SEA_LEVEL, TileFlag, type Terrain } from './terrain.ts';
 import { Charter } from './economy.ts';
 import { SiteState } from './sites.ts';
@@ -177,6 +178,106 @@ export function generateWorld(w: World): void {
       if (!spot) continue;
       w.sites.alloc(def, spot[0], spot[1], t.idx(spot[0], spot[1]), AUTHORITY);
     }
+  }
+
+  /*
+   * ---- what is actually growing in the fields -----------------------------
+   *
+   * The field generator divides the whole district into parcels and then picks
+   * each one's crop from its slope and a coin toss. That is why the landscape
+   * read as noise: "there's loads of fields, but there's nothing in the fields
+   * — they don't look like real farms". Arable and pasture alternated at random,
+   * so no farm had a holding, no holding had a character, and the pattern
+   * carried no information at all.
+   *
+   * A field belongs to a farm. So: find the nearest farm to each parcel, take
+   * the crop from what that farm *does*, and vary it within the holding rather
+   * than across the district. A dairy is surrounded by grass because that is
+   * what cows eat; an arable farm has wheat and ploughed ground around it in
+   * strips; and anything more than a long walk from any farm is not enclosed at
+   * all, which is what leaves the hills open and gives the woods somewhere to
+   * be.
+   *
+   * Done here rather than in `fields.ts` because the terrain is generated before
+   * the farms are placed, and the alternative — deferring field generation until
+   * after site placement — would put the roads, which read parcels for their
+   * boundary preference, on the wrong side of it.
+   */
+  {
+    const fields = w.terrain.fields;
+    const size = w.config.size;
+    const grass = [Crop.Pasture, Crop.PastureRich, Crop.Meadow];
+    const arable = [Crop.Wheat, Crop.WheatRipe, Crop.Plough];
+
+    // Farms, and which sort each one is. `outputs` rather than the id, so a
+    // content author adding a second kind of dairy gets grass round it for free.
+    const farms: { x: number; y: number; grazing: boolean }[] = [];
+    for (let i = 0; i < w.sites.count; i++) {
+      const ind = c.industries[w.sites.def[i]];
+      if (ind.deposit !== Deposit.Farm) continue;
+      const outs = Object.keys(ind.recipe.outputs);
+      farms.push({
+        x: w.sites.x[i],
+        y: w.sites.y[i],
+        grazing: outs.includes('milk') || outs.includes('livestock'),
+      });
+    }
+
+    // Parcel centroids, in one pass over the map.
+    const n = fields.count;
+    const sumX = new Float64Array(n);
+    const sumY = new Float64Array(n);
+    const tally = new Int32Array(n);
+    for (let t = 0; t < size * size; t++) {
+      const p2 = fields.parcel[t];
+      if (p2 < 0 || p2 >= n) continue;
+      sumX[p2] += t % size;
+      sumY[p2] += (t / size) | 0;
+      tally[p2]++;
+    }
+
+    /** Beyond this, nobody is farming it. Twenty tiles is a long walk with a
+     *  herd, and it is what keeps the high ground open. */
+    const REACH = 20;
+    const cropOf = new Int32Array(n).fill(-1);
+    for (let p2 = 0; p2 < n; p2++) {
+      if (tally[p2] === 0) continue;
+      const cx2 = sumX[p2] / tally[p2];
+      const cy2 = sumY[p2] / tally[p2];
+      let nearest = -1;
+      let bestD = Infinity;
+      for (let f = 0; f < farms.length; f++) {
+        const d = Math.hypot(farms[f].x - cx2, farms[f].y - cy2);
+        if (d < bestD) { bestD = d; nearest = f; }
+      }
+      if (nearest < 0 || bestD > REACH) continue;
+      /*
+       * Variation *within* the holding, keyed off the parcel id.
+       *
+       * A farm whose every field is the same green is a lawn. Keying on the id
+       * rather than the rng means the pattern is stable and that neighbouring
+       * parcels differ, which is what gives a holding the patchwork look — and
+       * the ploughed field next to the wheat is the same farm's next rotation,
+       * which is why they belong together.
+       */
+      const list = farms[nearest].grazing ? grass : arable;
+      cropOf[p2] = list[(p2 * 2654435761) % list.length];
+    }
+
+    let unenclosed = 0;
+    for (let t = 0; t < size * size; t++) {
+      const p2 = fields.parcel[t];
+      if (p2 < 0 || p2 >= n) continue;
+      if (cropOf[p2] < 0) {
+        // Out of reach of any farm: take the hedges away and let it be country.
+        fields.parcel[t] = -1;
+        fields.crop[t] = Crop.Rough;
+        unenclosed++;
+        continue;
+      }
+      fields.crop[t] = cropOf[p2];
+    }
+    void unenclosed;
   }
 
   // ---- stock capacities --------------------------------------------------

@@ -45,6 +45,48 @@ const TREE_MODELS = [
 ];
 
 /**
+ * What stands in a field, and which crop wants which.
+ *
+ * The point is that the prop *says the crop*. A gold field with stooks in it has
+ * been harvested; a green one with sheep in it is grazing; a brown one with a
+ * muck heap at the edge has been ploughed. Nothing else the renderer can do at
+ * this size carries that information — a colour says "green", and three white
+ * specks say "grazed".
+ *
+ * Indices run on from the trees because they share one scatter layer: to a draw
+ * call a bale is a small tree.
+ */
+const PROP_MODELS = [
+  'prop_bale_round', 'prop_bale_wrapped', 'prop_bale_stack',
+  'prop_stook', 'prop_sheep', 'prop_cattle', 'prop_muck', 'prop_trough',
+];
+
+/** Crop indices, matching `Crop` in the sim's fields.ts. */
+const CROP_PASTURE = 0;
+const CROP_PASTURE_RICH = 1;
+const CROP_MEADOW = 2;
+const CROP_WHEAT = 3;
+const CROP_WHEAT_RIPE = 4;
+const CROP_PLOUGH = 5;
+
+/**
+ * Which props belong in which crop, as indices into `PROP_MODELS`.
+ *
+ * Grass gets stock and a trough; ripe wheat gets stooks and bales; a ploughed
+ * field gets a heap and nothing else, because a field that has just been turned
+ * over is empty and that emptiness is the point of it. Meadow gets bales,
+ * because a meadow is what hay comes from.
+ */
+const PROPS_BY_CROP: Record<number, number[]> = {
+  [CROP_PASTURE]: [4, 4, 5, 7],
+  [CROP_PASTURE_RICH]: [5, 5, 4, 7],
+  [CROP_MEADOW]: [0, 1, 2, 4],
+  [CROP_WHEAT]: [0, 2],
+  [CROP_WHEAT_RIPE]: [3, 3, 0, 1, 2],
+  [CROP_PLOUGH]: [6],
+};
+
+/**
  * Ticks of simulation per real second.
  *
  * 13 gives a game day of 800 / 13 = 62 seconds. Slow enough that a lorry
@@ -287,6 +329,7 @@ export function App(): JSX.Element {
       sScale: new Float32Array(1400),
       dayFraction: 0.62,
       snow: 0,
+      dayNumber: 0,
     };
 
     /*
@@ -439,6 +482,41 @@ export function App(): JSX.Element {
             rot: hash(x + 3, z + 5),
             // A stand of identical trees is a wallpaper. Half again either way.
             scale: 0.78 + hash(x + 11, z + 13) * 0.55,
+          });
+        }
+      }
+
+      /*
+       * And what is standing in the fields.
+       *
+       * A second pass rather than a branch in the first, because the rule is
+       * different in kind: a tree goes on a boundary or in scrub, and a bale
+       * goes *inside* a parcel, keyed off what is growing there. Mixing the two
+       * would need the loop to carry both sets of conditions and neither would
+       * be readable.
+       *
+       * Sparse — about one prop every twenty tiles of field — because the job is
+       * to say what the crop is, not to fill the field. Three bales in a
+       * ten-tile field reads as a field with bales in it; thirty reads as a
+       * warehouse.
+       */
+      for (let z = 1; z < DISTRICT - 1 && trees.length < 1400; z++) {
+        for (let x = 1; x < DISTRICT - 1 && trees.length < 1400; x++) {
+          const t = z * DISTRICT + x;
+          if (parcel[t] < 0) continue;
+          if (roadClass[t] >= 0 || height[t] <= 0) continue;
+          if (boundary(t, x, z)) continue;
+          const list = PROPS_BY_CROP[crop[t]];
+          if (list === undefined || list.length === 0) continue;
+          const r = hash(x + 501, z + 733);
+          if (r > 0.05) continue;
+          const pick = list[Math.floor(hash(x + 61, z + 97) * list.length) % list.length];
+          trees.push({
+            x: x + 0.2 + hash(x + 7, z + 3) * 0.6,
+            z: z + 0.2 + hash(x + 3, z + 7) * 0.6,
+            model: TREE_MODELS.length + pick,
+            rot: hash(x + 13, z + 17),
+            scale: 0.85 + hash(x + 23, z + 29) * 0.4,
           });
         }
       }
@@ -624,12 +702,13 @@ export function App(): JSX.Element {
       const ordered = modelNames.map((n) => kit.models.get(n)).filter((m) => m !== undefined);
       if (ordered.length === modelNames.length) renderer.setFleet(ordered);
     });
-    void loadKit(TREE_MODELS).then((kit) => {
+    const scatterNames = [...TREE_MODELS, ...PROP_MODELS];
+    void loadKit(scatterNames).then((kit) => {
       if (kit.missing.length > 0) {
-        console.warn(`[trees] no model for: ${kit.missing.join(', ')}`);
+        console.warn(`[scatter] no model for: ${kit.missing.join(', ')}`);
       }
-      const ordered = TREE_MODELS.map((n) => kit.models.get(n)).filter((m) => m !== undefined);
-      if (ordered.length === TREE_MODELS.length) renderer.setScatterModels(ordered);
+      const ordered = scatterNames.map((n) => kit.models.get(n)).filter((m) => m !== undefined);
+      if (ordered.length === scatterNames.length) renderer.setScatterModels(ordered);
     });
     void loadKit(placeNames).then((kit) => {
       if (kit.missing.length > 0) {
@@ -925,6 +1004,7 @@ export function App(): JSX.Element {
       // One number, read by the renderer to paint the season and by the traffic
       // to decide who can move. There is deliberately not a second one.
       src.snow = world.snow;
+      src.dayNumber = world.day;
 
       renderer.render(src, dt);
 

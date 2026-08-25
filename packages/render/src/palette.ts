@@ -180,12 +180,12 @@ export const SNOW = {
  * of them along a lane tells you where your fleet is from across the district.
  */
 export const NIGHT = {
-  zenith: hex('#3d5580'),
-  horizon: hex('#4a6491'),
+  zenith: hex('#16223d'),
+  horizon: hex('#1d2b48'),
   /** The light source itself, once the sun is under the horizon. */
-  moon: hex('#b6c8e6'),
+  moon: hex('#93a9cd'),
   /** Bounce, and it must not be black — see SKY.ground. */
-  ground: hex('#39405a'),
+  ground: hex('#161b2b'),
 };
 
 /**
