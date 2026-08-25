@@ -13,7 +13,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { HISTORY_MONTHS, LINE_IS_INCOME, LINE_NAMES, Line } from '@interchange/sim';
+import { HISTORY_MONTHS, LINE_IS_INCOME, LINE_NAMES, Line, TICKS_PER_SECOND } from '@interchange/sim';
 import { money, num, shortMoney } from './format.ts';
 import { saveStats } from './saves.ts';
 import type { Engine } from './engine.ts';
@@ -26,6 +26,63 @@ const CHARTS: { id: Chart; label: string; note: string }[] = [
   { id: 'cash', label: 'Cash and debt', note: 'What you have, and what you owe.' },
   { id: 'tonnage', label: 'Tonnage', note: 'Everything you have moved, cumulatively.' },
 ];
+
+/**
+ * Where the frame went, against the budget for this machine.
+ *
+ * architecture.md's testing table asks for frame time and tick time tracked
+ * against per-device budgets. Two things make this worth a panel rather than
+ * a console line.
+ *
+ * The budget is split, and the split is the useful part. At twenty hertz the
+ * simulation gets fifty milliseconds per tick and the renderer gets whatever
+ * a display frame is; a game that is dropping frames because the tick is slow
+ * and one that is dropping them because the scene is heavy want completely
+ * different work done, and a single "fps" number cannot tell you which.
+ *
+ * And it is shown to the player rather than sent anywhere. This is a local
+ * readout of their own machine, which needs no consent and no infrastructure;
+ * anything that left the machine would be a decision for whoever ships this,
+ * not something to be quietly wired in.
+ */
+function Telemetry({ engine }: { engine: Engine }): JSX.Element {
+  const stats = engine.renderer?.stats;
+  const tickBudget = 1000 / TICKS_PER_SECOND;
+  const frameBudget = 1000 / 60;
+  const frameMs = engine.fps > 0 ? 1000 / engine.fps : 0;
+  const bar = (v: number, of: number): JSX.Element => (
+    <div className="meter" style={{ width: 90, display: 'inline-block', verticalAlign: 'middle' }}>
+      <div style={{
+        width: `${Math.min(100, (v / of) * 100)}%`,
+        background: v > of ? 'var(--bad)' : v > of * 0.7 ? 'var(--warn)' : 'var(--good)',
+      }} />
+    </div>
+  );
+  return (
+    <>
+      <div className="ledger" style={{ borderTop: '1px solid var(--rule)' }}>
+        <div className="head">This machine</div>
+      </div>
+      <dl className="kv">
+        <dt>Frame</dt>
+        <dd>{frameMs.toFixed(1)} ms of {frameBudget.toFixed(1)} {bar(frameMs, frameBudget)}</dd>
+        <dt>Simulation tick</dt>
+        <dd>{engine.tickMs.toFixed(2)} ms of {tickBudget.toFixed(0)} {bar(engine.tickMs, tickBudget)}</dd>
+        {stats && (
+          <>
+            <dt>Triangles drawn</dt><dd>{num(stats.triangles)}</dd>
+            <dt>Draw calls</dt><dd>{num(stats.drawCalls)}</dd>
+            <dt>Instances</dt><dd>{num(stats.instances)}</dd>
+            <dt>Rebuilt this frame</dt>
+            <dd className="dim">
+              {stats.chunksBuilt} chunks, {stats.sitesBuilt} sites, {stats.townsBuilt} towns
+            </dd>
+          </>
+        )}
+      </dl>
+    </>
+  );
+}
 
 export function Reports({ engine, onClose }: { engine: Engine; onClose: () => void }): JSX.Element {
   const [chart, setChart] = useState<Chart>('mix');
@@ -198,6 +255,7 @@ export function Reports({ engine, onClose }: { engine: Engine; onClose: () => vo
           <div className="legend">
             <span className="dim">{CHARTS.find((c) => c.id === chart)?.note}</span>
           </div>
+          <Telemetry engine={engine} />
           <dl className="kv" style={{ borderTop: '1px solid var(--rule)' }}>
             <dt>Rent share of income</dt><dd>{w.companies.rentShare(p)}%</dd>
             <dt>Infrastructure owned</dt><dd>{num(w.ownedAssets(p))} assets</dd>
