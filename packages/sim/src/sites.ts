@@ -133,6 +133,12 @@ export class SiteTable {
     return after - before;
   }
 
+  /** Tonnes of a cargo this site could still take. */
+  roomFor(site: number, cargo: number): number {
+    const i = site * this.cargoCount + cargo;
+    return Math.max(0, this.capacity[i] - this.stock[i]);
+  }
+
   takeStock(site: number, cargo: number, tonnes: number): number {
     const i = site * this.cargoCount + cargo;
     const taken = Math.min(this.stock[i], tonnes);
@@ -162,12 +168,25 @@ export class TownTable {
 
   stock: Int32Array;
   demand: Int32Array;
+  /*
+   * Tonnes are whole numbers everywhere in this simulation, and a town's
+   * appetite is not. A town of thirteen hundred people wants about a third of
+   * a tonne of post a day; stored in the integer tables above that is zero,
+   * every day, forever — which is why passengers and mail never moved a single
+   * tonne in any balance sweep, and why an omnibus could be bought, crewed and
+   * routed and still find nothing at the stop. These carry the fraction over
+   * from one day to the next so whole tonnes come out at the right rate.
+   */
+  produceAcc: Float64Array;
+  demandAcc: Float64Array;
   readonly cargoCount: number;
 
   constructor(cargoCount: number) {
     this.cargoCount = cargoCount;
     this.stock = new Int32Array(MAX_TOWNS * cargoCount);
     this.demand = new Int32Array(MAX_TOWNS * cargoCount);
+    this.produceAcc = new Float64Array(MAX_TOWNS * cargoCount);
+    this.demandAcc = new Float64Array(MAX_TOWNS * cargoCount);
   }
 
   nodeOf(town: number, mode: number): number {
@@ -377,10 +396,31 @@ export function stepSiteDecay(
  * hundredths so a small town can grow by less than a person a day without the
  * integer rounding pinning it in place forever.
  */
+/**
+ * How many people a town's own hinterland can supply, unaided.
+ *
+ * Deliberately an absolute number of people rather than a share of demand.
+ * A share would make every town self-sufficient at every size, so towns would
+ * grow forever whether or not anybody hauled anything — which is what the
+ * first version of this did, taking the region from fifteen thousand to a
+ * hundred and seventy-six thousand in thirty years with the carriers bankrupt
+ * throughout.
+ *
+ * As a fixed capacity it does the opposite, and does the job the design needs:
+ * a small town feeds itself, a large one cannot, and the gap between what a
+ * town wants and what its own fields and pits can make is exactly the cargo
+ * somebody has to carry. Equilibrium population is therefore a direct function
+ * of tonnage delivered, which is the sentence the whole growth model is
+ * supposed to mean. Set so that a starting town of eleven or twelve hundred
+ * sits just under the decline threshold: left alone it slowly fades, and it
+ * takes real haulage to turn that around.
+ */
+export const LOCAL_SUPPLY_POP = 760;
+
 export function stepTowns(
   towns: TownTable,
-  demandPerThousand: Int32Array,
-  producePerThousand: Int32Array,
+  demandPerThousand: Float64Array,
+  producePerThousand: Float64Array,
   growthPerDay: number,
 ): void {
   const cargoCount = towns.cargoCount;
@@ -401,25 +441,64 @@ export function stepTowns(
     for (let c = 0; c < cargoCount; c++) {
       const per = producePerThousand[c];
       if (per === 0) continue;
-      const made = Math.max(1, Math.round((per * pop) / 1000));
+      const made = (per * pop) / 1000;
       const i = t * cargoCount + c;
-      const cap = made * 5;
-      towns.stock[i] = Math.min(cap, towns.stock[i] + made);
+      // People will wait for a bus, but not indefinitely: a few days of
+      // departures and then they walk, and the town notices.
+      const cap = Math.max(12, Math.round(made * 20));
+      towns.produceAcc[i] += made;
+      const whole = Math.floor(towns.produceAcc[i]);
+      if (whole > 0) {
+        towns.produceAcc[i] -= whole;
+        towns.stock[i] = Math.min(cap, towns.stock[i] + whole);
+      }
     }
     let wanted = 0;
     let met = 0;
     for (let c = 0; c < cargoCount; c++) {
       const per = demandPerThousand[c];
       if (per === 0) continue;
-      const need = Math.max(1, Math.round((per * pop) / 1000));
-      towns.demand[t * cargoCount + c] = need;
+      // Fractional on purpose. Rounding each cargo up to a whole tonne a day
+      // put a floor under a small town's basket that was larger than the
+      // basket, so every town wanted a dozen tonnes a day whatever its size.
+      const need = (per * pop) / 1000;
+      const i = t * cargoCount + c;
+      towns.demand[i] = Math.max(1, Math.ceil(need));
       wanted += need;
-      const have = towns.stock[t * cargoCount + c];
-      const used = Math.min(have, need);
-      towns.stock[t * cargoCount + c] = have - used;
-      met += used;
+      // What the hinterland makes of this cargo, which it can only do up to
+      // the size of hinterland there is.
+      const local = Math.min(need, (per * LOCAL_SUPPLY_POP) / 1000);
+      const shortfall = Math.max(0, need - local);
+      // Satisfaction is measured against what is available today, not against
+      // the whole tonnes drawn below: a town short of half a tonne is half a
+      // tonne short, and rounding that to nothing or to one would make the
+      // growth curve a staircase.
+      met += local + Math.min(shortfall, towns.stock[i]);
+      towns.demandAcc[i] += shortfall;
+      const draw = Math.floor(towns.demandAcc[i]);
+      if (draw > 0) {
+        towns.demandAcc[i] -= draw;
+        towns.stock[i] = Math.max(0, towns.stock[i] - draw);
+      }
     }
-    const rate = wanted > 0 ? Math.round((met * 100) / wanted) : 100;
+    /*
+     * Local supply, and why a town is not starving on day one.
+     *
+     * A region of fifteen thousand people in 1860 already eats. It has a
+     * market, a carrier's cart, a coal merchant — everything a town needs to
+     * subsist without a single one of the player's lorries. Counting only
+     * hauled tonnes against the whole basket said otherwise: every town in the
+     * region opened at sixty per cent served, fell to twenty-three inside a
+     * year, and the population collapsed from fifteen thousand to eight
+     * hundred by the fifth. The carriers were then hauling to towns too small
+     * to want anything, which is why the opening looked like a haulage-rate
+     * problem when it was a demand-model problem.
+     *
+     * So the baseline is what the town does for itself, and haulage is the
+     * increment on top. Set just under the decline threshold: a town nobody
+     * serves slowly shrinks, and it takes real tonnage to make one grow.
+     */
+    const rate = wanted > 0 ? Math.min(100, Math.round((met * 100) / wanted)) : 100;
     towns.served[t] = Math.round((towns.served[t] * 9 + rate) / 10);
 
     // Above sixty a town grows, below forty it shrinks, between the two it

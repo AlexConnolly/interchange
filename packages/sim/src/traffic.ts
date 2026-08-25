@@ -221,6 +221,16 @@ export class VehicleTable {
   readonly heading: Int32Array;
 
   readonly odometer: Float64Array;
+  /** Tiles run since the current load was picked up. The haulage rate is paid
+   *  on this rather than on the crow-flies distance, because the running cost
+   *  is paid on it too and a rate in different units from its cost is not a
+   *  rate. */
+  readonly haulDistance: Float64Array;
+  /** The stop index this vehicle last took on cargo at, or -1. An Exchange
+   *  stop must not treat what it has just picked up as something to put down. */
+  readonly loadedAt: Int32Array;
+  /** Ticks spent waiting at the current stop, for the patience rule. */
+  readonly waited: Int32Array;
   readonly revenue: Float64Array;
   readonly costs: Float64Array;
   readonly boughtTick: Int32Array;
@@ -254,6 +264,9 @@ export class VehicleTable {
     this.y = new Int32Array(capacity);
     this.heading = new Int32Array(capacity);
     this.odometer = new Float64Array(capacity);
+    this.haulDistance = new Float64Array(capacity);
+    this.loadedAt = new Int32Array(capacity).fill(-1);
+    this.waited = new Int32Array(capacity);
     this.revenue = new Float64Array(capacity);
     this.costs = new Float64Array(capacity);
     this.boughtTick = new Int32Array(capacity);
@@ -284,6 +297,9 @@ export class VehicleTable {
     this.load[id] = 0;
     this.dwell[id] = 0;
     this.odometer[id] = 0;
+    this.haulDistance[id] = 0;
+    this.loadedAt[id] = -1;
+    this.waited[id] = 0;
     this.revenue[id] = 0;
     this.costs[id] = 0;
     this.delayTicks[id] = 0;
@@ -459,6 +475,7 @@ export function stepTraffic(
       g.cells[cellStart + cell] = id;
       pos -= CELL_LENGTH;
       v.odometer[id] += 1 / CELLS_PER_TILE;
+      v.haulDistance[id] += 1 / CELLS_PER_TILE;
     }
     v.pos[id] = pos;
     v.cell[id] = cell;

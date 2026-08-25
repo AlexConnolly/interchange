@@ -274,7 +274,7 @@ for (const i of industries) ERA_UNLOCKS[(i as { fromEra?: number }).fromEra ?? 1
 const balance = {
   startingCash: P(2400),
   interestBps: 620,
-  creditLimitPct: 140,
+  creditLimitPct: 180,
   contractSlots: 6,
   contractIntervalDays: 9,
   latePenaltyPct: 40,

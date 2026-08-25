@@ -264,6 +264,22 @@ export class ServiceTable {
   readonly tonnes = new Float64Array(MAX_ROUTES);
   /** Mean round-trip time in ticks, the number that actually matters. */
   readonly roundTrip = new Int32Array(MAX_ROUTES);
+  /** Tick the service was created, so it can be given time to prove itself
+   *  before anybody judges its returns. */
+  readonly created = new Int32Array(MAX_ROUTES);
+  /*
+   * Tonnage as it stood when the route was last reviewed, and when that was.
+   *
+   * Cumulative tonnage cannot tell a route that is working from one that
+   * worked once. A run into a works that has since filled up and stopped
+   * accepting keeps its lifetime figure forever while the lorry circles the
+   * triangle empty and the fodder bill runs; the operator's books showed
+   * twenty-nine tonnes carried and a loss growing every year for two decades.
+   * A mark and a date turn that into the only question worth asking, which is
+   * whether the route has carried anything lately.
+   */
+  readonly tonnesMark = new Float64Array(MAX_ROUTES);
+  readonly markTick = new Int32Array(MAX_ROUTES);
 
   private free: number[] = [];
 
@@ -276,9 +292,12 @@ export class ServiceTable {
    * inactive forever. Twenty thousand vehicles sat still for that reason and
    * the symptom looked like a pathfinding bug.
    */
-  alloc(company: number, name: string): number {
+  alloc(company: number, name: string, tick = 0): number {
     if (this.free.length === 0 && this.count >= MAX_ROUTES) return NONE;
     const id = this.free.length > 0 ? this.free.pop()! : this.count++;
+    this.created[id] = tick;
+    this.markTick[id] = tick;
+    this.tonnesMark[id] = 0;
     this.company[id] = company;
     this.names[id] = name;
     this.stopCount[id] = 0;
@@ -351,7 +370,11 @@ export function stepFinance(
       co.ledgerYear[base + Line.Haulage] +
       co.ledgerYear[base + Line.ContractBonus] +
       co.ledgerYear[base + Line.AccessCharged];
-    const limit = Math.max(300000, (revenue * balance.creditLimitPct) / 100);
+    // The floor matters as much as the multiple. A company with no trading
+    // history still has to be able to buy its first few vehicles and run them
+    // long enough to deliver something, and a floor below the price of two
+    // lorries makes the opening move fatal.
+    const limit = Math.max(900000, (revenue * balance.creditLimitPct) / 100);
     if (co.debt[c] > limit) onInsolvent(c);
   }
 }
@@ -380,6 +403,7 @@ export function makeContract(
   tick: number,
   rng: Rng,
   balance: { latePenaltyPct: number; contractIntervalDays: number },
+  haulier: { capacity: number; tilesPerDay: number },
 ): number {
   const id = contracts.alloc();
   contracts.cargo[id] = seed.cargo;
@@ -388,7 +412,23 @@ export function makeContract(
   contracts.toSite[id] = seed.toSite;
   contracts.toIsTown[id] = seed.toIsTown ? 1 : 0;
 
-  const volume = 40 + rng.int(9) * 20;
+  /*
+   * Sized in lorry-loads, not in tonnes.
+   *
+   * A flat forty-to-two-hundred tonnes is a fortnight's work for a modern
+   * artic and rather more than three years for a horse dray, so in 1860 every
+   * contract on the board was one no carrier in the region could finish. The
+   * sweep showed it plainly: contracts offered and taken throughout a
+   * thirty-year run, and not one ever completed, which in turn meant nobody
+   * ever reached the six deliveries a construction charter asks for and Act II
+   * was unreachable by construction.
+   *
+   * Quoting it in loads of whatever the era actually drives keeps a contract
+   * the same shape of commitment in every era — a few weeks of one vehicle's
+   * work — while the tonnage on the page grows through the century by itself.
+   */
+  const loads = 4 + rng.int(7);
+  const volume = Math.max(1, Math.round(haulier.capacity * loads));
   contracts.volume[id] = volume;
 
   // Struck against the same carriage curve the spot market pays, plus a
@@ -396,9 +436,12 @@ export function makeContract(
   // them would simply be the correct answer forever.
   contracts.rate[id] = Math.max(1, Math.round(haulageRate(seed.basePrice, seed.distanceTiles) * 0.55));
 
-  // Deadline scales with distance and volume: roughly the time a single
-  // period-appropriate vehicle needs, plus half again.
-  const days = Math.max(20, Math.round((seed.distanceTiles * volume) / 26) + 24 + rng.int(20));
+  // Deadline: the time a single period-appropriate vehicle needs at the speed
+  // that era actually travels, plus half again. Computed from the same figures
+  // the volume is, so the two cannot drift apart into a contract that is a
+  // fortnight's work with a week to do it in.
+  const roundTripDays = (seed.distanceTiles * 2 * ROAD_WANDER) / Math.max(0.1, haulier.tilesPerDay);
+  const days = Math.max(20, Math.round(loads * roundTripDays * 1.5) + 20 + rng.int(20));
   contracts.deadline[id] = tick + days * TICKS_PER_DAY;
   contracts.offeredUntil[id] = tick + balance.contractIntervalDays * TICKS_PER_DAY * 2;
   contracts.penalty[id] = Math.round((volume * contracts.rate[id] * balance.latePenaltyPct) / 100);
@@ -420,14 +463,47 @@ export function makeContract(
  * it carried is not an exaggeration for 1860 — it is why railways changed
  * everything, and Act I should feel it.
  */
-export function haulageRate(basePrice: number, distanceTiles: number): number {
+export function haulageRate(basePrice: number, distanceTiles: number, weight = 1): number {
   const distanceFactor = 24 + Math.min(900, Math.round(distanceTiles * 9));
-  return Math.round((HAUL_BASE * distanceFactor) / 100 + basePrice * VALUE_SHARE);
+  return Math.round(((HAUL_BASE * distanceFactor) / 100) * weight + basePrice * VALUE_SHARE);
 }
+
+/**
+ * What a unit of this cargo is worth carrying, against a tonne of freight.
+ *
+ * A bus is quoted at thirty-four and a commuter train at a hundred and eighty,
+ * and those are people, not tonnes — the content means seats. The tariff is
+ * per tonne, so paying seats at the tonne rate made an omnibus six times the
+ * business of a dray for less money, and the sweep came back with passengers
+ * at eighty-nine per cent of everything moved in the region and companies
+ * ending the century on a million and a half pounds. About ten people weigh a
+ * tonne, and the fare reflects it. The cargo's own value term is untouched:
+ * that part is priced per unit and always was.
+ */
+export const RATE_WEIGHT_BY_TIER: Record<string, number> = { passenger: 0.11 };
 
 /** Pence per tonne of carriage at the reference distance. The single number
  *  that moves every haulage rate in the game, so the sweep starts here. */
-export const HAUL_BASE = 200;
+export const HAUL_BASE = 560;
+
+/**
+ * How much further than the direct line a haul may be paid for.
+ *
+ * Carriage is charged on the miles actually run, up to this multiple of the
+ * crow-flies distance. Past it the detour is the haulier's problem, which is
+ * what keeps a straighter road worth building; short of it, a road that
+ * wanders is still paid for, which is what keeps the opening survivable on a
+ * network nobody has improved yet. Generated roads wander at about twice the
+ * direct line, so 1.8 covers most of a bad network without covering a stupid
+ * one. Railway companies called it constructive mileage.
+ */
+export const HAUL_ALLOWANCE = 1.8;
+
+/** How far a generated road actually wanders relative to the direct line.
+ *  Measured off the world generator, not guessed: routes come out at very
+ *  close to twice the crow-flies distance. Used to quote deadlines a vehicle
+ *  can really meet. */
+export const ROAD_WANDER = 2.0;
 
 /**
  * How much of the cargo's own value the carriage rate picks up. Small on

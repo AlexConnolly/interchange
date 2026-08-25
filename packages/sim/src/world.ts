@@ -13,12 +13,12 @@ import {
   ACCEL, AUTHORITY, CELLS_PER_TILE, Control, DIR_BIT, DIR_DX, DIR_DY,
   DIR_OPPOSITE, FLOW_WINDOW, HASH_INTERVAL, MAX_COMPANIES, MAX_VEHICLES,
   MAX_NODES, MODE_COUNT, MODE_NAMES, Mode, PATH_LATENCY_TICKS, SPEED_STEPS, START_YEAR,
-  TICKS_PER_DAY, TICKS_PER_YEAR, DAYS_PER_MONTH, DAYS_PER_YEAR,
+  TICKS_PER_DAY, TICKS_PER_YEAR, DAYS_PER_MONTH, DAYS_PER_YEAR, ECONOMY_SCALE, LOAD_PATIENCE_DAYS, LOAD_PATIENCE_SHARE,
 } from './constants.ts';
 import { Cmd, CommandQueue, type Command } from './commands.ts';
 import {
   CompanyTable, ContractState, ContractTable, Charter, Line, LINE_COUNT,
-  ServiceTable, StopAction, MAX_STOPS, hashEconomy, haulageRate, makeContract, stepFinance,
+  ServiceTable, StopAction, MAX_STOPS, hashEconomy, haulageRate, HAUL_ALLOWANCE, RATE_WEIGHT_BY_TIER, makeContract, stepFinance,
 } from './economy.ts';
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
 import { Hasher } from './hash.ts';
@@ -34,6 +34,7 @@ import {
 } from './sites.ts';
 import { DEPOSIT_NAMES, TileFlag, generateTerrain, SEA_LEVEL, type Terrain, type WorldConfig } from './terrain.ts';
 import { ObjectiveTable, checkObjectives, generateObjective, type ObjectiveContext } from './objectives.ts';
+import { THINK_DAYS, stepRival } from './rivals.ts';
 import { alignForRadius, layAlignment, planAlignment, removeWayTile, type Alignment } from './construction.ts';
 import { balanceGrids, buildGrids, computeLabour, emptyUtilityState } from './utilities.ts';
 import {
@@ -116,8 +117,12 @@ export class World {
   private vehicleMode = new Uint8Array(256);
   private cargoPrice = new Int32Array(64);
   private recipes: RecipeTables;
-  private townDemandPerThousand: Int32Array;
-  private townProducePerThousand: Int32Array;
+  private cargoRateWeight = new Float64Array(256).fill(1);
+  private townDemandPerThousand: Float64Array;
+  private townWant: Record<string, number> = {};
+  private townSend: Record<string, number> = {};
+  private basketEra = 0;
+  private townProducePerThousand: Float64Array;
   private routeCosts: RouteCosts;
 
   /** Access tiles, so sites and towns survive a graph rebuild. */
@@ -134,7 +139,22 @@ export class World {
   /** People who can reach each node inside a commute. */
   labourAt = new Float64Array(MAX_NODES);
 
+  /**
+   * The last thing each company created, so a command can refer to it without
+   * predicting its id.
+   *
+   * A command that creates something cannot return the id — the log has to be
+   * replayable without running the game to find out. Predicting `count` at
+   * issue time works right up until two issuers create something on the same
+   * tick, at which point both predict the same id and the second one's
+   * follow-up commands attach to the first one's object. Four rival companies
+   * spent twelve years building services for each other and went bankrupt.
+   */
+  readonly lastService = new Int32Array(MAX_COMPANIES).fill(NONE);
+  readonly lastVehicle = new Int32Array(MAX_COMPANIES).fill(NONE);
+
   /** Where a vehicle's current load was picked up, for the distance premium. */
+  private lapStart = new Int32Array(MAX_VEHICLES);
   private loadOriginX = new Int32Array(MAX_VEHICLES);
   private loadOriginY = new Int32Array(MAX_VEHICLES);
 
@@ -179,6 +199,7 @@ export class World {
     });
     content.cargo.forEach((c, i) => {
       this.cargoPrice[i] = c.basePrice;
+      this.cargoRateWeight[i] = RATE_WEIGHT_BY_TIER[c.tier] ?? 1;
     });
 
     const n = content.industries.length;
@@ -212,7 +233,7 @@ export class World {
       };
       this.recipes.inputs[i] = flat(ind.recipe.inputs);
       this.recipes.outputs[i] = flat(ind.recipe.outputs);
-      this.recipes.period[i] = ind.recipe.period;
+      this.recipes.period[i] = ind.recipe.period * ECONOMY_SCALE;
       this.recipes.kind[i] =
         ind.kind === 'extraction' ? IndustryKind.Extraction
         : ind.kind === 'processing' ? IndustryKind.Processing
@@ -225,31 +246,30 @@ export class World {
       this.recipes.fromEra[i] = ind.fromEra;
     });
 
-    // What a thousand townspeople want per day. Passengers and mail are
-    // produced by towns rather than wanted by them, so they are zero here.
-    this.townDemandPerThousand = new Int32Array(content.cargo.length);
-    const want: Record<string, number> = {
+    /*
+     * What a thousand townspeople want per day — for the era they live in.
+     *
+     * The table below is the full modern basket, and applying all of it from
+     * 1860 was quietly fatal. A town's satisfaction is met-over-wanted across
+     * every cargo it wants, so wanting electronics and petrol in 1860 put a
+     * hard ceiling of about seventy per cent on a town nobody could raise, and
+     * since a town shrinks below fifty-five, every town in the region shrank
+     * from the first day. Smaller towns want less, so the sinks got smaller,
+     * so the carriers earned less, and the whole opening was a slow collapse
+     * that read as a haulage-rate problem.
+     *
+     * Gated by the cargo's own era, the basket grows as the century does,
+     * which is both correct and the thing that makes town growth a reward for
+     * running a *varied* network rather than a big one.
+     */
+    this.townWant = {
       goods: 6, food: 8, coal: 5, textiles: 2, planks: 2, cement: 2,
       paper: 1, glass: 1, fuel: 2, electronics: 1, luxury: 1, retail: 3,
     };
-    for (const [id, v] of Object.entries(want)) {
-      const i = content.cargoIndex.get(id);
-      if (i !== undefined) this.townDemandPerThousand[i] = v;
-    }
-
-    // And what a town sends out. Passengers are wanted by other towns as well
-    // as produced, so they appear in both tables — which is what makes a
-    // commuter service a round trip that pays in both directions rather than a
-    // full run out and an empty run back.
-    this.townProducePerThousand = new Int32Array(content.cargo.length);
-    const sends: Record<string, number> = { passengers: 9, mail: 2 };
-    for (const [id, v] of Object.entries(sends)) {
-      const i = content.cargoIndex.get(id);
-      if (i !== undefined) {
-        this.townProducePerThousand[i] = v;
-        this.townDemandPerThousand[i] = Math.max(this.townDemandPerThousand[i], Math.round(v * 0.8));
-      }
-    }
+    this.townSend = { passengers: 9, mail: 2 };
+    this.townDemandPerThousand = new Float64Array(content.cargo.length);
+    this.townProducePerThousand = new Float64Array(content.cargo.length);
+    this.rebuildTownBasket(1);
 
     this.routeCosts = { speedLimit: this.waySpeed, valueOfTime: content.balance.valueOfTime };
     this.router = new Router(MAX_COMPANIES, 100000);
@@ -271,6 +291,32 @@ export class World {
 
   get dayOfMonth(): number {
     return this.day % DAYS_PER_MONTH;
+  }
+
+  /**
+   * Rebuild the town basket for an era. Cheap, and called only when the era
+   * turns over, so the cost is a handful of times in a whole game.
+   */
+  private rebuildTownBasket(era: number): void {
+    if (this.basketEra === era) return;
+    this.basketEra = era;
+    this.townDemandPerThousand.fill(0);
+    this.townProducePerThousand.fill(0);
+    for (const [id, v] of Object.entries(this.townWant)) {
+      const i = this.content.cargoIndex.get(id);
+      if (i === undefined || this.content.cargo[i].fromEra > era) continue;
+      this.townDemandPerThousand[i] = v / ECONOMY_SCALE;
+    }
+    // And what a town sends out. Passengers are wanted by other towns as well
+    // as produced, so they appear in both tables — which is what makes a
+    // commuter service a round trip that pays in both directions rather than a
+    // full run out and an empty run back.
+    for (const [id, v] of Object.entries(this.townSend)) {
+      const i = this.content.cargoIndex.get(id);
+      if (i === undefined || this.content.cargo[i].fromEra > era) continue;
+      this.townProducePerThousand[i] = v / ECONOMY_SCALE;
+      this.townDemandPerThousand[i] = Math.max(this.townDemandPerThousand[i], (v * 0.8) / ECONOMY_SCALE);
+    }
   }
 
   get era(): number {
@@ -484,9 +530,11 @@ export class World {
 
     this.stepUtilities();
     stepSiteDecay(this.sites, b);
+    this.rebuildTownBasket(this.era);
     stepTowns(this.towns, this.townDemandPerThousand, this.townProducePerThousand, b.townGrowthPerDay);
     this.stepConveyors();
     this.stepContracts();
+    this.stepRivals();
     stepFinance(this.companies, b, (c) => this.declareBankrupt(c));
 
     if (this.day % b.contractIntervalDays === 0) this.offerContract();
@@ -764,7 +812,17 @@ export class World {
       const rate = this.vehicleTransfer[v.type[id]];
       let busy = false;
 
-      if (action === StopAction.Unload || action === StopAction.Exchange) {
+      /*
+       * An Exchange stop drops what it brought and picks up what is waiting,
+       * and the two must not be the same tonnes. Without this guard the tick
+       * after a pickup saw a loaded vehicle at an unloading stop, put the
+       * cargo straight back where it came from, and *paid the carriage on it* —
+       * then picked it up again next tick. A stationary dray earned its own
+       * price in coal every fortnight; four AI companies moved five and a half
+       * million tonnes in thirty years without one of them leaving the yard.
+       */
+      const justLoadedHere = v.loadedAt[id] === si;
+      if (!justLoadedHere && (action === StopAction.Unload || action === StopAction.Exchange)) {
         if (v.load[id] > 0) {
           const cargo = v.cargo[id];
           const amount = Math.min(v.load[id], rate);
@@ -777,10 +835,25 @@ export class World {
             this.payForDelivery(id, cargo, accepted, isTown, target);
             busy = true;
           } else if (this.accepts(isTown, target, cargo)) {
-            // The destination takes this cargo but has no room right now: a
-            // full yard is the signal decay is measured from, so wait.
-            v.dwell[id] = TICKS_PER_DAY / 2;
-            busy = true;
+            /*
+             * The destination takes this cargo but has no room right now: a
+             * full yard is the signal decay is measured from, so wait — but
+             * again, not forever. A works starved of its *other* input never
+             * empties its yard, and a vehicle that treats that as a queue to
+             * join simply stops being a vehicle. Three drays spent twenty
+             * years parked at a glassworks that had coal and no sand.
+             */
+            const lap = svcT.roundTrip[svc];
+            const patience = lap > 0
+              ? Math.max(TICKS_PER_DAY * 2, lap * LOAD_PATIENCE_SHARE)
+              : LOAD_PATIENCE_DAYS * TICKS_PER_DAY;
+            if (v.waited[id] >= patience) {
+              busy = false;
+            } else {
+              v.dwell[id] = TICKS_PER_DAY / 2;
+              v.waited[id] += TICKS_PER_DAY / 2;
+              busy = true;
+            }
           } else {
             // The destination will never take it. Waiting is a deadlock, so
             // the load is written off and the service keeps running. It should
@@ -809,9 +882,11 @@ export class World {
               if (v.load[id] === 0) {
                 this.loadOriginX[id] = isTown ? this.towns.x[target] : this.sites.x[target];
                 this.loadOriginY[id] = isTown ? this.towns.y[target] : this.sites.y[target];
+                v.haulDistance[id] = 0;
               }
               v.cargo[id] = cargo;
               v.load[id] += got;
+              v.loadedAt[id] = si;
               if (!isTown) {
                 this.sites.collected[target] += got;
                 this.sites.everServed[target] = 1;
@@ -821,9 +896,21 @@ export class World {
           }
           if (action === StopAction.LoadFull && v.load[id] < capacity) {
             // Wait for a full load. This is the decision the act is about:
-            // a full load out and an empty load back is half a business.
-            if (!busy) v.dwell[id] = TICKS_PER_DAY / 3;
-            busy = true;
+            // a full load out and an empty load back is half a business. But
+            // only for so long — see LOAD_PATIENCE_DAYS.
+            const lap = svcT.roundTrip[svc];
+            const patience = lap > 0
+              ? Math.max(TICKS_PER_DAY * 2, lap * LOAD_PATIENCE_SHARE)
+              : LOAD_PATIENCE_DAYS * TICKS_PER_DAY;
+            if (v.load[id] > 0 && v.waited[id] >= patience) {
+              busy = false;
+            } else {
+              if (!busy) {
+                v.dwell[id] = TICKS_PER_DAY / 3;
+                v.waited[id] += TICKS_PER_DAY / 3;
+              }
+              busy = true;
+            }
           }
         }
       }
@@ -834,7 +921,18 @@ export class World {
       }
 
       // Done here. Move to the next stop.
+      v.loadedAt[id] = -1;
+      v.waited[id] = 0;
       v.orderIndex[id] = (stopIdx + 1) % svcT.stopCount[svc];
+      if (v.orderIndex[id] === 0) {
+        // Back to the first stop: one full cycle. Rolled rather than replaced,
+        // so one unlucky trip does not rewrite the figure the player reads.
+        const lap = this.tick - this.lapStart[id];
+        if (lap > 0 && lap < TICKS_PER_YEAR) {
+          svcT.roundTrip[svc] = svcT.roundTrip[svc] === 0 ? lap : Math.round((svcT.roundTrip[svc] * 3 + lap) / 4);
+        }
+        this.lapStart[id] = this.tick;
+      }
       const nextSi = svc * MAX_STOPS + v.orderIndex[id];
       const nextKind = svcT.stopKind[nextSi];
       const nextTarget = svcT.stopTarget[nextSi];
@@ -863,6 +961,16 @@ export class World {
    * service is actually going next, because a cargo the destination will not
    * accept is worse than no cargo at all.
    */
+  /** Tonnes of a cargo a destination could take right now. */
+  private roomFor(isTown: boolean, target: number, cargo: number): number {
+    const cargoCount = this.content.cargo.length;
+    if (isTown) {
+      const i = target * cargoCount + cargo;
+      return Math.max(0, Math.max(20, this.towns.demand[i] * 6) - this.towns.stock[i]);
+    }
+    return this.sites.roomFor(target, cargo);
+  }
+
   private bestCargoAt(vehicle: number, isTown: boolean, target: number, service: number): number {
     const handling = this.content.vehicles[this.vehicles.type[vehicle]].handling;
     const cargoCount = this.content.cargo.length;
@@ -878,6 +986,10 @@ export class World {
       if (!handling.includes(this.content.cargo[c].handling as never)) continue;
       if (!isTown && !this.produces(this.sites.def[target], c)) continue;
       if (dest && !this.accepts(dest.isTown, dest.target, c)) continue;
+      // And has somewhere to put it. A works whose input yard is already full
+      // takes nothing, so loading for it is loading for a closed gate — the
+      // vehicle arrives, waits, and never leaves.
+      if (dest && this.roomFor(dest.isTown, dest.target, c) <= 0) continue;
       const value = have * this.cargoPrice[c];
       if (value > bestValue) {
         bestValue = value;
@@ -953,8 +1065,29 @@ export class World {
     const ty = isTown ? this.towns.y[target] : this.sites.y[target];
     const dx = tx - this.loadOriginX[vehicle];
     const dy = ty - this.loadOriginY[vehicle];
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const pence = haulageRate(this.cargoPrice[cargo], dist) * tonnes;
+    const direct = Math.sqrt(dx * dx + dy * dy);
+    /*
+     * Paid for the miles run, not the miles as the crow flies — capped.
+     *
+     * The running cost accrues per day of driving, so it is charged against
+     * the road distance whatever the rate says. Paying the rate on the direct
+     * line meant revenue and cost were quoted in different units, and since
+     * the generated road network wanders at about twice the direct line, every
+     * haul in the game lost money: a dray on a fifty-seven tile run earned
+     * thirty-two pounds against forty-six of fodder. Companies went bankrupt
+     * on their first route and the sweep read it as a content problem.
+     *
+     * The cap is the other half. Without it a winding road pays better than a
+     * straight one and there is no reason to ever build the straight one,
+     * which inverts the point of the game. With it, carriage is paid up to a
+     * reasonable allowance for terrain and no further — so a detour beyond
+     * that is carried at the haulier's own expense, and shortening it is worth
+     * money twice over: a better rate until the cap, and less time after it.
+     * Railway tariffs called this constructive mileage and did it for the same
+     * reason.
+     */
+    const dist = Math.max(direct, Math.min(this.vehicles.haulDistance[vehicle], direct * HAUL_ALLOWANCE));
+    const pence = haulageRate(this.cargoPrice[cargo], dist, this.cargoRateWeight[cargo]) * tonnes;
     this.companies.post(company, Line.Haulage, pence);
     this.movedByCargo[company * this.content.cargo.length + cargo] += tonnes;
     this.vehicles.revenue[vehicle] += pence;
@@ -966,6 +1099,7 @@ export class World {
       this.services.tonnes[svc] += tonnes;
     }
     if (!isTown) this.sites.shipped[target] += tonnes;
+    if (this.vehicles.load[vehicle] <= 0) this.vehicles.haulDistance[vehicle] = 0;
 
     // Credit any contract this delivery satisfies.
     for (let k = 0; k < this.contracts.count; k++) {
@@ -996,7 +1130,27 @@ export class World {
     if (offered >= b.contractSlots) return;
     const seed = this.pickContractSeed();
     if (!seed) return;
-    makeContract(this.contracts, seed, this.tick, this.rng, b);
+    makeContract(this.contracts, seed, this.tick, this.rng, b, this.eraHaulier());
+  }
+
+  /**
+   * The road vehicle a contract is written against: the biggest one on sale
+   * this era. Contracts are quoted in its loads and its speed, so what the
+   * board asks for stays a few weeks of work from 1860 to 2100.
+   */
+  private eraHaulier(): { capacity: number; tilesPerDay: number } {
+    let capacity = 3;
+    let speed = 2949;
+    const era = this.era;
+    for (let i = 0; i < this.content.vehicles.length; i++) {
+      const v = this.content.vehicles[i];
+      if (v.mode !== 'road' || v.era > era || v.obsoleteYear < this.year) continue;
+      if (v.capacity > capacity) {
+        capacity = v.capacity;
+        speed = v.speed;
+      }
+    }
+    return { capacity, tilesPerDay: (speed / 65536) * TICKS_PER_DAY };
   }
 
   /**
@@ -1185,6 +1339,38 @@ export class World {
     }
   }
 
+  /**
+   * Rivals think, one at a time, on a rota.
+   *
+   * Staggered rather than all on the same day so the contract board is not
+   * hit by four simultaneous bids every sixth morning — and because a company
+   * that reviews its strategy the same day as everybody else is a company in
+   * a simulation rather than a company.
+   */
+  private stepRivals(): void {
+    for (let company = 1; company < this.companies.count; company++) {
+      if (!this.companies.isAi[company]) continue;
+      if (this.companies.bankrupt[company]) continue;
+      if ((this.day + company * 2) % THINK_DAYS !== 0) continue;
+      stepRival(this, company, this.rng);
+    }
+  }
+
+  /**
+   * Whether rivals may buy and price infrastructure.
+   *
+   * Not whether they exist. A rival buying roads out from under a player who
+   * cannot buy anything is a tax rather than a challenge, so the *ownership*
+   * half of their decision list waits for Act II — but they haul from the
+   * first day, because a region where nobody else is trading is not a region.
+   *
+   * Gating the whole AI on this was worth thirty years of nothing happening in
+   * the balance sweep.
+   */
+  get rivalOwnershipEnabled(): boolean {
+    return this.era >= 2 || this.companies.charter[this.player] >= Charter.Construction;
+  }
+
   // ------------------------------------------------------------ objectives
 
   private objectiveContext(company: number): ObjectiveContext {
@@ -1262,13 +1448,25 @@ export class World {
         this.companies.ledgerYear[base + Line.AccessCharged];
       const delivered = this.companies.delivered[c];
       const cash = this.companies.cash[c];
+      /*
+       * Thresholds measured against the game, not guessed at.
+       *
+       * The first set asked for six completed contracts, nine thousand a year
+       * of revenue and four thousand in the bank. A sweep of eight thirty-year
+       * runs put the best surviving company in the region at three contracts
+       * and thirty-six hundred a year, so the first gate of the first act was
+       * out of reach by a factor of three and Act II could not be entered by
+       * anybody, ever. These sit near the upper quartile of what a company
+       * that is actually doing well reaches: a good operator gets there, a
+       * mediocre one does not, which is the only thing a gate is for.
+       */
       let earned = false;
       if (have === Charter.Carrier) {
-        earned = delivered >= 6 && revenue >= 900000 && cash >= 400000;
+        earned = delivered >= 2 && revenue >= 250000 && cash >= 300000;
       } else if (have === Charter.Construction) {
-        earned = revenue >= 4000000 && this.ownedAssets(c) >= 4;
+        earned = revenue >= 900000 && this.ownedAssets(c) >= 3;
       } else if (have === Charter.Extraction) {
-        earned = revenue >= 14000000 && this.ownedSites(c) >= 3;
+        earned = revenue >= 2500000 && this.ownedSites(c) >= 2;
       }
       if (earned) {
         this.companies.charter[c] = have + 1;
@@ -1325,25 +1523,32 @@ export class World {
         this.focusX = c.a;
         this.focusY = c.b;
         break;
-      case Cmd.BuyVehicle:
-        this.buyVehicle(c.issuer, c.a, c.b);
+      case Cmd.BuyVehicle: {
+        const id = this.buyVehicle(c.issuer, c.a, c.b);
+        if (id !== NONE) this.lastVehicle[c.issuer] = id;
         break;
+      }
       case Cmd.SellVehicle:
         this.sellVehicle(c.a, true);
         break;
-      case Cmd.CreateService:
-        this.services.alloc(c.issuer, typeof c.data === 'string' ? c.data : `Service ${this.services.count + 1}`);
+      case Cmd.CreateService: {
+        const id = this.services.alloc(c.issuer, typeof c.data === 'string' ? c.data : `Service ${this.services.count + 1}`, this.tick);
+        if (id !== NONE) this.lastService[c.issuer] = id;
         break;
+      }
       case Cmd.DeleteService:
         this.deleteService(c.a);
         break;
-      case Cmd.AddStop:
-        // `c` packs the town flag in bit 0 and the cargo in the rest, so the
-        // command still fits four integers. 255 means "whatever pays best".
-        if (this.services.company[c.a] === c.issuer) {
-          this.services.addStop(c.a, c.b, c.c & 3, c.d as StopAction, c.c >> 2);
+      case Cmd.AddStop: {
+        // `c` packs the stop kind in the low two bits and the cargo in the
+        // rest, so the command still fits four integers. 255 means "whatever
+        // pays best". A service of -1 means "the one I just created".
+        const svc = c.a < 0 ? this.lastService[c.issuer] : c.a;
+        if (svc !== NONE && this.services.company[svc] === c.issuer) {
+          this.services.addStop(svc, c.b, c.c & 3, c.d as StopAction, c.c >> 2);
         }
         break;
+      }
       case Cmd.RemoveStop:
         this.removeStop(c.a, c.b, c.issuer);
         break;
@@ -1351,7 +1556,11 @@ export class World {
         if (this.services.company[c.a] === c.issuer) this.services.active[c.a] = c.b ? 1 : 0;
         break;
       case Cmd.AssignVehicle:
-        this.assignVehicle(c.a, c.b, c.issuer);
+        this.assignVehicle(
+          c.a < 0 ? this.lastVehicle[c.issuer] : c.a,
+          c.b < 0 ? this.lastService[c.issuer] : c.b,
+          c.issuer,
+        );
         break;
       case Cmd.UnassignVehicle:
         if (this.vehicles.company[c.a] === c.issuer) {
@@ -1623,6 +1832,7 @@ export class World {
   }
 
   assignVehicle(vehicle: number, service: number, issuer: number): void {
+    if (vehicle === NONE || service === NONE) return;
     if (!this.vehicles.alive[vehicle] || this.vehicles.company[vehicle] !== issuer) return;
     if (service < 0 || service >= this.services.count) return;
     if (this.services.company[service] !== issuer) return;
@@ -1759,6 +1969,31 @@ export class World {
       h.int(this.vehicles.cargo[i]).int(this.vehicles.orderIndex[i]);
     }
     return h.value();
+  }
+
+  /**
+   * What a unit of the best-paying cargo with this handling class is worth
+   * against a tonne of freight. Lets a buyer compare a lorry with a bus
+   * without pretending a seat is a tonne.
+   */
+  rateWeightFor(handling: string): number {
+    let best = 0;
+    for (let c = 0; c < this.content.cargo.length; c++) {
+      if (this.content.cargo[c].handling !== handling) continue;
+      if (this.cargoRateWeight[c] > best) best = this.cargoRateWeight[c];
+    }
+    return best > 0 ? best : 1;
+  }
+
+  /** Does a town make this cargo? Passengers and post, in practice. */
+  townProduces(cargo: number): boolean {
+    return (this.townProducePerThousand[cargo] ?? 0) > 0;
+  }
+
+  /** Daily tonnes of a cargo a thousand townspeople want. Exposed so the
+   *  rival AI can tell an unconditional sink from a conditional one. */
+  townDemandFor(cargo: number): number {
+    return this.townDemandPerThousand[cargo] ?? 0;
   }
 
   /** Positions for the renderer. Never called by the tick. */

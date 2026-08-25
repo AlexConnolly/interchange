@@ -1,7 +1,7 @@
 {
   "startingCash": 240000,
   "interestBps": 620,
-  "creditLimitPct": 140,
+  "creditLimitPct": 180,
   "contractSlots": 6,
   "contractIntervalDays": 9,
   "latePenaltyPct": 40,

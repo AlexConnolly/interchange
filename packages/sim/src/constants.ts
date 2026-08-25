@@ -143,3 +143,46 @@ export const CHARGE_UNIT = 1;
 
 /** Ticks over which link flow is averaged for congestion and valuation. */
 export const FLOW_WINDOW = TICKS_PER_DAY * 30;
+
+/**
+ * How much slower the economy runs than the calendar.
+ *
+ * scale.md is honest that vehicle speed is tuned for legibility and the
+ * calendar for progression, and that the two are not reconciled: a horse dray
+ * crosses forty tiles in nineteen game days. What that document does not
+ * follow through is the consequence for everything quoted *per day*. A
+ * gasworks burning four tonnes of coal a day is a perfectly reasonable
+ * gasworks, and a dray managing one round trip a fortnight is a perfectly
+ * reasonable dray, but together they say the works needs sixty drays and the
+ * game is unplayable — which is exactly what the balance sweep found: four
+ * companies moving a thousand tonnes between them in thirty years against a
+ * regional demand of three hundred thousand, all four bankrupt.
+ *
+ * So production and consumption are quoted in the same document-legible
+ * numbers and then divided by this, once, here. It is the bridge between the
+ * two scales scale.md keeps apart, and it belongs next to them rather than
+ * smeared through the content as artificially long recipe periods that would
+ * read as mistakes to anybody editing the JSON.
+ */
+export const ECONOMY_SCALE = 24;
+
+/**
+ * How long a vehicle holds out for a full load, as a share of its round trip.
+ *
+ * "Wait for a full load" is the right default and a terrible absolute rule: a
+ * colliery produces a fifth of a tonne a day, so drays holding out for three
+ * tonnes each can sit at the pithead for a season with the fodder bill
+ * running. But a fixed few days is just as wrong in the other direction. A
+ * dray that waits five days on a route that takes seventy leaves with one
+ * tonne of three, earns a third of what the journey costs, and every company
+ * in the region goes bankrupt — which is precisely what the sweep reported.
+ *
+ * Relative to the round trip it is self-tuning, and it is also the calculation
+ * a carrier actually makes: a day at the wharf is cheap when the voyage is a
+ * month and ruinous when it is an afternoon. It wants no re-tuning per era,
+ * per vehicle size, or per cargo, which a figure in days needs constantly.
+ */
+export const LOAD_PATIENCE_SHARE = 0.35;
+
+/** Patience before a round trip has been measured, in days. */
+export const LOAD_PATIENCE_DAYS = 12;
