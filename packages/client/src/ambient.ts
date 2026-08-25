@@ -40,6 +40,35 @@
  */
 export const AMBIENT_COUNT = 22;
 
+/**
+ * How much traffic the *area* justifies, 0..1.
+ *
+ * Twenty-two vehicles was still far too many, and the reason is that a flat
+ * count is the wrong shape: the same number of cars is deserted on a trunk road
+ * through a market town and absurd on a farm track. So the count is scaled by
+ * what is around the camera — settlements near by, weighted by size, plus a
+ * little for the roads themselves.
+ *
+ * At the opening village it comes out at four or five vehicles in shot, which is
+ * a quiet lane in 1985. Round the biggest town it is three times that. Nothing
+ * about it is tuned to a target; it is a density, and it reads as one.
+ */
+export function areaDemand(
+  towns: { x: number; y: number; population: number }[],
+  x: number, z: number, reach: number,
+): number {
+  let people = 0;
+  for (const t of towns) {
+    const d = Math.hypot(t.x - x, t.y - z);
+    if (d > reach * 2.2) continue;
+    // Falls off with distance: a town ten tiles away puts traffic on your lane,
+    // one sixty tiles away does not.
+    people += t.population / (1 + (d / Math.max(1, reach)) ** 2);
+  }
+  // A hamlet is a few hundred; the market town is a couple of thousand.
+  return Math.max(0.12, Math.min(1, people / 2600));
+}
+
 interface Wanderer {
   /** The route it is driving, as tiles, and how far along it is. */
   path: number[];
@@ -79,6 +108,8 @@ export class Ambient {
    *  per vehicle per frame would be the most expensive thing in the file. */
   private places: number[] = [];
   private placesAge = 0;
+  /** How busy the area round the camera is, 0..1. Set by the caller. */
+  demand = 0.4;
 
   // Written out rather than declared in the parameter list: the project builds
   // with `erasableSyntaxOnly`, so a constructor parameter property is a syntax
@@ -125,7 +156,15 @@ export class Ambient {
   private spawn(w: Wanderer): boolean {
     const start = this.pick(this.places);
     if (start === undefined) return false;
-    w.speed = 1.5 + this.rnd() * 1.4;
+    /*
+     * Half what it was.
+     *
+     * Everything was "driving way too fast" at one and a half to three tiles a
+     * second, which on a camera showing twenty-six tiles is a car crossing the
+     * frame in ten seconds — motorway speed on a country lane. Three quarters of
+     * a tile to a tile and a half reads as a drive.
+     */
+    w.speed = 0.75 + this.rnd() * 0.7;
     w.model = this.models[Math.floor(this.rnd() * this.models.length) % this.models.length];
     w.livery = Math.floor(this.rnd() * 4) % 4;
     if (!this.dispatch(w, start)) return false;
@@ -158,11 +197,16 @@ export class Ambient {
     if (this.places.length < 2) return n0;
 
     let n = n0;
+    // How many the area justifies right now, not a constant.
+    const want = Math.max(2, Math.round(AMBIENT_COUNT * this.demand));
     while (this.cars.length < AMBIENT_COUNT) {
       this.cars.push({ path: [], leg: 0, t: 0, speed: 2, model: 0, livery: 0, dwell: 0 });
     }
 
     for (let i = 0; i < this.cars.length; i++) {
+      // Beyond what the area supports, park the rest. Kept in the list rather
+      // than destroyed so driving into a town and out again does not churn.
+      if (i >= want) { this.cars[i].path = []; continue; }
       const w = this.cars[i];
       if (w.path.length < 2 && !this.spawn(w)) continue;
 

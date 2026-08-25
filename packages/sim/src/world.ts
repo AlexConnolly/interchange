@@ -19,7 +19,7 @@ import {
 import { Cmd, CommandQueue, type Command } from './commands.ts';
 import {
   CompanyTable, Charter, Line, LINE_COUNT,
-  ServiceTable, StopAction, MAX_STOPS, ENTRANT_NAMES, hashEconomy, haulageRate, HAUL_ALLOWANCE, RATE_WEIGHT_BY_TIER, CHARTER_REQUIREMENTS, stepFinance,
+  ServiceTable, StopAction, MAX_STOPS, ENTRANT_NAMES, hashEconomy, SITE_PRICE_SCALE, haulageRate, HAUL_ALLOWANCE, RATE_WEIGHT_BY_TIER, CHARTER_REQUIREMENTS, stepFinance,
 } from './economy.ts';
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
 import { Hasher } from './hash.ts';
@@ -2750,7 +2750,7 @@ export class World {
     }
     // Doubles at the town gate, falls away to nothing by about thirty tiles.
     const premium = 1 + Math.max(0, 1 - nearest / 30);
-    return Math.round(def.foundCost * premium);
+    return Math.round(def.foundCost * premium * SITE_PRICE_SCALE);
   }
 
   /**
@@ -2962,7 +2962,7 @@ export class World {
     if (this.yards.count >= MAX_YARDS) {
       return { site: NONE, reason: 'You have as many yards as you can run.' };
     }
-    const cost = this.content.industries[defIndex].foundCost;
+    const cost = this.content.industries[defIndex].foundCost * SITE_PRICE_SCALE;
     if (this.companies.cash[this.player] < cost) {
       return { site: NONE, reason: 'Not enough in the bank.' };
     }
@@ -2994,6 +2994,102 @@ export class World {
     this.refreshInfluence();
     this.offerWorkNow();
     return { site, reason: '' };
+  }
+
+  /**
+   * What a contract is worth an hour, run by a given vehicle.
+   *
+   * "Rather than showing you the money, just show how much you're gonna make an
+   * hour, because that's the thing that's most important — is it worth it for an
+   * hour" — and that is exactly right, because a rate per tonne is not
+   * comparable between two offers. A short run in a small van and a long run in
+   * an artic can pay the same per tonne and differ fourfold in what they are
+   * worth to you, and nothing on the row said so.
+   *
+   * The sum is: a full load, there and back, at the speed the roads allow. The
+   * *return* leg matters and is the part a player would forget — a lorry that
+   * has delivered is at the wrong end and earns nothing coming home, so a
+   * fifty-tile run is a hundred tiles of driving for one load's pay.
+   *
+   * Returns 0 when nothing suitable is available, and the caller shows a dash:
+   * an hourly rate for a lorry you do not own is a number about a hypothesis.
+   */
+  contractPerHour(contract: number, vehicle: number): number {
+    const b = this.contractBoard;
+    if (contract < 0 || contract >= b.count) return 0;
+    if (vehicle < 0 || vehicle >= this.vehicles.count) return 0;
+    const def = this.content.vehicles[this.vehicles.type[vehicle]];
+    if (!def) return 0;
+    const from = b.from[contract];
+    const to = b.to[contract];
+    if (from < 0 || to < 0) return 0;
+
+    const there = this.roadRoute(this.siteAccessTile[from], this.siteAccessTile[to]);
+    if (there.length < 2) return 0;
+    // Tiles per tick, from the way classes actually on the route: a lane and a
+    // trunk road are not the same journey, and the whole point of the widening
+    // proposals is that this number moves when the road improves.
+    const layer = this.layers[Mode.Road];
+    let ticks = 0;
+    const own = this.vehicleSpeed[this.vehicles.type[vehicle]];
+    for (const t of there) {
+      const cls = layer.cls[t];
+      const limit = Math.min(own, cls === NO_WAY ? own : this.waySpeed[cls]);
+      // `speed` is Q16.16 tiles per tick, so a tile takes FX_ONE / speed ticks.
+      ticks += FX_ONE / Math.max(1, limit);
+    }
+    // There and back, plus a little standing at each end for loading.
+    const round = ticks * 2 + TICKS_PER_DAY * 0.06;
+    if (round <= 0) return 0;
+    const perLoad = b.pay[contract] * def.capacity;
+    // An hour is a twenty-fourth of a day, in ticks.
+    return Math.round(perLoad * ((TICKS_PER_DAY / 24) / round));
+  }
+
+  /**
+   * Take a lorry off whatever it is doing.
+   *
+   * The reason the vehicle panel can be opened at all: a lorry you cannot
+   * reassign is a lorry you have lost, and until now there was no way to get one
+   * back off a job it should not have been given.
+   *
+   * The contract goes back on the board rather than closing, because the work
+   * still exists — somebody wanted that milk moved and still does. Which also
+   * means taking the wrong lorry off and putting the right one on is one
+   * decision rather than a lost contract.
+   */
+  dropVehicle(vehicle: number): boolean {
+    if (vehicle < 0 || vehicle >= this.vehicles.count) return false;
+    if (!this.vehicles.alive[vehicle]) return false;
+    if (this.vehicles.company[vehicle] !== this.player) return false;
+    const svc = this.vehicles.service[vehicle];
+    if (svc === NONE) return false;
+
+    // Off the service, and back to idle where it stands. The mirror of
+    // `assignVehicle`, written out here rather than as a method because it is
+    // three lines and this is its only caller.
+    this.services.vehicles[svc] = Math.max(0, this.services.vehicles[svc] - 1);
+    this.vehicles.service[vehicle] = NONE;
+    this.vehicles.orderIndex[vehicle] = 0;
+    this.vehicles.state[vehicle] = VState.Idle;
+
+    // Is anything else still running it? If not, the work is on offer again.
+    let others = 0;
+    for (let v = 0; v < this.vehicles.count; v++) {
+      if (v !== vehicle && this.vehicles.alive[v] && this.vehicles.service[v] === svc) others++;
+    }
+    if (others === 0) {
+      const b = this.contractBoard;
+      for (let i = 0; i < b.count; i++) {
+        if (b.service[i] !== svc) continue;
+        b.state[i] = ContractState.Offered;
+        b.service[i] = NONE;
+        b.offeredTick[i] = this.tick;
+      }
+      this.services.active[svc] = 0;
+    }
+    this.rebuild();
+    return true;
   }
 
   /** Is this place one of yours, and a depot? For the panel's wording. */

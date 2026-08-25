@@ -106,13 +106,23 @@ for (let i = 0; i < board.count; i++) {
 console.log(`  accepted ${took}`);
 
 const van = w.content.vehicles[vi].cost;
+const started = w.companies.cash[w.player];
 let secondVan = -1;
 for (let day = 1; day <= 260; day++) {
+  if (day === 6) {
+    // Five game days is about five real minutes at 13 ticks a second, which is
+    // the window the player actually judged the game on.
+    console.log(`  first five days: earned £`
+      + `${((w.companies.cash[w.player] - started) / 100).toFixed(0)}`);
+  }
   for (let t = 0; t < TICKS_PER_DAY; t++) w.step();
   w.takeEarnings();
   if (secondVan < 0 && w.companies.cash[w.player] >= van) secondVan = day;
 }
 console.log(`  a second van affordable on day ${secondVan}`);
+if (opening.from >= 0) {
+  console.log(`  the dairy farm costs £${(w.priceOf(opening.from) / 100).toFixed(0)}`);
+}
 console.log(`  after 260 days: £${(w.companies.cash[w.player] / 100).toFixed(0)}`
   + `, approval ${w.approval.toFixed(1)}, fleet ${w.fleetSize()}`);
 

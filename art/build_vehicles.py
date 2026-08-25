@@ -38,7 +38,14 @@ CHASSIS = (0.22, 0.23, 0.25, 1)
 BOX = (0.90, 0.88, 0.83, 1)
 TIMBER = (0.52, 0.40, 0.28, 1)
 LAMP_WHITE = (1.0, 0.96, 0.86, 1.0)
-LAMP_RED = (1.0, 0.24, 0.16, 1.0)
+# Nearly pure red, and the green and blue matter more than the red does.
+#
+# The lamps are drawn with an *additive* blend, so their colour is added to
+# whatever is behind them: at (1.0, 0.24, 0.16) over a mid-grey road the result
+# came out orange-pink and read as white at three pixels. Taking green and blue
+# down to almost nothing means the sum can only move the red channel, so a tail
+# lamp is red over tarmac, over grass and over snow.
+LAMP_RED = (1.0, 0.06, 0.03, 1.0)
 
 
 def wheels(name, axles, half_width, radius, length):
@@ -78,8 +85,11 @@ def lamps(name, nose, tail, half_width, height):
                     loc=(nose, side * half_width * 0.62, height))
         f.data.materials.append(white)
         made.append(f)
+        # Bigger than the headlamp, not smaller. A tail lamp is the thing you
+        # see most of on a road full of traffic going the same way as you, and
+        # at this size it was two pixels.
         r = lib.box('%s_tail%d' % (name, side),
-                    (0.022, 0.038, 0.036),
+                    (0.026, 0.050, 0.046),
                     loc=(tail, side * half_width * 0.62, height * 0.86))
         r.data.materials.append(red)
         made.append(r)

@@ -20,10 +20,12 @@ import { loadContent } from '@interchange/data';
 import {
   Renderer, RoadClass, TILES_ACROSS_DEFAULT, RUN, loadKit, type RenderSource,
 } from '@interchange/render';
-import { Alerts, Earnings, Markers, money } from './Markers.tsx';
-import { Ambient } from './ambient.ts';
+import { Alerts, Earnings, Markers, Mine, money } from './Markers.tsx';
+import { Ambient, areaDemand } from './ambient.ts';
 import { Fleet, Yard } from './Fleet.tsx';
 import { Planning } from './Planning.tsx';
+import { Dock } from './Dock.tsx';
+import { Driver } from './Driver.tsx';
 import { Place, type PlaceActions } from './Place.tsx';
 import './style.css';
 
@@ -63,7 +65,8 @@ type Panel =
   | { k: 'place'; site: number }
   | { k: 'yard'; yard: number }
   | { k: 'vehicles' }
-  | { k: 'planning' };
+  | { k: 'planning' }
+  | { k: 'driver'; vehicle: number };
 
 /**
  * Map the content's way classes onto the three the renderer draws.
@@ -589,6 +592,9 @@ export function App(): JSX.Element {
       byId('rigid-box'),
       byId('artic-box'),
     ];
+    const townList = Array.from({ length: world.towns.count }, (_, t) => ({
+      x: world.towns.x[t], y: world.towns.y[t], population: world.towns.population[t],
+    }));
     const ambient = new Ambient({
       size: DISTRICT,
       isRoad: (t) => roadClass[t] >= 0,
@@ -820,7 +826,10 @@ export function App(): JSX.Element {
         n++;
       }
       // And the traffic, appended after the fleet. Scenery that moves, and the
-      // difference between a road and a grey stripe.
+      // difference between a road and a grey stripe. How much of it there is
+      // depends on where you are looking: a lane by a hamlet is not the road
+      // into the market town.
+      ambient.demand = areaDemand(townList, renderer.camX, renderer.camZ, 22);
       n = ambient.step(
         dt, renderer.camX, renderer.camZ, renderer.tilesAcross * 0.8, n,
         src.vx, src.vz, src.vHeading, src.vLivery, src.vModel, src.vId,
@@ -985,6 +994,24 @@ export function App(): JSX.Element {
       )}
       {live && <Alerts world={live.world} renderer={live.renderer} />}
       {live && <Earnings world={live.world} renderer={live.renderer} />}
+      {live && (
+        <Mine
+          world={live.world}
+          renderer={live.renderer}
+          onOpen={(vehicle) => setPanel({ k: 'driver', vehicle })}
+        />
+      )}
+      {live && panel.k === 'driver' && (
+        <Driver
+          world={live.world}
+          renderer={live.renderer}
+          vehicle={panel.vehicle}
+          onDrop={(v) => {
+            if (live.world.dropVehicle(v)) { bump(); setPanel({ k: 'none' }); }
+          }}
+          onClose={() => setPanel({ k: 'none' })}
+        />
+      )}
       {live && panel.k === 'place' && (
         <Place
           world={live.world}
@@ -1040,37 +1067,56 @@ export function App(): JSX.Element {
         </span>
         <span>{hud.date}</span>
         <span className="dim">{hud.vehicles} out · {hud.free} idle</span>
-        <button
-          className="hud-btn"
-          onClick={() => {
-            if (!live || live.world.yards.count === 0) return;
-            if (panel.k === 'yard') { setPanel({ k: 'none' }); return; }
-            // And *go* there. A button named after a place that does not move
-            // the camera to it is the thing that made the yard unfindable.
-            lookAt(live.world.yards.x[0] + 0.5, live.world.yards.y[0] + 0.5);
-            setPanel({ k: 'yard', yard: 0 });
-          }}
-        >Yard</button>
-        <button
-          className="hud-btn"
-          onClick={() => setPanel(panel.k === 'vehicles' ? { k: 'none' } : { k: 'vehicles' })}
-        >Vehicles</button>
-        <button
-          className={`hud-btn ${building ? 'armed' : ''}`}
-          onClick={() => { setBuilding(!building); setNote(''); setPanel({ k: 'none' }); }}
-        >{building ? 'Cancel' : 'Depot'}</button>
-        {/*
-          * The parish appears when the parish would notice you, and not before.
-          * See planning.ts: a bar filling up on day one would make the opening a
-          * game about the bar.
-          */}
-        {live?.world.planningOpen() && (
-          <button
-            className="hud-btn"
-            onClick={() => setPanel(panel.k === 'planning' ? { k: 'none' } : { k: 'planning' })}
-          >Parish</button>
-        )}
       </div>
+      {live && (
+        <Dock
+          items={[
+            {
+              key: 'yard',
+              label: 'Yard',
+              icon: 'yard',
+              on: panel.k === 'yard',
+              onClick: () => {
+                if (live.world.yards.count === 0) return;
+                if (panel.k === 'yard') { setPanel({ k: 'none' }); return; }
+                lookAt(live.world.yards.x[0] + 0.5, live.world.yards.y[0] + 0.5);
+                setPanel({ k: 'yard', yard: 0 });
+              },
+            },
+            {
+              key: 'fleet',
+              label: 'Vehicles',
+              icon: 'terminal',
+              on: panel.k === 'vehicles',
+              onClick: () => setPanel(
+                panel.k === 'vehicles' ? { k: 'none' } : { k: 'vehicles' },
+              ),
+            },
+            {
+              key: 'depot',
+              label: building ? 'Cancel' : 'Build',
+              icon: 'builders-merchant',
+              on: building,
+              onClick: () => {
+                setBuilding(!building);
+                setNote('');
+                setPanel({ k: 'none' });
+              },
+            },
+            // The parish appears when the parish would notice you, and not
+            // before. See planning.ts.
+            ...(live.world.planningOpen() ? [{
+              key: 'parish',
+              label: 'Parish',
+              icon: 'village-shop',
+              on: panel.k === 'planning',
+              onClick: (): void => setPanel(
+                panel.k === 'planning' ? { k: 'none' } : { k: 'planning' },
+              ),
+            }] : []),
+          ]}
+        />
+      )}
       {!ready && <div className="loading">Surveying the district…</div>}
     </div>
   );

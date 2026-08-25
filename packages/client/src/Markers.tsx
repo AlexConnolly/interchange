@@ -183,6 +183,89 @@ export function useAnchor(
   return anchor;
 }
 
+
+/**
+ * A small mark over each of your own vehicles.
+ *
+ * "It's not obvious to see which ones are vehicles on the map... it should have
+ * a very small indicator above them, something to just say this is yours." Once
+ * there is ambient traffic that is not a nicety: a dozen lorries on screen and
+ * two of them are yours, and nothing distinguished them.
+ *
+ * Deliberately smaller and quieter than a place marker — a chevron, not a card.
+ * A place marker is a thing you have not looked at yet and wants to be found; a
+ * vehicle marker is an annotation on something you already own, and there may be
+ * twenty of them. It changes colour when the lorry is on a job, which answers
+ * the other half of the same complaint at no extra cost.
+ *
+ * Clicking it opens the vehicle, which is the only way to reach one: a lorry is
+ * a few pixels of a moving object, so picking it off the canvas would be a
+ * frustrating game of its own.
+ */
+export function Mine({
+  world, renderer, onOpen,
+}: {
+  world: World;
+  renderer: Renderer;
+  onOpen: (vehicle: number) => void;
+}): JSX.Element {
+  const [marks, setMarks] = useState<
+    { v: number; x: number; y: number; busy: boolean }[]>([]);
+
+  useEffect(() => {
+    let raf = 0;
+    const tick = (): void => {
+      raf = requestAnimationFrame(tick);
+      const size = world.terrain.size;
+      const out: { v: number; x: number; y: number; busy: boolean }[] = [];
+      for (let v = 0; v < world.vehicles.count; v++) {
+        if (!world.vehicles.alive[v]) continue;
+        if (world.vehicles.company[v] !== world.player) continue;
+        let x = world.vehicles.x[v] / 65536;
+        let z = world.vehicles.y[v] / 65536;
+        /*
+         * A parked lorry has no position.
+         *
+         * `projectVehicles` only writes x and y for vehicles on a link, so one
+         * sitting in its yard between jobs is at the origin — and its marker
+         * went to the corner of the district, which is to say nowhere. The same
+         * fallback the stopped-vehicle badge needed, and for the same reason: a
+         * lorry that is not on the road *is* at its yard.
+         */
+        const yard = world.vehicleYard[v] ?? -1;
+        if (world.vehicles.link[v] === -1 && yard >= 0) {
+          x = world.yards.x[yard] + 0.5;
+          z = world.yards.y[yard] + 0.5;
+        }
+        const tile = Math.max(0, Math.min(size * size - 1,
+          Math.round(z) * size + Math.round(x)));
+        const at = renderer.project(x, world.terrain.height[tile], z);
+        if (!at) continue;
+        out.push({
+          v, x: at.x, y: at.y - 16, busy: world.vehicles.service[v] !== -1,
+        });
+      }
+      setMarks(out);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [world, renderer]);
+
+  return (
+    <>
+      {marks.map((m) => (
+        <button
+          key={m.v}
+          className={`mine-mark ${m.busy ? 'busy' : ''}`}
+          style={{ left: m.x, top: m.y }}
+          onClick={() => onOpen(m.v)}
+          title={m.busy ? 'On a job' : 'Idle'}
+        />
+      ))}
+    </>
+  );
+}
+
 /** Money, as a haulier would say it. */
 export function money(pence: number): string {
   const p = Math.round(pence);

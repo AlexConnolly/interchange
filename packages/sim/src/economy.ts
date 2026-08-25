@@ -540,7 +540,23 @@ export const RATE_WEIGHT_BY_TIER: Record<string, number> = { passenger: 0.11 };
  * that the purchase is a decision. At 560 a 7.5-tonne load over twenty-six tiles
  * paid a hundred and seventeen pounds, which was about half of what that needs.
  */
-export const HAUL_BASE = 4200;
+export const HAUL_BASE = 15750;
+
+/**
+ * How much dearer a business is than its build cost.
+ *
+ * Raised alongside HAUL_BASE and for the same reason: the two numbers only mean
+ * anything against each other. Measured, the first five game days of a milk run
+ * earned nine hundred pounds — "I've made one k in about five minutes of playing
+ * and there's no incentive" — so the rate went up nearly fourfold. Left alone,
+ * that would have made the pivot of the whole game, buying your first farm,
+ * affordable in two days.
+ *
+ * Eight puts a dairy farm at about fifty thousand: two months of milk runs, and
+ * a decision rather than a formality. The ladder keeps its shape because both
+ * ends of it moved.
+ */
+export const SITE_PRICE_SCALE = 8;
 
 /**
  * How much further than the direct line a haul may be paid for.

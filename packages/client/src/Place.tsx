@@ -42,6 +42,24 @@ import { BodyIcon, Icon } from './Icons.tsx';
 
 const C = content();
 
+/**
+ * What a job is worth an hour, using the best lorry you have for it.
+ *
+ * The *best* suitable one rather than an average, because that is the one you
+ * would send. Zero when you own nothing that can do it, and the row then falls
+ * back to the tonne rate — an hourly figure for a vehicle you do not have is a
+ * number about a hypothesis.
+ */
+function perHour(world: World, contract: number): number {
+  let best = 0;
+  for (const d of world.driversFor(contract)) {
+    if (!d.suitable) continue;
+    const rate = world.contractPerHour(contract, d.vehicle);
+    if (rate > best) best = rate;
+  }
+  return best;
+}
+
 export interface PlaceActions {
   buy: (site: number) => void;
   supply: (from: number, to: number, cargo: number) => void;
@@ -184,6 +202,7 @@ export function Place({
                 );
               }
               const can = world.fleetCanCarry(board.cargo[id]);
+              const hourly = perHour(world, id);
               return (
                 <button
                   key={id}
@@ -198,7 +217,19 @@ export function Place({
                   <span className="job-line">
                     <span className="swatch" style={{ background: cargo.colour }} />
                     <span className="grow">{cargo.name} → {to.name}</span>
-                    <span className="pay">{money(board.pay[id])}<i>/t</i></span>
+                    {/*
+                      * Per hour, not per tonne. A rate per tonne is not
+                      * comparable between two offers — a short run in a van and
+                      * a long run in an artic can pay the same per tonne and
+                      * differ fourfold in what they are worth — and comparing
+                      * them is the only thing a player wants to do with it.
+                      * Falls back to the tonne rate when you own nothing that
+                      * could take the job, because an hourly figure for a lorry
+                      * you do not have is a number about a hypothesis.
+                      */}
+                    {hourly > 0
+                      ? <span className="pay">{money(hourly)}<i>/hr</i></span>
+                      : <span className="pay dim">{money(board.pay[id])}<i>/t</i></span>}
                   </span>
                   <span className={`needs ${can ? '' : 'cannot'}`}>
                     <BodyIcon handling={cargo.handling} />

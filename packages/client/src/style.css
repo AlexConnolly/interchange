@@ -774,3 +774,59 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 }
 .build-hint b { color: #ffb0a0; font-weight: 700; }
 .hud-btn.armed { background: #f4c95d; color: #4a3c14; }
+
+/* The dock. Icons, at the bottom, where the hand is. */
+.dock {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 16px;
+  background: rgba(247, 243, 234, 0.94);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 24px rgba(30, 40, 30, 0.24);
+}
+.dock-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 62px;
+  padding: 7px 4px 5px;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  color: #6f685a;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+.dock-btn:hover { background: rgba(0, 0, 0, 0.05); color: #3a352c; }
+.dock-btn.on { background: #f4c95d; color: #4a3c14; }
+
+/* A mark over one of your own lorries.
+ *
+ * Much quieter than a place marker on purpose: a place marker is something you
+ * have not looked at and wants finding, this is an annotation on something you
+ * already own and there may be twenty. Gold when idle, blue when working, so the
+ * "is it on a job" question is answered from across the district. */
+.mine-mark {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50% 50% 50% 50%;
+  background: #f4c95d;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(30, 40, 30, 0.4);
+}
+.mine-mark.busy { background: #4ab0d0; }
+.mine-mark:hover { transform: translate(-50%, -100%) scale(1.35); }
+.bubble .veh-thumb { width: 34px; height: 34px; flex: 0 0 34px; }
