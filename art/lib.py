@@ -25,6 +25,18 @@ OUT = os.path.join(ROOT, 'packages', 'client', 'public', 'models')
 # to be able to find it without knowing that.
 LIVERY = 'livery'
 
+# And the slot for anything that emits.
+#
+# Headlamps, tail lights, cat's eyes, lit windows. The renderer pulls faces
+# painted with this into a *separate mesh drawn with an unlit material*, because
+# a light has to glow when everything round it is dark — and any lighting term
+# at all makes a headlamp that goes out at dusk, which is precisely backwards.
+#
+# A name rather than an index for the same reason as the livery slot: a glTF
+# material index depends on the order the exporter happened to write the slots
+# in, which is not a contract.
+LAMP = 'lamp'
+
 
 def reset():
     bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -259,6 +271,12 @@ def livery_material():
     """The reserved slot. Authored mid-grey so a model that is never tinted —
     in a review render, say — still reads as bodywork rather than as a hole."""
     return material(LIVERY, (0.55, 0.55, 0.57, 1.0), rough=0.55)
+
+
+def lamp_material(colour=(1.0, 0.95, 0.84, 1.0)):
+    """The reserved emissive slot. Authored bright so a review render shows a
+    lamp as a lamp rather than as a pale square."""
+    return material(LAMP, colour, emissive=3.0, rough=0.25)
 
 
 def export(name, roots, report):

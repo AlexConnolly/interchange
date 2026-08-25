@@ -162,7 +162,102 @@ breaks down. Which leads to —
 **Road quality.** A better road is faster and kinder to the fleet. You cannot
 build one, but the district can, and whether it does is —
 
-## 4. Influence, and how it stays out of the way
+## 4. The world is two nouns
+
+Everything the player owns is one of two things, and nothing is a third thing.
+
+**A vehicle.** The unit of measurement for the entire game.
+
+**A business.** Defined by exactly three properties: **inputs**, **outputs**,
+and **storage**. That is the whole definition, and it is enough:
+
+| | Inputs | Outputs | Storage | Bays |
+|---|---|---|---|---|
+| Dairy farm | — | milk | yes | — |
+| Creamery | milk | dairy | yes | — |
+| Village shop | dairy, meat, veg | — | yes | — |
+| **Yard** | — | — | yes | **yes** |
+| Distribution centre | anything | the same thing | a lot | yes |
+
+A yard is a business with no inputs and no outputs. That is the whole reason a
+yard is not a special case, and it is why a distribution centre needs no new
+mechanic either — it is a business whose output is its input, with a big shed
+and a lot of bays.
+
+**Vehicles belong to a yard, and can be moved between yards.** A vehicle always
+lives somewhere; being based somewhere is what makes geography matter.
+
+### Vehicles, not people
+
+The old spec counted population and measured towns in thousands of people. Wrong
+resolution. **A vehicle is the unit of measurement.** You do not have a
+workforce, a headcount or a wage bill; you have eleven vehicles, and that number
+is the answer to "how big are you". Everything scales off it:
+
+- Your size is your vehicle count.
+- A yard's capacity is bays, which is vehicles.
+- A contract's demand is loads, which is vehicle-trips.
+- Influence grows with what you run, which is vehicles.
+
+People are below the resolution of this game. A town is a place with
+requirements, not a population figure — and a requirement is measured in loads.
+
+### Why this matters more than it looks
+
+Two nouns means two screens, one table each, and no third concept to explain.
+The old build had sites, towns, industries, depots, stations, stops, services and
+vehicles — eight nouns, and the player had to learn all of them before the first
+haul. Collapsing to two is most of what "simple" means here, and it is the
+sharpest single cut in this document.
+
+## 5. Fittings, and the winter
+
+A vehicle is bought once and then **fitted**. Fittings are the only
+customisation, and there is exactly one axis at the start: **tyres.**
+
+**Winter tyres.** Come the winter the district is under snow. A vehicle without
+winter tyres **stops** — not "goes slower", stops — and says so on its own
+badge: *no winter tyres.* One purchase per vehicle, permanent, and after that it
+uses the right rubber at the right time on its own. There is no seasonal
+swapping chore.
+
+This is the best kind of rule in the game because it is the same shape as the
+yard rule that already works:
+
+- The refusal is one sentence and obviously true.
+- It is fixed by a purchase, not by research.
+- **You can see it.** The world turns white, and the lorry that stopped is
+  standing still in the snow with a badge over it. Compare a modifier on a
+  spreadsheet.
+
+And it gives the calendar a job. Without it a year is only a number going up.
+
+### The winter has to be beautiful, or the rule is a tax
+
+Snow is not a white tint. It is the whole point of having a season:
+
+- The land goes under snow — fields, verges, field boundaries, roofs.
+- **Hedges catch it on top** and stay dark underneath, which is what makes snow
+  read as depth rather than as a filter.
+- **Roads are cleared but wet**, dark against the white, and that inverts the
+  whole frame's contrast for three months of every year.
+- **Wheel tracks in the snow** on the lanes and tracks, so a road that has been
+  used looks used.
+- Long blue shadows, a low sun, and the cat's eyes reading further because
+  everything round them is bright.
+
+If the winter does not look better than the summer, the tyre rule is a tax and
+should be cut.
+
+### Range: considered, rejected
+
+A per-vehicle range, with refuelling, was on the table and is not in. Range
+turns every contract into an arithmetic check before you accept it, which is the
+spreadsheet this design exists to avoid, and it says nothing the distance
+already tells you. Fittings that change what a vehicle *can do at all* are
+interesting; fittings that change a number are not.
+
+## 6. Influence, and how it stays out of the way
 
 Late on, you want to expand — a bigger yard, a new distribution centre, a road.
 The district has to allow it, and whether it does depends on an **approval
@@ -180,7 +275,7 @@ slider.
 
 This is the "almost the mayor's job" ending, arrived at from the haulage side.
 
-## 5. What is explicitly not in it
+## 7. What is explicitly not in it
 
 **No price negotiation.** The player's own call, and right: haggling adds a
 dialogue to every transaction and buys nothing a purchase decision does not
@@ -196,7 +291,7 @@ are not yours, which is fatal to a building game.
 **No multiplayer**, and therefore no deterministic-lockstep constraint on every
 line of code.
 
-## 6. The screens, and there are five
+## 8. The screens, and there are five
 
 | Screen | What is on it |
 |---|---|
@@ -213,7 +308,7 @@ The old build had fifteen buttons in one rail and twenty overlay modes. The cap
 here is a number and a breach is a bug: **no more than eight controls visible at
 once.**
 
-## 7. Scale, derived from the camera
+## 9. Scale, derived from the camera
 
 The old spec picked a tile size and a world size and then discovered what a
 lorry looked like. Backwards. Run it the other way:
@@ -235,7 +330,7 @@ lorry looked like. Backwards. Run it the other way:
 | Farms and works | ~12 at the start |
 | A haul | 20–50 tiles, under a minute |
 
-## 8. What the world is made of
+## 10. What the world is made of
 
 Straight off the target frame, and this is the renderer's contract:
 
@@ -249,8 +344,14 @@ Straight off the target frame, and this is the renderer's contract:
 - **Real directional shadows** from a low sun.
 - **A saturated pastel palette** under a standard view transform.
 - **Trees with multi-lobe canopies.**
+- **Buildings, and every business is one.** A farm is a house and two barns
+  round a yard; a creamery is a shed, a silo and a chimney; the village is a
+  street of cottages. A business the player can buy and cannot see is not in the
+  game — which it was not, for a while, because the renderer was rebuilt from
+  the ground up and the buildings did not come with it.
+- **Snow, for three months of twelve.** See 5.
 
-## 9. Order of work
+## 11. Order of work
 
 Look first. The old roadmap put art in phase six of six and by the time it
 arrived the mistakes were geometric.
@@ -261,7 +362,10 @@ arrived the mistakes were geometric.
 2. **Contracts.** Click a farm, take the milk run, get paid.
 3. **Fleet and yards.** Buy trucks. Facilities gate them.
 4. **Buying production.** The pivot.
-5. **Distribution centres.**
-6. **Influence and the planning board.**
+5. **Buildings, and the winter.** Every business visible as a building, and the
+   snow with the tyre rule under it. This is a step of its own because it is
+   half art and the art is the point.
+6. **Distribution centres.** A business whose output is its input.
+7. **Influence and the planning board.**
 
 Each step is playable and each step gets deployed so it can be played.

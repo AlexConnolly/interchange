@@ -24,7 +24,7 @@
  */
 
 import { Mesh } from './geometry.ts';
-import { ROAD, type RGB } from './palette.ts';
+import { ROAD, GLOW, type RGB } from './palette.ts';
 import { HEIGHT_TO_WORLD } from './ground.ts';
 
 /**
@@ -37,6 +37,9 @@ export type RoadClass = (typeof RoadClass)[keyof typeof RoadClass];
 interface Style {
   /** Half-width of the running surface, in tiles. */
   half: number;
+  /** Cat's eyes down the middle. A farm track has none, which is both true and
+   *  the cheapest possible way to make the hierarchy legible after dark. */
+  studs: boolean;
   /** Half-width of the verge outside it. */
   verge: number;
   surface: RGB;
@@ -47,9 +50,9 @@ interface Style {
 }
 
 const STYLE: Style[] = [
-  { half: 0.16, verge: 0.26, surface: ROAD.track, worn: false, lined: false },
-  { half: 0.26, verge: 0.40, surface: ROAD.lane, worn: true, lined: false },
-  { half: 0.36, verge: 0.52, surface: ROAD.spine, worn: true, lined: true },
+  { half: 0.16, studs: false, verge: 0.26, surface: ROAD.track, worn: false, lined: false },
+  { half: 0.26, studs: true, verge: 0.40, surface: ROAD.lane, worn: true, lined: false },
+  { half: 0.36, studs: true, verge: 0.52, surface: ROAD.spine, worn: true, lined: true },
 ];
 
 export interface RoadSource {
@@ -211,6 +214,74 @@ export function buildRoads(
           quadAt(m, cornerY, x, z, 0.5 - d, 0.28, 0.5 + d, 0.72,
                  0.006, faded(ROAD.line, inf));
         }
+      }
+    }
+  }
+  return m;
+}
+
+/**
+ * Cat's eyes.
+ *
+ * A separate mesh from the road, because these are the one thing on the ground
+ * that must not be lit: they are drawn unlit and blended additively, so they
+ * are invisible against a bright afternoon and are the brightest things in the
+ * district after dark. A lit stud would go out at dusk, which is precisely
+ * backwards.
+ *
+ * Two studs on a straight tile and one at a junction, down whichever axis the
+ * road runs, so a lane reads as a dotted line at any zoom. Tracks get none —
+ * an unadopted farm track has no reflective studs, and the absence is worth
+ * more than the geometry: after dark the network shows you its own hierarchy.
+ *
+ * The whole thing is about three hundred triangles per chunk, which is less
+ * than one hedge.
+ */
+export function buildCatsEyes(
+  src: RoadSource, x0: number, y0: number, x1: number, y1: number,
+): Mesh {
+  const s = src.size;
+  const m = new Mesh((x1 - x0) * (y1 - y0) * 12);
+  const R = 0.028;
+
+  const studAt = (x: number, z: number, u: number, v: number, c: RGB): void => {
+    const t = z * s + x;
+    const y = surfaceY(src, t) + 0.014;
+    m.quad(
+      x + u - R, y, z + v - R, x + u + R, y, z + v - R,
+      x + u + R, y, z + v + R, x + u - R, y, z + v + R, c, 1,
+    );
+  };
+
+  for (let z = y0; z < y1; z++) {
+    for (let x = x0; x < x1; x++) {
+      const tile = z * s + x;
+      const cls = src.roadClass[tile];
+      if (cls < 0) continue;
+      const st = STYLE[cls] ?? STYLE[1];
+      if (!st.studs) continue;
+      // Beyond your influence there is nothing to see, at any hour.
+      if (src.influence(tile) < 0.18) continue;
+
+      const west = x > 0 && src.roadClass[tile - 1] >= 0;
+      const east = x + 1 < s && src.roadClass[tile + 1] >= 0;
+      const north = z > 0 && src.roadClass[tile - s] >= 0;
+      const south = z + 1 < s && src.roadClass[tile + s] >= 0;
+      const openX = west || east;
+      const openZ = north || south;
+
+      if (openX !== openZ) {
+        // A straight run: two studs, so the spacing reads as a rhythm rather
+        // than as one dot per tile.
+        if (openX) {
+          studAt(x, z, 0.25, 0.5, GLOW.catseye);
+          studAt(x, z, 0.75, 0.5, GLOW.catseye);
+        } else {
+          studAt(x, z, 0.5, 0.25, GLOW.catseye);
+          studAt(x, z, 0.5, 0.75, GLOW.catseye);
+        }
+      } else {
+        studAt(x, z, 0.5, 0.5, GLOW.catseye);
       }
     }
   }

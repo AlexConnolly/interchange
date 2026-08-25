@@ -35,12 +35,39 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 /** Where the pipeline writes, and where the client serves from. */
 export const MODEL_PATH = 'models/';
 
-/** The reserved material slot. Must match `LIVERY` in art/lib.py. */
+/** The reserved material slots. Must match `LIVERY` and `LAMP` in art/lib.py. */
 export const LIVERY_MATERIAL = 'livery';
+export const LAMP_MATERIAL = 'lamp';
+
+/** Does this material name claim a reserved slot? Prefix rather than equality
+ *  because Blender suffixes duplicates (`livery.001`) and the pipeline names
+ *  variants (`lamp_red`), and both are still the slot they say they are. */
+function isSlot(name: string, slot: string): boolean {
+  return name === slot || name.startsWith(slot + '.') || name.startsWith(slot + '_');
+}
+
+/**
+ * One model, in two halves.
+ *
+ * Everything painted with the `lamp` slot comes out as a separate geometry,
+ * because a light cannot be drawn by a lit material. Put a headlamp through
+ * `MeshLambertMaterial` and it is brightest at noon and black at midnight —
+ * exactly inverted. The lamp half is drawn unlit and blended additively, and
+ * it is the only part of a vehicle that is *brighter* after dark.
+ *
+ * Split at load rather than at authoring time because the pipeline's job is to
+ * describe the object once. It says "this face is a lamp"; what that means for
+ * a draw call is the renderer's business.
+ */
+export interface Model {
+  body: BufferGeometry;
+  /** Null when the model has no lamps — a crate has none, and that is fine. */
+  lamps: BufferGeometry | null;
+}
 
 export interface Kit {
   /** Baked geometry by model name, ready to hand to an InstancedMesh. */
-  geometry: Map<string, BufferGeometry>;
+  models: Map<string, Model>;
   /** What failed, so a missing model is a reported absence rather than a
    *  silently invisible lorry. */
   missing: string[];
@@ -54,8 +81,9 @@ export interface Kit {
  * be one. The pipeline already merges what it can with `merge_into`; this
  * finishes the job across material boundaries, which it cannot.
  */
-function bake(root: ThreeMesh | { traverse: (f: (o: unknown) => void) => void }): BufferGeometry | null {
-  const parts: { geom: BufferGeometry; colour: Color; emit: number; livery: number }[] = [];
+function bake(root: ThreeMesh | { traverse: (f: (o: unknown) => void) => void }): Model | null {
+  type Part = { geom: BufferGeometry; colour: Color; emit: number; livery: number; lamp: boolean };
+  const parts: Part[] = [];
 
   root.traverse((node: unknown) => {
     const o = node as ThreeMesh;
@@ -76,13 +104,13 @@ function bake(root: ThreeMesh | { traverse: (f: (o: unknown) => void) => void })
       geom,
       colour,
       emit: m?.emissiveIntensity ? Math.min(1, m.emissiveIntensity) : 0,
-      livery: name === LIVERY_MATERIAL || name.startsWith(LIVERY_MATERIAL + '.') ? 1 : 0,
+      livery: isSlot(name, LIVERY_MATERIAL) ? 1 : 0,
+      lamp: isSlot(name, LAMP_MATERIAL),
     });
   });
 
   if (parts.length === 0) return null;
 
-  let total = 0;
   for (const p of parts) {
     // De-index first: a shared vertex cannot have two face normals, and flat
     // shading needs one normal per face.
@@ -91,8 +119,21 @@ function bake(root: ThreeMesh | { traverse: (f: (o: unknown) => void) => void })
       p.geom.dispose();
       p.geom = flat;
     }
-    total += p.geom.getAttribute('position').count;
   }
+
+  const body = weld(parts.filter((p) => !p.lamp));
+  const lamps = weld(parts.filter((p) => p.lamp));
+  for (const p of parts) p.geom.dispose();
+  if (!body) return null;
+  return { body, lamps };
+}
+
+/** Fold a set of primitives into one flat-shaded, attributed geometry. */
+function weld(parts: { geom: BufferGeometry; colour: Color; emit: number; livery: number }[]):
+BufferGeometry | null {
+  let total = 0;
+  for (const p of parts) total += p.geom.getAttribute('position').count;
+  if (total === 0) return null;
 
   const pos = new Float32Array(total * 3);
   const col = new Float32Array(total * 3);
@@ -112,7 +153,6 @@ function bake(root: ThreeMesh | { traverse: (f: (o: unknown) => void) => void })
       livery[w + i] = p.livery;
     }
     w += src.count;
-    p.geom.dispose();
   }
 
   const g = new BufferGeometry();
@@ -136,19 +176,19 @@ function bake(root: ThreeMesh | { traverse: (f: (o: unknown) => void) => void })
  */
 export async function loadKit(names: string[], base = MODEL_PATH): Promise<Kit> {
   const loader = new GLTFLoader();
-  const geometry = new Map<string, BufferGeometry>();
+  const models = new Map<string, Model>();
   const missing: string[] = [];
 
   await Promise.all(names.map(async (name) => {
     try {
       const gltf = await loader.loadAsync(`${base}${name}.glb`);
       const baked = bake(gltf.scene);
-      if (baked) geometry.set(name, baked);
+      if (baked) models.set(name, baked);
       else missing.push(name);
     } catch {
       missing.push(name);
     }
   }));
 
-  return { geometry, missing };
+  return { models, missing };
 }

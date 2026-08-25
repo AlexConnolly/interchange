@@ -127,9 +127,58 @@ export const SKY = {
 
 /** The only colours allowed to mean something. Four, and they are checked for
  *  perceptual distance rather than chosen by eye. */
+/** The two halves of a haulage job, and they must not look alike: one earns and
+ *  one does not. */
+export const RUN = {
+  /** Out from the yard to the pickup. Empty, and it costs you. */
+  empty: hex('#c8683c'),
+  /** Pickup to drop. This is the part that pays. */
+  loaded: hex('#f0c04a'),
+};
+
 export const SEMANTIC = {
   yours: hex('#f0c04a'),
   offered: hex('#4ab0d0'),
   busy: hex('#e08040'),
   refused: hex('#d05050'),
+};
+
+// ------------------------------------------------------------------ the night
+
+/**
+ * Night, and it is a blue evening rather than a blackout.
+ *
+ * The rule is that the district stays readable: a casual game that goes dark
+ * enough to hide the road has stopped being playable for a third of every day,
+ * and the player will simply learn to look away until it is over. So the night
+ * palette is a *moonlit* one — deep blue, not black, with a fill that never
+ * reaches zero.
+ *
+ * What night is actually for is the lights. Nothing in the day frame can be
+ * brighter than the sky, so nothing in the day frame can glow. At night the
+ * cat's eyes and the headlamps are the brightest things on screen, and a chain
+ * of them along a lane tells you where your fleet is from across the district.
+ */
+export const NIGHT = {
+  zenith: hex('#3d5580'),
+  horizon: hex('#4a6491'),
+  /** The light source itself, once the sun is under the horizon. */
+  moon: hex('#b6c8e6'),
+  /** Bounce, and it must not be black — see SKY.ground. */
+  ground: hex('#39405a'),
+};
+
+/**
+ * Things that emit, drawn unlit and blended additively.
+ *
+ * These are deliberately near-white: an additive blend adds to whatever is
+ * behind it, so a saturated glow colour tints the road instead of lighting it.
+ * The warmth belongs in the lamp, not in the glow.
+ */
+export const GLOW = {
+  /** Cat's eyes. Reflective rather than emitting, which is why they are the
+   *  faintest of the three and why a farm track has none. */
+  catseye: hex('#ffeeb4'),
+  head: hex('#fff6e0'),
+  tail: hex('#ff5238'),
 };

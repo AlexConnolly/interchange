@@ -28,14 +28,15 @@
  */
 
 import {
-  BackSide, Color, DirectionalLight, DoubleSide, Group,
-  InstancedMesh, MeshLambertMaterial, Object3D, OrthographicCamera,
+  AdditiveBlending, BackSide, Color, DirectionalLight, DoubleSide, Group,
+  InstancedMesh, MeshBasicMaterial, MeshLambertMaterial, Object3D, OrthographicCamera,
   HemisphereLight, PCFSoftShadowMap, Scene as ThreeScene, Vector3, WebGLRenderer,
-  type BufferGeometry,
 } from 'three';
 import { buildGround, toMesh, HEIGHT_TO_WORLD, type GroundSource } from './ground.ts';
-import { buildRoads, type RoadSource } from './roads.ts';
-import { LIVERY, SKY } from './palette.ts';
+import { Mesh } from './geometry.ts';
+import { buildRoads, buildCatsEyes, type RoadSource } from './roads.ts';
+import type { Model } from './glb.ts';
+import { LIVERY, NIGHT, SKY, type RGB } from './palette.ts';
 
 export { HEIGHT_TO_WORLD };
 
@@ -54,12 +55,30 @@ export const CHUNK = 16;
 export const TILES_ACROSS_DEFAULT = 26;
 
 export interface RenderSource extends GroundSource, RoadSource {
-  /** Vehicles: position in tiles, heading in turns, and whose it is. */
+  /** Vehicles: position in tiles, heading in turns, whose it is, and which
+   *  model to draw — a tanker has to look like a tanker, or the yard rule that
+   *  says where it can live is invisible. */
   vehicleCount: number;
   vx: Float32Array;
   vz: Float32Array;
   vHeading: Float32Array;
   vLivery: Uint8Array;
+  vModel: Uint8Array;
+  /**
+   * Buildings. One per business, plus the village housing.
+   *
+   * Fed as a flat list rather than read off the world, because *which* of them
+   * are visible is an influence question and influence changes: a business
+   * beyond your reach is not drawn at all, and the moment your influence
+   * reaches it, its buildings appear. That fade-in is the fog of war, and it is
+   * the single most persuasive thing the influence area does.
+   */
+  placeCount: number;
+  px: Float32Array;
+  pz: Float32Array;
+  pModel: Uint8Array;
+  /** Heading in turns, so a farmyard is not axis-aligned with its neighbour. */
+  pRot: Float32Array;
   /** 0..1 through the day, for the sun. */
   dayFraction: number;
 }
@@ -67,6 +86,8 @@ export interface RenderSource extends GroundSource, RoadSource {
 interface Chunk {
   ground: ReturnType<typeof toMesh>;
   roads: ReturnType<typeof toMesh> | null;
+  /** Cat's eyes. Their own mesh because they are drawn unlit — see `glow`. */
+  studs: ReturnType<typeof toMesh> | null;
   seen: number;
 }
 
@@ -75,11 +96,21 @@ export class Renderer {
   private readonly scene = new ThreeScene();
   private readonly camera: OrthographicCamera;
   private readonly material: MeshLambertMaterial;
+  /** Everything that emits: cat's eyes and lamps. Unlit, additive, and its
+   *  opacity is how far into the night we are. */
+  private readonly glow: MeshBasicMaterial;
   private readonly sun: DirectionalLight;
   private readonly fill: HemisphereLight;
   private readonly chunks = new Map<number, Chunk>();
   private readonly fleet = new Group();
-  private batches: (InstancedMesh | null)[] = [];
+  /** Batches indexed [model][livery], for bodies and for lamps. */
+  private lamps: (InstancedMesh | null)[][] = [];
+  private readonly places = new Group();
+  private placeBatches: InstancedMesh[] = [];
+  /** A route being considered, drawn over the road. */
+  private routeMesh: ReturnType<typeof toMesh> | null = null;
+  private routeKey = '';
+  private batches: (InstancedMesh | null)[][] = [];
   private frame = 0;
   private cols = 0;
 
@@ -127,6 +158,31 @@ export class Renderer {
     this.material = new MeshLambertMaterial({ vertexColors: true, side: DoubleSide });
     this.material.shadowSide = BackSide;
 
+    /*
+     * The glow pass, and it is one material shared by every emitter in the
+     * scene — cat's eyes, headlamps, tail lamps — because they all want exactly
+     * the same thing and all want it at exactly the same time.
+     *
+     * Unlit, so a lamp is not dimmed by the light it is supposed to be making.
+     * Additive, so it *brightens* what is behind it rather than painting over
+     * it: that is the difference between a headlamp and a white sticker.
+     * `depthWrite` off, so a stud lying on a road neither z-fights with it nor
+     * hides the lorry driving over it.
+     *
+     * And one opacity, set once a frame from how far into the night it is. That
+     * single number is the entire day/night behaviour of every light in the
+     * game, which is why the emitters had to be separated from the lit
+     * geometry rather than given an emissive term inside it.
+     */
+    this.glow = new MeshBasicMaterial({
+      vertexColors: true,
+      side: DoubleSide,
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      opacity: 0,
+    });
+
     this.sun = new DirectionalLight(new Color(...SKY.sun), 2.1);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -152,6 +208,7 @@ export class Renderer {
     );
     this.scene.add(this.fill);
     this.scene.add(this.fleet);
+    this.scene.add(this.places);
   }
 
   resize(w: number, h: number): void {
@@ -212,19 +269,62 @@ export class Renderer {
   }
 
   private placeSun(dayFraction: number): void {
-    // Late afternoon at the reference, swinging through the day but never
-    // straight overhead — a high sun kills every shadow and the shadows are
-    // the point.
+    /*
+     * The sun goes all the way round, and now it sets.
+     *
+     * Two bugs are avoided here and they are opposites. The first version swept
+     * the azimuth from 0.7 to 2.3 radians and then wrapped back — a
+     * ninety-two-degree jump between one frame and the next, which is what "the
+     * shadows jump from one side to the other very quickly at the end of the
+     * day" was. The fix was to make every term a function of `t` that returns
+     * to its own start: a full-turn azimuth and a sine height. Nothing snaps,
+     * at any day length.
+     *
+     * The second was the fix going too far. Having got a continuous cycle I
+     * removed night altogether, on the reasoning that a bright casual game
+     * cannot afford a screen you cannot read. That threw away the best-looking
+     * thing the renderer can do. Cat's eyes and headlamps only exist after
+     * dark, and nothing in a daylit frame can be brighter than the sky, so
+     * nothing in a daylit frame can glow.
+     *
+     * So night is back, and the readability worry is answered by what night
+     * *is* rather than by not having one: the light never goes below the
+     * horizon, it turns cool and dim instead, and the fill never reaches zero.
+     * A moonlit blue district you can play in, with the road picked out in
+     * studs. Not a blackout.
+     */
     const t = dayFraction;
-    const angle = (t - 0.25) * Math.PI * 2;
-    const elevation = Math.max(0.28, Math.sin(angle) * 0.75 + 0.30);
-    const azimuth = 0.7 + t * 1.6;
+    const azimuth = t * Math.PI * 2;
+    /*
+     * Sun height, and it is deliberately not centred on zero.
+     *
+     * `0.24 + 0.76 sin` spends about sixty per cent of the cycle above the
+     * horizon and gives roughly a quarter of it to full night — a long golden
+     * hour at each end, a short night. Centring it would make night and day
+     * equal, and on a forty-eight-second day that is twenty-four seconds of
+     * dark, which is long enough to be an interruption rather than an evening.
+     */
+    const h = 0.24 + 0.76 * Math.sin(azimuth);
+    /*
+     * The light stays above the horizon.
+     *
+     * `max` of two continuous functions is continuous, so this cannot
+     * reintroduce the jump. What it means visually is that as the sun sets the
+     * light does not vanish — it flattens out, rakes along the ground and turns
+     * to moonlight, still casting a shadow. Killing the light at night instead
+     * would flatten every object in the district at the exact moment the
+     * shadows are longest.
+     */
+    const lit = Math.max(h, 0.11);
+    this.night = smoothstep(0.06, -0.34, h);
+    const day = 1 - this.night;
+
     const d = 70;
     this.sun.target.position.set(this.camX, this.camY, this.camZ);
     this.sun.position.set(
-      this.camX + Math.cos(azimuth) * d * (1 - elevation * 0.5),
-      this.camY + elevation * d,
-      this.camZ + Math.sin(azimuth) * d * (1 - elevation * 0.5),
+      this.camX + Math.cos(azimuth) * d * (1 - lit * 0.5),
+      this.camY + lit * d,
+      this.camZ + Math.sin(azimuth) * d * (1 - lit * 0.5),
     );
     const c = this.sun.shadow.camera;
     const reach = this.tilesAcross * 0.9;
@@ -234,17 +334,55 @@ export class Renderer {
     c.bottom = -reach;
     c.updateProjectionMatrix();
 
-    // Warm and strong when low, cooler and softer at noon.
-    const warm = 1 - elevation * 0.4;
-    this.sun.color.setRGB(
-      SKY.sun[0], SKY.sun[1] * (0.94 + warm * 0.06), SKY.sun[2] * (0.82 + warm * 0.18),
-    );
+    // Warm when low, cooler at noon, then cool and blue once it is the moon.
+    // Every term is continuous in `lit` and `night`, so none of them can
+    // introduce a jump of its own.
+    const warm = 1 - lit * 0.4;
+    for (let k = 0; k < 3; k++) {
+      const sunlit = [
+        SKY.sun[0],
+        SKY.sun[1] * (0.94 + warm * 0.06),
+        SKY.sun[2] * (0.82 + warm * 0.18),
+      ][k];
+      this.sunRGB[k] = sunlit * day + NIGHT.moon[k] * this.night;
+    }
+    this.sun.color.setRGB(this.sunRGB[0], this.sunRGB[1], this.sunRGB[2]);
+
     // The sun does the describing and the fill only stops the shadows going
     // black. Getting that ratio the wrong way round is what washed the first
-    // build out.
-    this.sun.intensity = 2.5 + elevation * 0.5;
-    this.fill.intensity = 0.62 + (1 - elevation) * 0.22;
+    // build out. At night the ratio narrows — moonlight is nearly all bounce —
+    // but it does not invert.
+    /*
+     * Night at about half the brightness of day, and half is a measured
+     * number rather than a taste.
+     *
+     * The first attempt put night at a fifth — 0.55 against a sun of 2.7 — and
+     * the district went practically black: the fields were unreadable, the
+     * hedges were silhouettes and the only thing you could see was the cat's
+     * eyes. Which sounds atmospheric and is unplayable, and breaks the rule
+     * this palette exists to serve: the game stays readable at every hour.
+     *
+     * There is no tone mapping in this renderer, on purpose, so light is
+     * linear and a fifth of the light really is a fifth as bright on screen.
+     * Half reads as a bright moonlit evening — you can see the crop in a field
+     * and tell a hedge from its own shadow, and the lamps still dominate
+     * because nothing else is near white.
+     */
+    this.sun.intensity = (2.5 + lit * 0.5) * day + 1.15 * this.night;
+    this.fill.intensity = (0.62 + (1 - lit) * 0.22) * day + 0.78 * this.night;
+    lerpColour(this.fill.color, SKY.zenith, NIGHT.zenith, this.night);
+    lerpColour(this.fill.groundColor, SKY.ground, NIGHT.ground, this.night);
+    lerpColour(this.clear, SKY.horizon, NIGHT.horizon, this.night);
+    this.renderer.setClearColor(this.clear);
+
+    // And the one number that lights every lamp and every stud in the game.
+    this.glow.opacity = this.night;
   }
+
+  /** How far into the night, 0..1. Read by the glow pass. */
+  private night = 0;
+  private readonly clear = new Color();
+  private readonly sunRGB: [number, number, number] = [0, 0, 0];
 
   /** Stream the chunks around the camera, building what has come into view. */
   private streamChunks(src: RenderSource): void {
@@ -287,7 +425,17 @@ export class Renderer {
           roads.castShadow = false;
           this.scene.add(roads);
         }
-        this.chunks.set(key, { ground, roads, seen: frame });
+        // Cat's eyes, built with the roads and thrown away with them, so they
+        // stream in and out on exactly the same schedule.
+        const studMesh = buildCatsEyes(src, x0, z0, x1, z1);
+        let studs: Chunk['studs'] = null;
+        if (!studMesh.isEmpty()) {
+          studs = toMesh(studMesh, this.glow);
+          studs.castShadow = false;
+          studs.receiveShadow = false;
+          this.scene.add(studs);
+        }
+        this.chunks.set(key, { ground, roads, studs, seen: frame });
       }
     }
 
@@ -300,44 +448,162 @@ export class Renderer {
         this.scene.remove(chunk.roads);
         chunk.roads.geometry.dispose();
       }
+      if (chunk.studs) {
+        this.scene.remove(chunk.studs);
+        chunk.studs.geometry.dispose();
+      }
       this.chunks.delete(key);
     }
   }
 
-  /** Hand the renderer the vehicle model, once it has loaded. */
-  setVehicleModel(geometry: BufferGeometry, capacity = 256): void {
-    for (const b of this.batches) {
-      if (b) {
-        this.fleet.remove(b);
-        b.dispose();
+  /**
+   * Hand the renderer the fleet, once it has loaded.
+   *
+   * A batch per model per livery, which sounds like a lot of draw calls and is
+   * nine times four — except that a batch with nothing in it is switched off,
+   * and no district has all nine body types on the road at once. In practice it
+   * settles at three or four.
+   *
+   * A model *per vehicle type* rather than one lorry recoloured, because the
+   * body type is a game rule you can see: a yard with no tank bay cannot keep
+   * the tanker, and the player has to be able to tell which of the lorries on
+   * the road is the tanker. One shared silhouette would make that rule
+   * invisible and it is the best rule in the design.
+   *
+   * Lamps are a second batch on the same matrices — see `glow`.
+   */
+  setFleet(models: Model[], capacity = 96): void {
+    for (const row of [...this.batches, ...this.lamps]) {
+      for (const b of row) {
+        if (b) {
+          this.fleet.remove(b);
+          b.dispose();
+        }
       }
     }
-    this.batches = LIVERY.map((liv) => {
-      const mat = new MeshLambertMaterial({ vertexColors: true, side: DoubleSide });
-      mat.shadowSide = BackSide;
-      const mesh = new InstancedMesh(geometry, mat, capacity);
+    this.batches = models.map((model) => LIVERY.map((liv) => {
+      const mesh = new InstancedMesh(model.body, liveryMaterial(liv.body), capacity);
       mesh.castShadow = true;
       mesh.receiveShadow = false;
       mesh.frustumCulled = false;
       mesh.count = 0;
-      // The livery tints the whole instance. The models reserve a slot for it,
-      // but a lorry that is entirely its company's colour reads better at forty
-      // pixels than one with a stripe on it.
-      void liv;
+      mesh.visible = false;
       this.fleet.add(mesh);
+      return mesh;
+    }));
+    this.lamps = models.map((model) => LIVERY.map(() => {
+      if (!model.lamps) return null;
+      const mesh = new InstancedMesh(model.lamps, this.glow, capacity);
+      // A lamp does not cast a shadow. It is the thing making them.
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.frustumCulled = false;
+      mesh.count = 0;
+      mesh.visible = false;
+      this.fleet.add(mesh);
+      return mesh;
+    }));
+  }
+
+  /** True once there is something to draw, so the caller can report a fleet
+   *  that failed to load rather than wonder where the lorries went. */
+  get hasFleet(): boolean {
+    return this.batches.length > 0;
+  }
+
+  /**
+   * Hand the renderer the buildings.
+   *
+   * Instanced like the fleet and for the same reason, even though a district
+   * has one creamery: a village has nine cottages, and three of the twenty
+   * models account for most of what is on screen. Instancing costs nothing
+   * extra for the singletons.
+   *
+   * Buildings cast shadows and receive them. That is not a detail — a shed with
+   * no shadow is a decal, and the whole reason the target frame has weight is
+   * that everything standing up in it puts something dark on the ground beside
+   * it.
+   */
+  setPlaceModels(models: Model[], capacity = 64): void {
+    for (const b of this.placeBatches) {
+      this.places.remove(b);
+      b.dispose();
+    }
+    // No livery on a building. A creamery is not a company colour, and the
+    // `livery` attribute the pipeline writes is left at whatever the model
+    // says, which for these is nothing.
+    this.placeBatches = models.map((model) => {
+      const mat = new MeshLambertMaterial({ vertexColors: true, side: DoubleSide });
+      mat.shadowSide = BackSide;
+      const mesh = new InstancedMesh(model.body, mat, capacity);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
+      mesh.count = 0;
+      mesh.visible = false;
+      this.places.add(mesh);
       return mesh;
     });
   }
+
+  private updatePlaces(src: RenderSource): void {
+    if (this.placeBatches.length === 0) return;
+    // Rebuilt only when the list changes, which it does when influence grows or
+    // a chunk streams in — not sixty times a second for a static village.
+    const key = `${src.placeCount}:${this.placeRevision}`;
+    if (key === this.placeKey) return;
+    this.placeKey = key;
+
+    const counts = new Int32Array(this.placeBatches.length);
+    for (let i = 0; i < src.placeCount; i++) {
+      const mi = src.pModel[i] % this.placeBatches.length;
+      const batch = this.placeBatches[mi];
+      if (counts[mi] >= batch.instanceMatrix.count) continue;
+      const x = src.px[i];
+      const z = src.pz[i];
+      const tile = Math.min(src.size * src.size - 1,
+        (Math.round(z) * src.size + Math.round(x)) | 0);
+      const lv = src.level[tile];
+      const y = lv !== 0 ? HEIGHT_TO_WORLD(lv) : HEIGHT_TO_WORLD(src.height[tile]);
+      this.tmp.position.set(x, y, z);
+      this.tmp.rotation.set(0, src.pRot[i] * Math.PI * 2, 0);
+      this.tmp.updateMatrix();
+      batch.setMatrixAt(counts[mi]++, this.tmp.matrix);
+    }
+    for (let mi = 0; mi < this.placeBatches.length; mi++) {
+      const batch = this.placeBatches[mi];
+      batch.count = counts[mi];
+      batch.visible = counts[mi] > 0;
+      batch.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  /** Bump to force the buildings to be laid out again — the caller does this
+   *  when influence has grown and more of the district is visible. */
+  placeRevision = 0;
+  private placeKey = '';
 
   private readonly tmp = new Object3D();
 
   private updateFleet(src: RenderSource): void {
     if (this.batches.length === 0) return;
-    const counts = new Array(this.batches.length).fill(0);
+    const models = this.batches.length;
+    const liveries = LIVERY.length;
+    // One counter per batch, flattened. Reused between frames because
+    // allocating a nine-by-four array sixty times a second is a garbage
+    // generator for nothing.
+    if (this.counts.length !== models * liveries) {
+      this.counts = new Int32Array(models * liveries);
+    }
+    this.counts.fill(0);
+
     for (let i = 0; i < src.vehicleCount; i++) {
-      const b = src.vLivery[i] % this.batches.length;
-      const batch = this.batches[b];
-      if (!batch || counts[b] >= batch.instanceMatrix.count) continue;
+      const mi = src.vModel[i] % models;
+      const li = src.vLivery[i] % liveries;
+      const batch = this.batches[mi][li];
+      if (!batch) continue;
+      const slot = mi * liveries + li;
+      if (this.counts[slot] >= batch.instanceMatrix.count) continue;
       const x = src.vx[i];
       const z = src.vz[i];
       const tile = Math.min(src.size * src.size - 1,
@@ -347,23 +613,91 @@ export class Renderer {
       this.tmp.position.set(x, y, z);
       this.tmp.rotation.set(0, -src.vHeading[i] * Math.PI * 2 + Math.PI, 0);
       this.tmp.updateMatrix();
-      batch.setMatrixAt(counts[b]++, this.tmp.matrix);
+      // The same matrix into both batches: a lamp is not a separate object, it
+      // is the same lorry drawn by a material that ignores the light.
+      const n = this.counts[slot]++;
+      batch.setMatrixAt(n, this.tmp.matrix);
+      this.lamps[mi][li]?.setMatrixAt(n, this.tmp.matrix);
     }
-    for (let b = 0; b < this.batches.length; b++) {
-      const batch = this.batches[b];
-      if (!batch) continue;
-      batch.count = counts[b];
-      batch.instanceMatrix.needsUpdate = true;
+
+    for (let mi = 0; mi < models; mi++) {
+      for (let li = 0; li < liveries; li++) {
+        const n = this.counts[mi * liveries + li];
+        const batch = this.batches[mi][li];
+        if (batch) {
+          batch.count = n;
+          batch.visible = n > 0;
+          batch.instanceMatrix.needsUpdate = true;
+        }
+        const lamp = this.lamps[mi][li];
+        if (lamp) {
+          // Nothing to draw in daylight, and switching the batch off outright
+          // is cheaper than drawing several hundred transparent quads at zero
+          // opacity.
+          lamp.count = n;
+          lamp.visible = n > 0 && this.night > 0.01;
+          lamp.instanceMatrix.needsUpdate = true;
+        }
+      }
     }
   }
+
+  private counts = new Int32Array(0);
 
   render(src: RenderSource): void {
     this.followGround(src);
     this.streamChunks(src);
+    this.updatePlaces(src);
     this.updateFleet(src);
     this.placeSun(src.dayFraction);
     this.placeCamera();
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * Draw a run over the road, so the player can see it before agreeing to it.
+   *
+   * Two segments, two colours, because a haulage job is two different journeys
+   * and the difference between them is the whole cost of using the wrong lorry:
+   * the **empty run** out from the yard to the pickup earns nothing, and the
+   * **loaded run** from pickup to drop is the part that pays. Drawn as one line
+   * they look like one journey, which hides exactly the thing the player is
+   * choosing between when two yards both have a spare tanker.
+   *
+   * "26 tiles" cannot say that. A line through the village can.
+   */
+  showRoute(segments: { tiles: number[]; colour: RGB }[], src: RenderSource): void {
+    const key = segments.map((s2) => `${s2.tiles.length}:${s2.tiles[0] ?? -1}`).join('|');
+    if (key === this.routeKey) return;
+    this.routeKey = key;
+    if (this.routeMesh) {
+      this.scene.remove(this.routeMesh);
+      this.routeMesh.geometry.dispose();
+      this.routeMesh = null;
+    }
+    let total = 0;
+    for (const seg of segments) total += seg.tiles.length;
+    if (total === 0) return;
+
+    const m = new Mesh(total * 6);
+    const s = src.size;
+    for (const seg of segments) {
+      for (const t of seg.tiles) {
+        const x = t % s;
+        const z = (t / s) | 0;
+        const lv = src.level[t];
+        const y = (lv !== 0 ? HEIGHT_TO_WORLD(lv) : HEIGHT_TO_WORLD(src.height[t])) + 0.045;
+        const h = 0.19;
+        m.quad(
+          x + 0.5 - h, y, z + 0.5 - h, x + 0.5 + h, y, z + 0.5 - h,
+          x + 0.5 + h, y, z + 0.5 + h, x + 0.5 - h, y, z + 0.5 + h, seg.colour,
+        );
+      }
+    }
+    this.routeMesh = toMesh(m, this.material);
+    this.routeMesh.castShadow = false;
+    this.routeMesh.receiveShadow = false;
+    this.scene.add(this.routeMesh);
   }
 
   /**
@@ -424,4 +758,55 @@ export class Renderer {
   dispose(): void {
     this.renderer.dispose();
   }
+}
+
+/**
+ * Smooth 0..1 between two edges, in either direction.
+ *
+ * `b` below `a` is intended and used: nightness rises as the sun's height
+ * falls. A ramp that only went upwards would need the caller to negate its
+ * input, which is the sort of small inversion that ends up applied twice.
+ */
+function smoothstep(a: number, b: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
+function lerpColour(into: Color, from: RGB, to: RGB, k: number): void {
+  into.setRGB(
+    from[0] + (to[0] - from[0]) * k,
+    from[1] + (to[1] - from[1]) * k,
+    from[2] + (to[2] - from[2]) * k,
+  );
+}
+
+/**
+ * A lit material that tints only the bodywork.
+ *
+ * The pipeline reserves a `livery` material slot and `glb.ts` turns it into a
+ * per-vertex mask, so the information is already in the geometry — but three's
+ * standard materials have nowhere to read it from. Twelve lines of injected
+ * GLSL do: multiply the vertex colour by the company colour where the mask says
+ * bodywork, and leave it alone where it says tyre, glass or chrome.
+ *
+ * The alternative was tinting the whole instance, which is what this did
+ * before, and it turns the windows and the tyres the company colour too. At
+ * forty pixels that reads as a solid lozenge — which is exactly the failure
+ * the model's stepped silhouette was shaped to avoid, undone at the last step.
+ */
+function liveryMaterial(body: RGB): MeshLambertMaterial {
+  const mat = new MeshLambertMaterial({ vertexColors: true, side: DoubleSide });
+  mat.shadowSide = BackSide;
+  const colour = new Color(...body);
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uLivery = { value: colour };
+    shader.vertexShader = `attribute float livery;
+uniform vec3 uLivery;
+${shader.vertexShader}`.replace(
+      '#include <color_vertex>',
+      `#include <color_vertex>
+	vColor *= mix( vec3( 1.0 ), uLivery, livery );`,
+    );
+  };
+  return mat;
 }

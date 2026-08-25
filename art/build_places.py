@@ -1,0 +1,466 @@
+# -*- coding: utf-8 -*-
+# Every business is a building. design.md 4 and 10.
+#
+#   blender --background --python art/build_places.py
+#
+# There was a stretch where the game had fourteen industries the player could
+# click, buy and supply, and *nothing on screen for any of them*. The renderer
+# had been rebuilt from the ground up against the target frame - terrain,
+# fields, hedges, roads, shadows, fleet - and the buildings did not come with
+# it. A business you can own and cannot see is not in the game.
+#
+# Fourteen industries is not fourteen models, in the same way nine vehicles was
+# not nine models. It is a vocabulary of ten farm and industrial parts and
+# fourteen compositions of them. That is the whole argument for authoring shape
+# as a function: a silo is written once, and the creamery, the mill, the feed
+# mill and the concrete plant cannot disagree about what a silo looks like.
+#
+# Footprint: a business sits on about two tiles square, which is two world
+# units - twice a lorry's length, so a farm reads as a place a lorry drives
+# into rather than as scenery beside it. Nothing here exceeds 1.4 across.
+import os
+import sys
+import math
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import bpy  # noqa: E402
+import lib  # noqa: E402
+from boxmodel import Form  # noqa: E402
+
+# Straight off palette.ts BUILT, which is straight off the target frame.
+BRICK = (0.639, 0.384, 0.290, 1)
+RENDER = (0.812, 0.769, 0.682, 1)
+SLATE = (0.290, 0.302, 0.333, 1)
+# Terracotta pantile, and adding it was not decoration.
+#
+# The first village went in with slate on everything and read as a cluster of
+# grey lumps. From the game's camera - 38 degrees of elevation - a pitched roof
+# is most of the pixels of a house, so roof colour is very nearly the only
+# colour a building has. A street of slate is a street of nothing.
+PANTILE = (0.710, 0.416, 0.290, 1)
+PANTILE_PALE = (0.769, 0.541, 0.400, 1)
+THATCH = (0.706, 0.596, 0.373, 1)
+STEEL = (0.553, 0.573, 0.596, 1)
+CONCRETE = (0.702, 0.675, 0.635, 1)
+GLASS = (0.373, 0.478, 0.525, 1)
+SILO = (0.847, 0.855, 0.871, 1)
+TIMBER = (0.478, 0.360, 0.243, 1)
+SAWN = (0.741, 0.612, 0.435, 1)
+STONE = (0.667, 0.643, 0.596, 1)
+GRAVEL = (0.596, 0.573, 0.529, 1)
+DARK = (0.180, 0.180, 0.196, 1)
+LEAD = (0.400, 0.412, 0.435, 1)
+
+
+def _paint(obj, rgba, name, rough=0.75, metal=0.0):
+    obj.data.materials.append(lib.material(name, rgba, rough=rough, metal=metal))
+    return obj
+
+
+# ------------------------------------------------------------- the vocabulary
+
+def pitched(name, w, d, wall, rise, body, roof, ridge='x', eaves=0.07):
+    """Walls with a pitched roof on top. The commonest thing in the district.
+
+    The roof is a second object rather than a taper on the walls, because the
+    two want different colours and a glTF material boundary has to be a mesh
+    boundary somewhere. It also means the roof can overhang, and the shadow the
+    eaves cast on the wall below is most of what stops a cottage reading as a
+    painted box.
+    """
+    made = [_paint(lib.box(name + '_wall', (w, d, wall), loc=(0, 0, wall / 2)),
+                   body, name + '_body')]
+    rw = w + eaves * 2
+    rd = d + eaves * 2
+    f = Form(size=(rw, rd, rise), at=(0, 0, wall + rise / 2))
+    top = f.faces(normal='up')
+    # Collapse the top face along one axis and it is a ridge. Which axis is
+    # which way the building faces, and a farmyard wants them not all the same.
+    f.scale_faces(top, (0.04, 1.0, 1.0) if ridge == 'y' else (1.0, 0.04, 1.0))
+    made.append(_paint(f.build(name + '_roof'), roof, name + '_roofmat'))
+    return made
+
+
+def house(name, w=0.46, d=0.38, wall=0.26, body=BRICK, roof=SLATE, ridge='x'):
+    """A dwelling: pitched, with a chimney.
+
+    The chimney is doing a lot of work for four triangles - it is the one part
+    of the silhouette that says lived in rather than stored in.
+    """
+    made = pitched(name, w, d, wall, wall * 0.80, body, roof, ridge)
+    made.append(_paint(
+        lib.box(name + '_stack', (0.055, 0.055, 0.18),
+                loc=(w * 0.3, 0, wall + wall * 0.80)),
+        BRICK, name + '_stackmat'))
+    return made
+
+
+def barn(name, w=0.80, d=0.42, wall=0.24, body=TIMBER, roof=STEEL, ridge='x',
+         open_end=True):
+    """A long shed. Open-ended ones get a dark recess, which reads as a doorway
+    a lorry could back into and costs two triangles."""
+    made = pitched(name, w, d, wall, wall * 0.55, body, roof, ridge)
+    if open_end:
+        made.append(_paint(
+            lib.box(name + '_mouth', (0.02, d * 0.62, wall * 0.78),
+                    loc=(-w / 2 + 0.008, 0, wall * 0.40)),
+            DARK, name + '_mouthmat'))
+    return made
+
+
+def silo(name, r=0.10, h=0.52, at=(0, 0), body=SILO):
+    """A cylinder with a cone on it.
+
+    The tallest thing on a farm and the only part visible over a hedge, which is
+    why the mill and the creamery both get one: at forty pixels a silo is how
+    you tell an industry from a house.
+    """
+    made = [_paint(lib.cyl(name + '_body', r, r, h, loc=(at[0], at[1], h / 2),
+                           segments=9), body, name + '_bodymat', rough=0.55)]
+    made.append(_paint(
+        lib.cyl(name + '_cap', r * 1.04, r * 0.18, r * 0.9,
+                loc=(at[0], at[1], h + r * 0.45), segments=9),
+        LEAD, name + '_capmat', rough=0.5, metal=0.3))
+    return made
+
+
+def tank(name, r=0.13, h=0.20, at=(0, 0), body=SILO):
+    """A squat cylinder on short legs. Milk, water, fuel."""
+    made = [_paint(lib.cyl(name + '_body', r, r, h, loc=(at[0], at[1], h / 2 + 0.05),
+                           segments=10), body, name + '_bodymat', rough=0.4, metal=0.3)]
+    for i, sx in enumerate((-1, 1)):
+        made.append(_paint(
+            lib.box('%s_leg%d' % (name, i), (0.02, 0.02, 0.06),
+                    loc=(at[0] + sx * r * 0.6, at[1], 0.03)),
+            LEAD, name + '_legmat'))
+    return made
+
+
+def chimney(name, r=0.035, h=0.60, at=(0, 0)):
+    """Tapered, because a straight tube is a pipe and a taper is a chimney."""
+    return [_paint(lib.cyl(name, r * 1.5, r, h, loc=(at[0], at[1], h / 2), segments=7),
+                   BRICK, name + '_mat')]
+
+
+def pad(name, w, d, at=(0, 0), body=CONCRETE):
+    """Hardstanding.
+
+    Sits a hair above the field so it z-fights with nothing, and it is what
+    makes a cluster of separate sheds read as one premises rather than as three
+    objects that happen to be near each other.
+    """
+    return [_paint(lib.box(name, (w, d, 0.012), loc=(at[0], at[1], 0.006)),
+                   body, name + '_mat', rough=0.85)]
+
+
+def heap(name, r=0.16, h=0.14, at=(0, 0), body=GRAVEL):
+    """A cone. Aggregate, grain, sand - a stockpile, and the only part of a
+    quarry that says what comes out of it."""
+    return [_paint(lib.cyl(name, r, r * 0.06, h, loc=(at[0], at[1], h / 2), segments=8),
+                   body, name + '_mat', rough=0.95)]
+
+
+def stack(name, at=(0, 0), rot=0.0, body=SAWN, n=3):
+    """Timber, stacked. Three diminishing boxes, which at this size is more
+    convincing than any number of individual planks."""
+    made = []
+    for i in range(n):
+        made.append(_paint(
+            lib.box('%s_%d' % (name, i),
+                    (0.30 - i * 0.03, 0.13 - i * 0.012, 0.05),
+                    loc=(at[0], at[1], 0.025 + i * 0.05), rot=(0, 0, rot)),
+            body, name + '_mat'))
+    return made
+
+
+def canopy(name, w=0.52, d=0.34, h=0.26):
+    """A flat roof on four posts. A filling station, and nothing else looks like
+    one."""
+    made = [_paint(lib.box(name + '_deck', (w, d, 0.035), loc=(0, 0, h)),
+                   RENDER, name + '_deckmat')]
+    for i, sx in enumerate((-1, 1)):
+        for j, sy in enumerate((-1, 1)):
+            made.append(_paint(
+                lib.box('%s_post%d%d' % (name, i, j), (0.03, 0.03, h),
+                        loc=(sx * w * 0.42, sy * d * 0.36, h / 2)),
+                STEEL, name + '_postmat', rough=0.5, metal=0.3))
+    return made
+
+
+def tower(name, w=0.20, h=0.62, at=(0, 0)):
+    """A church tower.
+
+    The village needs one landmark or it is a row of houses, and this is the
+    cheapest recognisable thing in the whole vocabulary.
+    """
+    made = [_paint(lib.box(name + '_shaft', (w, w, h), loc=(at[0], at[1], h / 2)),
+                   STONE, name + '_mat')]
+    made.append(_paint(
+        lib.box(name + '_parapet', (w * 1.16, w * 1.16, 0.05),
+                loc=(at[0], at[1], h + 0.02)),
+        STONE, name + '_parapetmat'))
+    return made
+
+
+def moved(parts, dx, dy, rot=0.0):
+    """Place a sub-assembly.
+
+    Authoring each part at the origin and moving the group is what keeps a
+    farmyard readable as code: `house` then `barn` then `moved(barn(...), 0.5,
+    -0.3)` is a plan of the yard.
+    """
+    for o in parts:
+        if rot:
+            x, y = o.location.x, o.location.y
+            c, s = math.cos(rot), math.sin(rot)
+            o.location.x = x * c - y * s
+            o.location.y = x * s + y * c
+            o.rotation_euler.z += rot
+        o.location.x += dx
+        o.location.y += dy
+    return parts
+
+
+# ------------------------------------------------------------ the fourteen
+#
+# Each of these is a *farmyard plan*, not a model. Read them as "a house here,
+# two barns at right angles there, hardstanding between them" - which is what a
+# real one is, and why they come out looking like places rather than assets.
+
+def dairy_farm():
+    p = pad('dfp', 1.05, 0.90)
+    p += moved(house('dfh', body=RENDER, roof=PANTILE), -0.34, 0.22)
+    p += moved(barn('dfb1', w=0.62, d=0.34), 0.22, 0.24)
+    p += moved(barn('dfb2', w=0.56, d=0.30, ridge='y'), 0.26, -0.22, math.pi / 2)
+    p += moved(tank('dft', r=0.10, h=0.17), -0.30, -0.24)
+    return p
+
+
+def arable_farm():
+    p = pad('afp', 1.05, 0.90)
+    p += moved(house('afh', body=BRICK, roof=PANTILE), -0.34, -0.20)
+    p += moved(barn('afb', w=0.74, d=0.40, body=STEEL, roof=STEEL), 0.10, 0.22)
+    p += silo('afs', r=0.09, h=0.44, at=(0.40, -0.22))
+    return p
+
+
+def creamery():
+    p = pad('crp', 1.20, 1.00)
+    p += moved(barn('crs', w=0.86, d=0.50, wall=0.30, body=RENDER, roof=STEEL),
+               -0.05, 0.18)
+    p += moved(tank('crt1', r=0.11, h=0.22), 0.34, -0.26)
+    p += moved(tank('crt2', r=0.11, h=0.22), 0.08, -0.28)
+    p += chimney('crc', h=0.50, at=(-0.42, -0.26))
+    return p
+
+
+def mill():
+    p = pad('mlp', 1.00, 0.86)
+    p += moved(pitched('mlb', 0.44, 0.40, 0.52, 0.15, RENDER, SLATE), -0.20, 0.10)
+    p += silo('mls1', r=0.095, h=0.48, at=(0.24, 0.20))
+    p += silo('mls2', r=0.095, h=0.42, at=(0.24, -0.06))
+    p += moved(barn('mlsh', w=0.48, d=0.28, body=STEEL, roof=STEEL), -0.12, -0.28)
+    return p
+
+
+def quarry():
+    p = pad('qup', 1.20, 1.05, body=GRAVEL)
+    p += heap('quh1', r=0.19, h=0.17, at=(0.28, 0.24))
+    p += heap('quh2', r=0.14, h=0.12, at=(-0.02, -0.28), body=(0.62, 0.58, 0.53, 1))
+    p += heap('quh3', r=0.11, h=0.09, at=(0.38, -0.16))
+    p += moved(barn('qus', w=0.40, d=0.26, body=STEEL, roof=STEEL), -0.38, 0.18)
+    # The conveyor, and it is the one part that says this is a working quarry.
+    p += [_paint(lib.box('qucv', (0.42, 0.07, 0.03), loc=(0.02, 0.24, 0.20),
+                         rot=(0, -0.42, 0)), LEAD, 'qucv_mat', rough=0.6, metal=0.3)]
+    return p
+
+
+def forestry():
+    p = pad('fop', 0.95, 0.80, body=(0.42, 0.38, 0.30, 1))
+    p += moved(barn('foh', w=0.34, d=0.26, wall=0.20, body=TIMBER, roof=TIMBER,
+                    open_end=False), -0.28, 0.18)
+    p += stack('fos1', at=(0.16, 0.18), body=TIMBER)
+    p += stack('fos2', at=(0.06, -0.20), rot=0.25, body=TIMBER)
+    return p
+
+
+def sawmill():
+    p = pad('swp', 1.15, 0.95)
+    p += moved(barn('sws', w=0.78, d=0.44, wall=0.28, body=STEEL, roof=STEEL),
+               -0.06, 0.22)
+    p += stack('swt1', at=(0.30, -0.24))
+    p += stack('swt2', at=(-0.06, -0.26), rot=0.12)
+    p += chimney('swc', r=0.028, h=0.40, at=(-0.44, -0.20))
+    return p
+
+
+def concrete_plant():
+    p = pad('cpp', 1.05, 0.90)
+    p += silo('cps1', r=0.085, h=0.56, at=(-0.12, 0.20))
+    p += silo('cps2', r=0.085, h=0.50, at=(0.10, 0.20))
+    # The hopper: a tapered box, which is what a batching plant actually is.
+    p += [_paint(lib.box('cph', (0.26, 0.24, 0.24), loc=(0.30, -0.10, 0.24),
+                         taper=2.6), LEAD, 'cph_mat', rough=0.6, metal=0.25)]
+    p += heap('cpa', r=0.15, h=0.12, at=(-0.32, -0.24))
+    return p
+
+
+def terminal():
+    p = pad('tep', 1.35, 1.10)
+    p += moved(barn('tes1', w=0.92, d=0.42, wall=0.30, body=STEEL, roof=STEEL),
+               -0.10, 0.28)
+    p += moved(barn('tes2', w=0.72, d=0.34, wall=0.26, body=RENDER, roof=STEEL),
+               0.06, -0.14)
+    # Containers, stacked. A freight terminal with nothing waiting on it looks
+    # closed.
+    boxes = [(-0.46, -0.30, 0, (0.58, 0.30, 0.24, 1)),
+             (-0.46, -0.30, 1, (0.24, 0.36, 0.48, 1)),
+             (-0.16, -0.34, 0, (0.36, 0.44, 0.32, 1))]
+    for i, (x, y, lvl, c) in enumerate(boxes):
+        p += [_paint(lib.box('tec%d' % i, (0.24, 0.11, 0.10),
+                             loc=(x, y, 0.05 + lvl * 0.10)),
+                     c, 'tec%d_mat' % i)]
+    return p
+
+
+def builders_merchant():
+    p = pad('bmp', 1.10, 0.92)
+    p += moved(barn('bms', w=0.58, d=0.36, body=STEEL, roof=STEEL), -0.20, 0.22)
+    p += stack('bmt1', at=(0.28, 0.18))
+    p += stack('bmt2', at=(0.18, -0.22), rot=math.pi / 2)
+    p += [_paint(lib.box('bmb', (0.20, 0.16, 0.09), loc=(-0.28, -0.24, 0.045)),
+                 BRICK, 'bmb_mat')]
+    return p
+
+
+def filling_station():
+    p = pad('fsp', 1.00, 0.80)
+    p += moved(canopy('fsc'), 0.06, 0.10)
+    p += moved(house('fss', w=0.32, d=0.26, wall=0.20, body=RENDER, roof=PANTILE), -0.36, -0.20)
+    for i, x in enumerate((-0.08, 0.16)):
+        p += [_paint(lib.box('fspu%d' % i, (0.07, 0.10, 0.13), loc=(x, 0.10, 0.065)),
+                     (0.72, 0.30, 0.26, 1), 'fspump_mat')]
+    return p
+
+
+def livestock_farm():
+    p = pad('lfp', 1.10, 0.95)
+    p += moved(house('lfh', body=STONE, roof=PANTILE_PALE), -0.34, 0.20)
+    p += moved(barn('lfb1', w=0.58, d=0.32, body=TIMBER), 0.22, 0.22)
+    p += moved(barn('lfb2', w=0.50, d=0.28, body=TIMBER, ridge='y'), 0.30, -0.20,
+               math.pi / 2)
+    # Pens. Low rails, and the reason a livestock farm does not read as a dairy.
+    for i, y in enumerate((-0.16, -0.30)):
+        p += [_paint(lib.box('lfr%d' % i, (0.44, 0.012, 0.055),
+                             loc=(-0.20, y, 0.055)), TIMBER, 'lfr_mat')]
+    return p
+
+
+def abattoir():
+    p = pad('abp', 1.10, 0.92)
+    p += moved(barn('abs', w=0.70, d=0.44, wall=0.32, body=RENDER, roof=STEEL),
+               -0.04, 0.20)
+    p += chimney('abc', r=0.030, h=0.46, at=(0.40, -0.14))
+    p += moved(barn('abd', w=0.40, d=0.26, body=CONCRETE, roof=STEEL), -0.24, -0.26)
+    return p
+
+
+def village_shop():
+    p = pad('vsp', 0.80, 0.66)
+    p += moved(house('vsh', w=0.42, d=0.34, wall=0.34, body=RENDER, roof=PANTILE),
+               -0.06, 0.06)
+    # The awning is the shopfront, and at this size it is the whole difference
+    # between a shop and a cottage.
+    p += [_paint(lib.box('vsa', (0.40, 0.10, 0.02), loc=(-0.06, -0.16, 0.24)),
+                 (0.42, 0.30, 0.26, 1), 'vsa_mat')]
+    p += [_paint(lib.box('vsw', (0.28, 0.02, 0.12), loc=(-0.06, -0.115, 0.15)),
+                 GLASS, 'vsw_mat', rough=0.2)]
+    return p
+
+
+def yard():
+    """A yard is a business with no inputs and no outputs - design.md 4 - so it
+    gets a building like any other: hardstanding, an office and a workshop."""
+    p = pad('ydp', 1.15, 1.00)
+    p += moved(house('ydo', w=0.30, d=0.26, wall=0.22, body=BRICK, roof=PANTILE), -0.38, 0.24)
+    p += moved(barn('ydw', w=0.62, d=0.38, body=STEEL, roof=STEEL), 0.12, 0.24)
+    return p
+
+
+# --------------------------------------------------------------- the village
+#
+# Housing, which is not a business and is drawn anyway: a village of nothing but
+# the one shop you can buy is not a village, and the target frame has a street
+# of cottages in it.
+
+def cottage(body, roof, ridge='x', w=0.40, d=0.32):
+    return house('cot', w=w, d=d, wall=0.26, body=body, roof=roof, ridge=ridge)
+
+
+def church():
+    return tower('vch') + moved(
+        pitched('vcn', 0.46, 0.26, 0.24, 0.14, STONE, SLATE), 0.34, 0.0)
+
+
+BUILDS = [
+    ('plc_dairy_farm', dairy_farm),
+    ('plc_arable_farm', arable_farm),
+    ('plc_creamery', creamery),
+    ('plc_mill', mill),
+    ('plc_quarry', quarry),
+    ('plc_forestry', forestry),
+    ('plc_sawmill', sawmill),
+    ('plc_concrete_plant', concrete_plant),
+    ('plc_terminal', terminal),
+    ('plc_builders_merchant', builders_merchant),
+    ('plc_filling_station', filling_station),
+    ('plc_livestock_farm', livestock_farm),
+    ('plc_abattoir', abattoir),
+    ('plc_village_shop', village_shop),
+    ('plc_yard', yard),
+    # Three cottages, and the point of three is that no two next to each other
+    # match. Roof first, because roof is what you see.
+    ('vil_cottage_a', lambda: cottage(RENDER, PANTILE)),
+    ('vil_cottage_b', lambda: cottage(BRICK, SLATE, ridge='y')),
+    ('vil_cottage_stone', lambda: cottage(STONE, THATCH, w=0.36, d=0.30)),
+    ('vil_church', church),
+    ('vil_barn', lambda: barn('vbn', w=0.52, d=0.30, body=TIMBER)),
+]
+
+
+# How big a premises is, in tiles.
+#
+# The plans above are authored in units of "about one tile", because that is the
+# scale it is possible to hold in your head while writing a farmyard: a barn is
+# 0.6 long, a house is 0.45. Then the whole thing is scaled once, here, to the
+# size the game wants.
+#
+# 1.7 comes from the first render, which had a whole dairy farm the same
+# footprint as a single lorry. A business has to read as a place a lorry drives
+# *into*, and that means it has to be several lorries across. Everything else in
+# the file stays readable as a plan.
+PREMISES = 1.7
+
+
+def main():
+    report = []
+    for name, build in BUILDS:
+        lib.reset()
+        parts = build()
+        scale = PREMISES if name.startswith('plc_') else PREMISES * 0.80
+        for o in parts:
+            o.scale = (scale, scale, scale)
+            o.location = (o.location.x * scale, o.location.y * scale,
+                          o.location.z * scale)
+        lib.merge_into(name, parts, None)
+        lib.export(name, [], report)
+    # Nine hundred, against the fleet's four-eighty. A building does not move,
+    # there are a dozen or two in a district, and each is drawn once - where a
+    # vehicle is drawn per instance. The budget follows the draw cost, not the
+    # object's importance.
+    lib.summarise(report, budget=900)
+
+
+if __name__ == '__main__':
+    main()

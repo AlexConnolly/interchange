@@ -2315,6 +2315,132 @@ export class World {
     return id;
   }
 
+  // ------------------------------------------------------- buying a place
+
+  /**
+   * What a place costs.
+   *
+   * Its build cost, plus a premium for being near a town — which is the
+   * land-value gradient from design.md as one line rather than as a system. A
+   * farm out in the hills is cheap; the same farm on the edge of the market
+   * town is not, and that is what stops the player buying their way into the
+   * middle of the district on the first afternoon.
+   */
+  priceOf(site: number): number {
+    const def = this.content.industries[this.sites.def[site]];
+    let nearest = 1e9;
+    for (let t = 0; t < this.towns.count; t++) {
+      const dx = this.towns.x[t] - this.sites.x[site];
+      const dy = this.towns.y[t] - this.sites.y[site];
+      const d = Math.sqrt(dx * dx + dy * dy);
+      const weighted = d / Math.max(1, Math.sqrt(this.towns.population[t] / 400));
+      if (weighted < nearest) nearest = weighted;
+    }
+    // Doubles at the town gate, falls away to nothing by about thirty tiles.
+    const premium = 1 + Math.max(0, 1 - nearest / 30);
+    return Math.round(def.foundCost * premium);
+  }
+
+  /**
+   * Buy a place.
+   *
+   * This is the pivot of the whole game (design.md §3, rung 2). Taking a
+   * contract is somebody telling you A to B. Owning a farm inverts it: you have
+   * output and nobody has asked for it, so you have to go and find buyers.
+   *
+   * It is also a beachhead — `refreshInfluence` reads site ownership, so buying
+   * a place opens the map around it. That is what makes "buy the far shop" and
+   * "buy the near farm" genuinely different decisions rather than two sizes of
+   * the same one.
+   */
+  buySite(site: number): { ok: boolean; reason: string } {
+    if (site < 0 || site >= this.sites.count) return { ok: false, reason: 'No such place.' };
+    if (this.sites.owner[site] === this.player) return { ok: false, reason: 'Already yours.' };
+    const tile = this.siteAccessTile[site];
+    if (tile === NONE || !this.influence.usable(tile)) {
+      return { ok: false, reason: 'Too far out. You have no standing there yet.' };
+    }
+    const price = this.priceOf(site);
+    if (this.companies.cash[this.player] < price) {
+      return { ok: false, reason: 'Not enough in the bank.' };
+    }
+    this.companies.post(this.player, Line.AssetTrade, price);
+    this.sites.owner[site] = this.player;
+    this.refreshInfluence();
+    // New standing means new work in view.
+    this.offerWorkNow();
+    return { ok: true, reason: '' };
+  }
+
+  /**
+   * Who would take what this place of yours makes.
+   *
+   * The other half of the inversion: a buyer is a place with a requirement,
+   * which is a contract seen from the far end. So this needs no new system —
+   * only a different way of asking the same tables.
+   *
+   * Pays better than hauling for somebody else, because you are selling the
+   * goods as well as moving them. That difference is the reward for the rung.
+   */
+  buyersFor(site: number): {
+    site: number; cargo: number; distance: number; pay: number;
+  }[] {
+    const out: { site: number; cargo: number; distance: number; pay: number }[] = [];
+    if (this.sites.owner[site] !== this.player) return out;
+    const outs = this.recipes.outputs[this.sites.def[site]];
+    const cargoCount = this.content.cargo.length;
+    for (let i = 0; i < outs.length; i += 2) {
+      const cargo = outs[i];
+      for (let b = 0; b < this.sites.count; b++) {
+        if (b === site) continue;
+        const tile = this.siteAccessTile[b];
+        if (tile === NONE || !this.influence.usable(tile)) continue;
+        const ins = this.recipes.inputs[this.sites.def[b]];
+        let takes = false;
+        for (let k = 0; k < ins.length; k += 2) if (ins[k] === cargo) { takes = true; break; }
+        if (!takes) continue;
+        const dx = this.sites.x[b] - this.sites.x[site];
+        const dy = this.sites.y[b] - this.sites.y[site];
+        const distance = Math.round(Math.sqrt(dx * dx + dy * dy));
+        if (distance < 2) continue;
+        void cargoCount;
+        // The haulage rate plus the value of the goods, because they are yours.
+        const haul = haulageRate(this.cargoPrice[cargo], distance, this.cargoRateWeight[cargo]);
+        const goods = Math.round(this.cargoPrice[cargo] * 0.55);
+        out.push({ site: b, cargo, distance, pay: haul + goods });
+      }
+    }
+    out.sort((a, b) => b.pay - a.pay);
+    return out;
+  }
+
+  /**
+   * Set up a run from a place you own to a buyer.
+   *
+   * Deliberately the same two-stop service a contract makes, so owning
+   * production adds a *reason* rather than a mechanism. The player has learned
+   * one interaction by now and this is it again, pointing the other way.
+   */
+  supply(from: number, to: number, cargo: number): boolean {
+    if (this.sites.owner[from] !== this.player) return false;
+    const svc = this.services.alloc(
+      this.player, this.content.industries[this.sites.def[from]].name,
+    );
+    if (svc === NONE) return false;
+    this.services.addStop(svc, from, 0, StopAction.LoadFull, cargo);
+    this.services.addStop(svc, to, 0, StopAction.Unload, cargo);
+    this.services.active[svc] = 1;
+    for (let v = 0; v < this.vehicles.count; v++) {
+      if (!this.vehicles.alive[v]) continue;
+      if (this.vehicles.company[v] !== this.player) continue;
+      if (this.vehicles.service[v] !== NONE) continue;
+      this.assignVehicle(v, svc, this.player);
+      break;
+    }
+    this.rebuild();
+    return true;
+  }
+
   // ----------------------------------------------------------- contracts
 
   /**
@@ -2395,7 +2521,92 @@ export class World {
    * contract is, and assigns a vehicle if one is free. The player never sees the
    * word service: they see a truck put on a job.
    */
-  acceptContract(id: number, company: number): boolean {
+  /**
+   * Which of your vehicles could take a job, and from where.
+   *
+   * Answered per vehicle rather than as a yes/no, because with more than one
+   * yard *which* lorry goes is the decision — a tanker at the far yard and a
+   * tanker at the near one are not the same offer. So the chooser shows the
+   * yard each one lives at and how far it is from the pickup, and the player
+   * picks.
+   */
+  driversFor(contract: number): {
+    vehicle: number; yard: number; deadTiles: number; suitable: boolean;
+  }[] {
+    const b = this.contractBoard;
+    const out: { vehicle: number; yard: number; deadTiles: number; suitable: boolean }[] = [];
+    if (contract < 0 || contract >= b.count) return out;
+    const from = b.from[contract];
+    if (from === NONE) return out;
+    const cargo = b.cargo[contract];
+    const handling = this.content.cargo[cargo]?.handling;
+
+    for (let v = 0; v < this.vehicles.count; v++) {
+      if (!this.vehicles.alive[v]) continue;
+      if (this.vehicles.company[v] !== this.player) continue;
+      if (this.vehicles.service[v] !== NONE) continue;
+      const def = this.content.vehicles[this.vehicles.type[v]];
+      const yard = this.vehicleYard[v];
+      // Empty running from the yard to the pickup, which is the cost of using a
+      // lorry that lives in the wrong place.
+      let dead = 0;
+      if (yard >= 0) {
+        const dx = this.yards.x[yard] - this.sites.x[from];
+        const dy = this.yards.y[yard] - this.sites.y[from];
+        dead = Math.round(Math.sqrt(dx * dx + dy * dy));
+      }
+      out.push({
+        vehicle: v,
+        yard,
+        deadTiles: dead,
+        suitable: handling !== undefined
+          && (def.handling as readonly string[]).includes(handling),
+      });
+    }
+    // Suitable first, then nearest, because that is the order a player wants to
+    // read them in.
+    out.sort((a, c) => (Number(c.suitable) - Number(a.suitable)) || (a.deadTiles - c.deadTiles));
+    return out;
+  }
+
+  /** The tiles a run would cover, for drawing it before it is agreed. */
+  previewRoute(fromSite: number, toSite: number): number[] {
+    if (fromSite < 0 || toSite < 0) return [];
+    const a = this.siteAccessTile[fromSite];
+    const b = this.siteAccessTile[toSite];
+    if (a === NONE || b === NONE) return [];
+    const path = this.tileRouter.route(a, b);
+    return path ? Array.from(path) : [];
+  }
+
+  /**
+   * The empty run: from a yard out to the pickup.
+   *
+   * A separate call from the loaded run because they are separate journeys and
+   * the player is choosing between them — a lorry at the far yard does the same
+   * paid work as one at the near yard and a great deal more unpaid driving to
+   * get to it.
+   *
+   * The yard is not itself on the graph, so this routes from the nearest place
+   * that is. Close enough to draw, and the alternative is putting a node under
+   * every yard for the sake of a preview line.
+   */
+  routeFromYard(yard: number, toSite: number): number[] {
+    if (yard < 0 || yard >= this.yards.count || toSite < 0) return [];
+    let nearest = NONE;
+    let best = Infinity;
+    for (let s = 0; s < this.sites.count; s++) {
+      if (this.siteAccessTile[s] === NONE) continue;
+      const dx = this.sites.x[s] - this.yards.x[yard];
+      const dy = this.sites.y[s] - this.yards.y[yard];
+      const d = dx * dx + dy * dy;
+      if (d < best) { best = d; nearest = s; }
+    }
+    if (nearest === NONE || nearest === toSite) return [];
+    return this.previewRoute(nearest, toSite);
+  }
+
+  acceptContract(id: number, company: number, vehicle = NONE): boolean {
     const b = this.contractBoard;
     if (id < 0 || id >= b.count || b.state[id] !== ContractState.Offered) return false;
     const from = b.from[id];
@@ -2410,14 +2621,28 @@ export class World {
     b.service[id] = svc;
     b.state[id] = ContractState.Idle;
 
-    // Any idle truck of ours takes it.
-    for (let v = 0; v < this.vehicles.count; v++) {
-      if (!this.vehicles.alive[v]) continue;
-      if (this.vehicles.company[v] !== company) continue;
-      if (this.vehicles.service[v] !== NONE) continue;
-      this.assignVehicle(v, svc, company);
+    /*
+     * The named vehicle if the player chose one, otherwise the first idle
+     * truck.
+     *
+     * A default matters: the first contract of a new game should be one click,
+     * and asking a player who owns exactly one lorry which lorry to use is a
+     * question with one answer.
+     */
+    if (vehicle !== NONE && this.vehicles.alive[vehicle]
+      && this.vehicles.company[vehicle] === company
+      && this.vehicles.service[vehicle] === NONE) {
+      this.assignVehicle(vehicle, svc, company);
       b.state[id] = ContractState.Running;
-      break;
+    } else {
+      for (let v = 0; v < this.vehicles.count; v++) {
+        if (!this.vehicles.alive[v]) continue;
+        if (this.vehicles.company[v] !== company) continue;
+        if (this.vehicles.service[v] !== NONE) continue;
+        this.assignVehicle(v, svc, company);
+        b.state[id] = ContractState.Running;
+        break;
+      }
     }
     this.rebuild();
     return true;
