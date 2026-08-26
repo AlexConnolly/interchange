@@ -180,3 +180,65 @@ describe('what you may buy', () => {
     expect(w.canBuyLand(w.player, first.block).reason).toBe('Already yours.');
   });
 });
+
+describe('land with somebody on it', () => {
+  it('is not for sale under a house', () => {
+    /*
+     * "How come I can buy land where other people's businesses sit, or where houses
+     * sit?" You could, because the village is laid out in the client — once, at
+     * startup — so the simulation had no idea where anybody's cottage was. It is
+     * told now.
+     */
+    const w = district();
+    const sale = w.landForSale();
+    expect(sale.length).toBeGreaterThan(0);
+    const first = sale[0].block;
+
+    // Register a house in the middle of it and it leaves the market.
+    const c = w.land.centre(first);
+    w.registerBuildings([Math.floor(c.y) * 128 + Math.floor(c.x)]);
+    expect(w.canBuyLand(w.player, first).ok).toBe(false);
+    expect(w.landForSale().some((s) => s.block === first)).toBe(false);
+  });
+
+  it('is not for sale under somebody else s works', () => {
+    const w = district();
+    // Every site starts owned by the authority, so the block round one is out.
+    const theirs = w.land.blockAt(w.sites.tile[0], 128);
+    expect(w.canBuyLand(w.player, theirs).ok).toBe(false);
+  });
+
+  it('is for sale under your own works, which is the point', () => {
+    /*
+     * The distinction that matters is *whose*. Buying the ground under a business
+     * you already own is exactly the case this feature is for — it is how a yard
+     * grows — so ownership is what decides, not occupancy.
+     */
+    const w = district();
+    let mine = -1;
+    for (let s = 0; s < w.sites.count; s++) {
+      const b = w.land.blockAt(w.sites.tile[s], 128);
+      // Somewhere reachable, so only occupancy is in question.
+      if (w.canBuyLand(w.player, b).reason === 'Somebody else s property stands on it.') {
+        w.sites.owner[s] = w.player;
+        mine = b;
+        break;
+      }
+    }
+    expect(mine).toBeGreaterThanOrEqual(0);
+    expect(w.canBuyLand(w.player, mine).reason)
+      .not.toBe('Somebody else s property stands on it.');
+  });
+
+  it('says where it is, rather than making a joke about acres', () => {
+    // "Four acres, near enough" had to be read every time anybody bought a field,
+    // which is the worst kind of joke. A bearing from the nearest village is what
+    // anybody would actually say.
+    const w = district();
+    const name = w.landPlaceName(w.landForSale()[0].block);
+    expect(name.length).toBeGreaterThan(3);
+    expect(name).not.toContain('acres');
+    // A real place, or the honest fallback.
+    expect(/of |^In |^Open country/.test(name)).toBe(true);
+  });
+});

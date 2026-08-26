@@ -5451,6 +5451,94 @@ export class World {
    */
   readonly land: LandRegister;
 
+  /**
+   * Tiles with somebody's building on them, told to us by the client.
+   *
+   * The village cottages, the church, the barns. They are laid out in the client —
+   * once at startup and never again, because a place is a place — so the
+   * simulation has no way to know where they are, and it has to: "how come I can
+   * buy land where other people's businesses sit, or where houses sit?" You
+   * cannot, now.
+   *
+   * A registration rather than a computation, and it only works because the layout
+   * is fixed. If houses ever moved, this would be a cache with no invalidation and
+   * the wrong shape entirely.
+   */
+  private readonly built = new Set<number>();
+
+  /** Called once by whoever laid the buildings out. */
+  registerBuildings(tiles: Iterable<number>): void {
+    this.built.clear();
+    for (const t of tiles) this.built.add(t);
+  }
+
+  /**
+   * Is anybody else's property standing on this block?
+   *
+   * Three kinds, and the distinction that matters is *whose*: a business or a yard
+   * of your own is exactly the case where buying the ground under it makes sense,
+   * so those are allowed. Somebody else's works, somebody else's yard, and the
+   * village's own houses are not for sale at any price, which is both obvious and
+   * was not enforced.
+   */
+  private landOccupied(block: number): boolean {
+    const size = this.config.size;
+    const b = this.land.bounds(block);
+    for (let y = b.y0; y <= b.y1; y++) {
+      for (let x = b.x0; x <= b.x1; x++) {
+        if (x >= size || y >= size) continue;
+        if (this.built.has(y * size + x)) return true;
+      }
+    }
+    const inside = (tile: number): boolean => {
+      const x = tile % size;
+      const y = (tile / size) | 0;
+      return x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
+    };
+    for (let i = 0; i < this.sites.count; i++) {
+      if (this.sites.owner[i] === this.player) continue;
+      if (inside(this.sites.tile[i])) return true;
+    }
+    for (let i = 0; i < this.yards.count; i++) {
+      if (this.yards.owner[i] === this.player) continue;
+      if (inside(this.yards.tile[i])) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Where a block is, in words.
+   *
+   * "Four acres, near enough" was a joke that had to be read every time somebody
+   * bought a field, which is the worst kind. What a player wants to know is
+   * *where* — so this is a bearing and a distance from the nearest settlement,
+   * which is how anybody in 1985 would have described a field to somebody else.
+   */
+  landPlaceName(block: number): string {
+    const c = this.land.centre(block);
+    let best = -1;
+    let bestD = 1e9;
+    for (let t = 0; t < this.towns.count; t++) {
+      const d = Math.hypot(this.towns.x[t] - c.x, this.towns.y[t] - c.y);
+      if (d < bestD) { bestD = d; best = t; }
+    }
+    if (best < 0) return 'Open country';
+    const dx = c.x - this.towns.x[best];
+    const dy = c.y - this.towns.y[best];
+    // Eight points is as fine as anybody says out loud.
+    const dirs = ['east', 'south-east', 'south', 'south-west',
+      'west', 'north-west', 'north', 'north-east'];
+    const a = Math.atan2(dy, dx);
+    const dir = dirs[(Math.round((a / (Math.PI / 4)) + 8)) % 8];
+    const name = this.towns.names[best] ?? 'the village';
+    if (bestD < 4) return `In ${name}`;
+    // Tiles are not a unit the player is ever shown, so this is in miles at the
+    // scale the rest of the game implies: a tile is about a furlong.
+    const miles = bestD / 8;
+    const how = miles < 0.6 ? 'Just' : miles < 2 ? 'A little' : '';
+    return `${how ? `${how} ` : ''}${dir} of ${name}`.replace(/^./, (m) => m.toUpperCase());
+  }
+
   /** What this block would cost. See the note on `LAND_BASE`. */
   landPriceOf(block: number): number {
     const size = this.config.size;
@@ -5516,6 +5604,9 @@ export class World {
       return { ok: false, reason: 'Somebody else holds it.', price };
     }
     if (price <= 0) return { ok: false, reason: 'Nothing but water.', price };
+    if (this.landOccupied(block)) {
+      return { ok: false, reason: 'Somebody else s property stands on it.', price };
+    }
     if (!this.landInReach(block)) {
       return { ok: false, reason: 'Too far out. Buy toward it, or find a road.', price };
     }
@@ -5574,9 +5665,20 @@ export class World {
       const verdict = this.canBuyLand(this.player, b);
       // Affordability is *not* a filter here: seeing what you cannot yet afford
       // is how a player decides what to save for. Only reachability hides a block.
+      // Affordability is not a filter — seeing what you cannot yet afford is how a
+      // player decides what to save for. Everything else hides the block.
       if (verdict.reason === 'Not enough in the bank.' || verdict.ok) {
         out.push({ block: b, price: verdict.price });
       }
+    }
+    return out;
+  }
+
+  /** The blocks you hold, for drawing them. */
+  landOwned(): number[] {
+    const out: number[] = [];
+    for (let b = 0; b < this.land.owner.length; b++) {
+      if (this.land.owner[b] === this.player) out.push(b);
     }
     return out;
   }

@@ -2254,30 +2254,32 @@ export class Renderer {
   }
 
   /**
-   * The plot you are looking at: a wash inside a border.
+   * Plots on the ground: a wash inside a border, any number of them.
    *
-   * A separate mesh from the road tool's marks, and from the route line, because
-   * all three can be on screen at once and each means something different. This one
-   * means "*this* square, the one the price belongs to" — which needs an edge more
-   * than it needs a fill, because the whole question a player is asking is where the
-   * square stops.
+   * Several at once because the land tool shows two things that mean different
+   * things and must not look alike — **blue** for ground you already hold, and
+   * **green** for the square you are about to buy. One mesh for the lot, because
+   * they are all the same kind of object and rebuilding one list is simpler than
+   * keeping two in step.
+   *
+   * A separate mesh from the road tool's marks and from the route line, since all
+   * three can be on screen together. This one means "*this* ground", which needs
+   * an edge more than a fill: the question a player is asking is where the square
+   * stops.
    *
    * Hence both. The wash says which ground is included and stays faint enough that
-   * the field underneath is still a field; the border is what actually answers the
-   * question, drawn as four long thin quads rather than a line, because a line
-   * primitive is one pixel wide at every zoom and this has to read at fourteen
-   * tiles across and at seventy.
-   *
-   * Green, on a green field, and it works for the same reason a highlighter works
-   * on white paper: it is not a different hue from the grass, it is a much brighter
-   * one. A colour chosen for contrast with the ground — blue, gold — would say
-   * "something has been placed here", and nothing has. This is a selection.
+   * the field underneath is still a field; the border answers the question, drawn
+   * as long thin quads rather than a line because a line primitive is one pixel
+   * wide at every zoom and this has to read at fourteen tiles across and at
+   * seventy.
    */
-  showPlot(
-    bounds: { x0: number; y0: number; x1: number; y1: number } | null,
+  showPlots(
+    regions: { x0: number; y0: number; x1: number; y1: number; wash: RGB; edge: RGB }[],
     src: RenderSource,
   ): void {
-    const key = bounds ? `${bounds.x0},${bounds.y0},${bounds.x1},${bounds.y1}` : '';
+    const key = regions
+      .map((r) => `${r.x0},${r.y0},${r.x1},${r.y1},${r.wash[0]}`)
+      .join('|');
     if (key === this.plotKey) return;
     this.plotKey = key;
     if (this.plotMesh) {
@@ -2285,61 +2287,62 @@ export class Renderer {
       this.plotMesh.geometry.dispose();
       this.plotMesh = null;
     }
-    if (!bounds) return;
+    if (regions.length === 0) return;
 
     const sz = src.size;
-    const x0 = bounds.x0;
-    const z0 = bounds.y0;
-    const x1 = bounds.x1 + 1;
-    const z1 = bounds.y1 + 1;
-    const tiles = (x1 - x0) * (z1 - z0);
-    // A quad per tile for the wash, plus four for the border.
-    const m = new Mesh((tiles + 4) * 6);
-
-    /*
-     * The wash is drawn per tile rather than as one big quad, and it has to be:
-     * the ground is not flat, so a single quad across sixteen tiles would sink
-     * into every rise and float over every dip. Following the surface tile by tile
-     * is the same thing `showMarks` does and for the same reason.
-     */
-    for (let z = z0; z < z1; z++) {
-      for (let x = x0; x < x1; x++) {
-        if (x < 0 || z < 0 || x >= sz || z >= sz) continue;
-        const y = this.groundTop(src, x + 0.5, z + 0.5) + 0.03;
-        m.quad(
-          x, y, z, x + 1, y, z, x + 1, y, z + 1, x, y, z + 1, PLOT.wash,
-        );
-      }
+    let quads = 0;
+    for (const r of regions) {
+      quads += (r.x1 - r.x0 + 1) * (r.y1 - r.y0 + 1) + 4 * (r.x1 - r.x0 + 2);
     }
+    const m = new Mesh(quads * 6);
 
-    // And the border, one strip per side, each following the ground along its run.
-    const w = 0.14;
-    const edge = (
-      ax: number, az: number, bx: number, bz: number, nx: number, nz: number,
-    ): void => {
-      const steps = Math.max(1, Math.round(Math.abs(bx - ax) + Math.abs(bz - az)));
-      for (let i = 0; i < steps; i++) {
-        const t0 = i / steps;
-        const t1 = (i + 1) / steps;
-        const px0 = ax + (bx - ax) * t0;
-        const pz0 = az + (bz - az) * t0;
-        const px1 = ax + (bx - ax) * t1;
-        const pz1 = az + (bz - az) * t1;
-        const y0 = this.groundTop(src, px0 + nx * w * 0.5, pz0 + nz * w * 0.5) + 0.05;
-        const y1 = this.groundTop(src, px1 + nx * w * 0.5, pz1 + nz * w * 0.5) + 0.05;
-        m.quad(
-          px0, y0, pz0,
-          px1, y1, pz1,
-          px1 + nx * w, y1, pz1 + nz * w,
-          px0 + nx * w, y0, pz0 + nz * w,
-          PLOT.edge,
-        );
+    for (const r of regions) {
+      const x0 = r.x0;
+      const z0 = r.y0;
+      const x1 = r.x1 + 1;
+      const z1 = r.y1 + 1;
+
+      /*
+       * The wash per tile rather than as one big quad, and it has to be: the ground
+       * is not flat, so a single quad across sixteen tiles would sink into every
+       * rise and float over every dip.
+       */
+      for (let z = z0; z < z1; z++) {
+        for (let x = x0; x < x1; x++) {
+          if (x < 0 || z < 0 || x >= sz || z >= sz) continue;
+          const y = this.groundTop(src, x + 0.5, z + 0.5) + 0.03;
+          m.quad(x, y, z, x + 1, y, z, x + 1, y, z + 1, x, y, z + 1, r.wash);
+        }
       }
-    };
-    edge(x0, z0, x1, z0, 0, 1);
-    edge(x0, z1, x1, z1, 0, -1);
-    edge(x0, z0, x0, z1, 1, 0);
-    edge(x1, z0, x1, z1, -1, 0);
+
+      const w = 0.14;
+      const edge = (
+        ax: number, az: number, bx: number, bz: number, nx: number, nz: number,
+      ): void => {
+        const steps = Math.max(1, Math.round(Math.abs(bx - ax) + Math.abs(bz - az)));
+        for (let i = 0; i < steps; i++) {
+          const t0 = i / steps;
+          const t1 = (i + 1) / steps;
+          const px0 = ax + (bx - ax) * t0;
+          const pz0 = az + (bz - az) * t0;
+          const px1 = ax + (bx - ax) * t1;
+          const pz1 = az + (bz - az) * t1;
+          const y0 = this.groundTop(src, px0 + nx * w * 0.5, pz0 + nz * w * 0.5) + 0.05;
+          const y1 = this.groundTop(src, px1 + nx * w * 0.5, pz1 + nz * w * 0.5) + 0.05;
+          m.quad(
+            px0, y0, pz0,
+            px1, y1, pz1,
+            px1 + nx * w, y1, pz1 + nz * w,
+            px0 + nx * w, y0, pz0 + nz * w,
+            r.edge,
+          );
+        }
+      };
+      edge(x0, z0, x1, z0, 0, 1);
+      edge(x0, z1, x1, z1, 0, -1);
+      edge(x0, z0, x0, z1, 1, 0);
+      edge(x1, z0, x1, z1, -1, 0);
+    }
 
     this.plotMesh = toMesh(m, this.plotMaterial);
     this.plotMesh.castShadow = false;

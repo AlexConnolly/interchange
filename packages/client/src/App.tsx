@@ -969,6 +969,25 @@ export function App(): JSX.Element {
     }
 
     /*
+     * Tell the simulation where the village is.
+     *
+     * The buildings are laid out here — once, at startup, because a place is a
+     * place — so the simulation has no way to know where anybody's house stands,
+     * and it has to: without this you could buy the ground under somebody's
+     * cottage. Registered rather than computed, which only works *because* the
+     * layout is fixed; if houses ever moved this would be a cache with no
+     * invalidation.
+     *
+     * Village buildings only. A business or a yard is a thing the simulation
+     * already knows the position and the owner of, so it can decide about those
+     * itself — and it decides differently, because buying the ground under your
+     * *own* works is exactly the case that should be allowed.
+     */
+    world.registerBuildings(
+      placed.filter((q) => q.model >= VILLAGE_FIRST).map((q) => q.tile),
+    );
+
+    /*
      * The trees, laid out once and never again.
      *
      * Where they go matters more than how many. Three rules, and each one is a

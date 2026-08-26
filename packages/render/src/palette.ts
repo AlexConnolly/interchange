@@ -286,6 +286,11 @@ export const PLOT = {
    *  the wash by a long way, because it is drawn at the same low opacity and a
    *  border that reads as a border has to earn it in saturation. */
   edge: hex('#2ef066'),
+  /** And land already yours, which must not look like land you are choosing.
+   *  Blue against green is the strongest pair the palette has that still reads as
+   *  two states of the same thing rather than two unrelated markings. */
+  ownWash: hex('#7fb6f0'),
+  ownEdge: hex('#2e86f0'),
 };
 
 export const SEMANTIC = {

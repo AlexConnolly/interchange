@@ -18,7 +18,7 @@
 
 import { useEffect, useState, type JSX } from 'react';
 import { type World } from '@interchange/sim';
-import type { Renderer } from '@interchange/render';
+import { type Renderer, PLOT } from '@interchange/render';
 import { money } from './Markers.tsx';
 import { anchorAt } from './anchor.ts';
 
@@ -37,7 +37,7 @@ export function Land({
 }: {
   world: World;
   renderer: Renderer;
-  src: Parameters<Renderer['showPlot']>[1];
+  src: Parameters<Renderer['showPlots']>[1];
   camX: number;
   camZ: number;
   tilesAcross: number;
@@ -46,7 +46,6 @@ export function Land({
   /** The block whose price the player has actually pressed, or -1. */
   const [chosen, setChosen] = useState(-1);
 
-  const size = world.config.size;
   const forSale = world.landForSale();
 
   /*
@@ -68,17 +67,30 @@ export function Land({
   const bounds = chosen >= 0 ? world.land.bounds(chosen) : null;
 
   /*
-   * The green square on the ground, drawn by the renderer rather than by this.
+   * The squares on the ground: blue for what you hold, green for what you are
+   * choosing. Drawn by the renderer, because they follow the terrain.
    *
-   * An effect rather than a call in the render body, so the *teardown* is somewhere
-   * — a highlight left behind on a plot nobody has selected is the same bug as a
-   * route line left on the map, and that one took two goes to notice. Closing the
-   * tool unmounts this component, which clears it.
+   * An effect rather than a call in the render body, so the *teardown* is
+   * somewhere — a highlight left behind is the same bug as a route line left on
+   * the map, and that one took two goes to notice. Closing the tool unmounts this
+   * component, which clears it.
+   *
+   * Keyed on a string rather than on the arrays, because the owned list is rebuilt
+   * every render and a dependency on it would re-run this sixty times a second.
    */
+  const owned = world.landOwned();
+  const plots = [
+    ...owned.map((b) => ({
+      ...world.land.bounds(b), wash: PLOT.ownWash, edge: PLOT.ownEdge,
+    })),
+    ...(bounds ? [{ ...bounds, wash: PLOT.wash, edge: PLOT.edge }] : []),
+  ];
+  const plotKey = plots.map((r) => `${r.x0},${r.y0},${r.wash[0]}`).join('|');
   useEffect(() => {
-    renderer.showPlot(bounds, src);
-    return () => renderer.showPlot(null, src);
-  }, [renderer, src, bounds?.x0, bounds?.y0, bounds?.x1, bounds?.y1]);
+    renderer.showPlots(plots, src);
+    return () => renderer.showPlots([], src);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderer, src, plotKey]);
 
   return (
     <>
@@ -100,14 +112,28 @@ export function Land({
       )}
 
       {near.map((s) => {
-        const height = world.terrain.height[
-          Math.min(size * size - 1, Math.floor(s.c.y) * size + Math.floor(s.c.x))
-        ];
+        /*
+         * The *raw* heightmap value, because that is what the projector takes.
+         *
+         * This is where "the prices and positions make no sense" came from, and it
+         * was a unit mismatch rather than a maths error. `renderer.project` converts
+         * a heightmap sample into world height itself — every other anchored thing
+         * in the game passes `terrain.height[tile]` straight in — and I passed the
+         * already-converted world height, about 3.3 where the raw value was 498. So
+         * every chip was projected as though its field were at sea level, which put
+         * it a couple of hundred pixels below the square it belonged to.
+         *
+         * Sampled at the block's middle tile. Interpolating would be more precise
+         * and pointless: the label sits at the centre of sixteen tiles, and a tile
+         * of slope is smaller than the label.
+         */
+        const mid = Math.floor(s.c.y) * world.config.size + Math.floor(s.c.x);
+        const height = world.terrain.height[mid];
         return (
           <button
             key={s.block}
             className={`plot ${chosen === s.block ? 'on' : ''}`}
-            {...anchorAt(s.c.x, height / 64 * 0.42, s.c.y)}
+            {...anchorAt(s.c.x, height, s.c.y)}
             onClick={() => setChosen(chosen === s.block ? -1 : s.block)}
             title={`${money(s.price)} — four tiles by four`}
           >
@@ -124,11 +150,9 @@ export function Land({
          * back". Anything more would be a form in front of a click.
          */
         <div className="plot-buy">
-          <div className="plot-title">Four acres, near enough</div>
+          <div className="plot-title">{world.landPlaceName(chosen)}</div>
           <div className="plot-sub">
-            {bounds.x0},{bounds.y0} to {bounds.x1},{bounds.y1}
-            {' · '}
-            {money(verdict.price)}
+            Four tiles by four · {money(verdict.price)}
           </div>
           {!verdict.ok && <div className="why">{verdict.reason}</div>}
           <div className="plot-row">
