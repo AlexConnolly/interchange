@@ -4512,6 +4512,25 @@ export class World {
       if (this.yards.owner[y2] !== company) continue;
       claim(this.yards.tile[y2]);
     }
+    /*
+     * And the fields you actually bought.
+     *
+     * This is what makes buying land mean anything. Everything that asks "may I
+     * build here" — the road tool, `layTrack`, the blue placement markers — asks
+     * this one function, and until now it only knew about parcels that came *with*
+     * a business: the field a farm stands in and the ones its tile touches. So a
+     * player could buy four fields and not be allowed to put a track across their
+     * own ground, which is the opposite of the point. "Land means you can build
+     * buildings" was the whole reason for the feature.
+     *
+     * A union rather than a replacement, because the two kinds of holding are both
+     * real: a farm comes with its yard whether or not you ever open the land tool.
+     */
+    if (company === this.player) {
+      for (let p = 0; p < this.land.owner.length; p++) {
+        if (this.land.owner[p] === this.player) out.add(p);
+      }
+    }
     return out;
   }
 

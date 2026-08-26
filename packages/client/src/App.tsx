@@ -3114,7 +3114,17 @@ export function App(): JSX.Element {
                 setPanel({ k: 'none' });
                 setBuilding(false);
                 setNote('');
-                setTool(tool === 'none' ? 'lay' : 'none');
+                /*
+                 * Switch to the road tool, or off if it is already in hand.
+                 *
+                 * It used to read `tool === 'none' ? 'lay' : 'none'`, which was
+                 * right while roads were the only tool and became a bug the moment
+                 * land arrived: pressing Roads with the land tool in hand took the
+                 * "already busy" branch and turned *everything* off, so the dock
+                 * went dark and nothing was selected. A dock button should always
+                 * be able to say "this one now".
+                 */
+                setTool(tool === 'lay' || tool === 'lift' ? 'none' : 'lay');
               },
             },
             /*

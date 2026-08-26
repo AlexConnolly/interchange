@@ -275,3 +275,43 @@ describe('land with somebody on it', () => {
     expect(/of |^In |^Open country/.test(name)).toBe(true);
   });
 });
+
+describe('what owning land lets you do', () => {
+  it('lets you build on it, which is the whole point of buying it', () => {
+    /*
+     * Everything that asks "may I build here" — the road tool, `layTrack`, the blue
+     * placement markers — goes through `canBuildOn`, and that only knew about
+     * fields which came *with* a business: the one a farm stands in and the ones its
+     * tile touches. So a player could buy four fields and not be allowed to put a
+     * track across their own ground, which is the opposite of the point. "Land means
+     * you can build buildings."
+     */
+    const w = district();
+    const first = w.landForSale().find((s) => w.land.acres(s.parcel) > 4);
+    expect(first).toBeTruthy();
+    if (!first) return;
+
+    // A tile of that field with nothing already on it.
+    const bare = w.land.tiles[first.parcel]
+      .find((t) => w.layers[Mode.Road].cls[t] === NO_WAY && w.terrain.height[t] > 0);
+    expect(bare).toBeDefined();
+    if (bare === undefined) return;
+
+    expect(w.canBuildOn(w.player, bare)).toBe(false);
+    expect(w.buyLand(first.parcel).ok).toBe(true);
+    expect(w.canBuildOn(w.player, bare)).toBe(true);
+  });
+
+  it('does not let you build on somebody else s field', () => {
+    const w = district();
+    const sale = w.landForSale();
+    const mine = sale[0];
+    const theirs = sale.find((s) => s.parcel !== mine.parcel);
+    expect(theirs).toBeTruthy();
+    if (!theirs) return;
+    expect(w.buyLand(mine.parcel).ok).toBe(true);
+    const bare = w.land.tiles[theirs.parcel]
+      .find((t) => w.layers[Mode.Road].cls[t] === NO_WAY && w.terrain.height[t] > 0);
+    if (bare !== undefined) expect(w.canBuildOn(w.player, bare)).toBe(false);
+  });
+});

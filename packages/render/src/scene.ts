@@ -2298,8 +2298,28 @@ export class Renderer {
       for (const t of r.tiles) {
         const x = t % sz;
         const z = (t / sz) | 0;
-        const y = this.groundTop(src, x + 0.5, z + 0.5) + 0.03;
-        m.quad(x, y, z, x + 1, y, z, x + 1, y, z + 1, x, y, z + 1, r.wash);
+        /*
+         * The four corners, not one height for the whole tile.
+         *
+         * `groundTop` gives a single number per tile — the highest of its corners —
+         * so a wash built from it is a floor of flat plates, each at a slightly
+         * different height from its neighbour. Every join between them is a step,
+         * and a step in a translucent surface catches the light on one side and
+         * shows the ground through the other: what you get is a grid. "It still
+         * isn't one big square, it's lots" — those lines were the seams between
+         * sixteen little plates.
+         *
+         * Sampling the *corners* fixes it because neighbouring tiles share corners
+         * exactly, so the quads meet with no step and no gap, and the sheet follows
+         * the ground rather than approximating it in squares.
+         */
+        const h00 = groundHeightAt(src, x, z) + 0.03;
+        const h10 = groundHeightAt(src, x + 1, z) + 0.03;
+        const h11 = groundHeightAt(src, x + 1, z + 1) + 0.03;
+        const h01 = groundHeightAt(src, x, z + 1) + 0.03;
+        m.quad(
+          x, h00, z, x + 1, h10, z, x + 1, h11, z + 1, x, h01, z + 1, r.wash,
+        );
 
         /*
          * One strip per edge that faces out of the set. A tile in the middle of a
@@ -2307,20 +2327,69 @@ export class Renderer {
          * and the result is the outline — including round the inside of a hole,
          * which comes free and is correct.
          */
-        const ey = y + 0.02;
-        if (!inside.has(z > 0 ? t - sz : -1)) {
-          m.quad(x, ey, z, x + 1, ey, z, x + 1, ey, z + w, x, ey, z + w, r.edge);
+        /*
+         * An edge is drawn where the ground stops being yours — and "stops" has to
+         * look past the hedge.
+         *
+         * Two of your fields are almost never tile-adjacent: the hedgerow between
+         * them sits on ground that belongs to neither, so a strict test draws an
+         * outline round each and the holding reads as separate parcels with a line
+         * between them. "A field should be one square where possible — well, just
+         * one outline."
+         *
+         * So the test looks two tiles out. If your own land resumes just beyond the
+         * gap, the gap is *interior* and gets no border, which leaves a single
+         * outline round the whole holding with the hedge still visible through it —
+         * which is both what was asked for and true: the hedge is there, it simply
+         * is not the edge of your property.
+         */
+        const out = (dx: number, dz: number): boolean => {
+          const nx = x + dx;
+          const nz = z + dz;
+          if (nx < 0 || nz < 0 || nx >= sz || nz >= sz) return true;
+          if (inside.has(nz * sz + nx)) return false;
+          const fx = x + dx * 2;
+          const fz = z + dz * 2;
+          if (fx < 0 || fz < 0 || fx >= sz || fz >= sz) return true;
+          return !inside.has(fz * sz + fx);
+        };
+
+        // The border sits a whisker above the wash, sampled the same way so the
+        // two follow the same surface instead of crossing it.
+        const lift = 0.02;
+        const at = (px: number, pz: number): number =>
+          groundHeightAt(src, px, pz) + 0.03 + lift;
+        if (out(0, -1)) {
+          m.quad(
+            x, at(x, z), z,
+            x + 1, at(x + 1, z), z,
+            x + 1, at(x + 1, z + w), z + w,
+            x, at(x, z + w), z + w, r.edge,
+          );
         }
-        if (!inside.has(z + 1 < sz ? t + sz : -1)) {
-          m.quad(x, ey, z + 1 - w, x + 1, ey, z + 1 - w,
-                 x + 1, ey, z + 1, x, ey, z + 1, r.edge);
+        if (out(0, 1)) {
+          m.quad(
+            x, at(x, z + 1 - w), z + 1 - w,
+            x + 1, at(x + 1, z + 1 - w), z + 1 - w,
+            x + 1, at(x + 1, z + 1), z + 1,
+            x, at(x, z + 1), z + 1, r.edge,
+          );
         }
-        if (!inside.has(x > 0 ? t - 1 : -1)) {
-          m.quad(x, ey, z, x + w, ey, z, x + w, ey, z + 1, x, ey, z + 1, r.edge);
+        if (out(-1, 0)) {
+          m.quad(
+            x, at(x, z), z,
+            x + w, at(x + w, z), z,
+            x + w, at(x + w, z + 1), z + 1,
+            x, at(x, z + 1), z + 1, r.edge,
+          );
         }
-        if (!inside.has(x + 1 < sz ? t + 1 : -1)) {
-          m.quad(x + 1 - w, ey, z, x + 1, ey, z,
-                 x + 1, ey, z + 1, x + 1 - w, ey, z + 1, r.edge);
+        if (out(1, 0)) {
+          m.quad(
+            x + 1 - w, at(x + 1 - w, z), z,
+            x + 1, at(x + 1, z), z,
+            x + 1, at(x + 1, z + 1), z + 1,
+            x + 1 - w, at(x + 1 - w, z + 1), z + 1, r.edge,
+          );
         }
       }
     }
