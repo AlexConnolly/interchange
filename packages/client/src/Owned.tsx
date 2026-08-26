@@ -15,7 +15,7 @@
 import { useState, type JSX } from 'react';
 import { type World, ContractState } from '@interchange/sim';
 import { content } from '@interchange/data';
-import { money, bodyFor } from './Markers.tsx';
+import { money, Carriers } from './Markers.tsx';
 import { BodyIcon, Icon } from './Icons.tsx';
 import { perHour } from './Place.tsx';
 
@@ -366,7 +366,7 @@ export function Contracts({
                 {r.running
                   ? `${C.vehicles[world.vehicles.type[r.vehicle]].name} · ${b.delivered[r.id]} loads`
                   : r.ready !== null ? r.ready
-                    : bodyFor(cargo.handling)}
+                    : <Carriers handling={cargo.handling} size={17} />}
                 {r.offered && r.ready !== null && <b>free — take it</b>}
                 {r.offered && r.ready === null && r.ownsKind && <b>yours are all out</b>}
                 {r.offered && r.ready === null && !r.ownsKind && <b>none in your fleet</b>}

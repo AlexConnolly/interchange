@@ -28,7 +28,7 @@ import {
 } from '@interchange/sim';
 import { content } from '@interchange/data';
 import type { Renderer } from '@interchange/render';
-import { money, useAnchor } from './Markers.tsx';
+import { money, useAnchor, thumb } from './Markers.tsx';
 import { anchorAt } from './anchor.ts';
 import { Icon } from './Icons.tsx';
 
@@ -48,11 +48,6 @@ const DOING: Record<string, string> = {
   sleeping: 'sleeping…',
   stopped: 'stopped by snow',
 };
-
-/** Where the pipeline writes its rendered thumbnails. */
-function thumb(vehicleId: string): string {
-  return `thumbs/veh_${vehicleId.replace(/-/g, '_')}.png`;
-}
 
 /**
  * A vehicle, as a row with its picture on it.

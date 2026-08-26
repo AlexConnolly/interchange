@@ -17,7 +17,7 @@ import { type JSX } from 'react';
 import { type World, ContractState } from '@interchange/sim';
 import { content } from '@interchange/data';
 import type { Renderer } from '@interchange/render';
-import { money, useAnchor, bodyFor } from './Markers.tsx';
+import { money, useAnchor, Carriers } from './Markers.tsx';
 import { anchorAt } from './anchor.ts';
 import { BodyIcon } from './Icons.tsx';
 
@@ -113,7 +113,7 @@ export function Driver({
               </span>
               <span className="needs">
                 <BodyIcon handling={C.cargo[board.cargo[contract]].handling} />
-                {bodyFor(C.cargo[board.cargo[contract]].handling)}
+                <Carriers handling={C.cargo[board.cargo[contract]].handling} size={17} />
               </span>
             </div>
             <div className="stock">

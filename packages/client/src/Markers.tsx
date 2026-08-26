@@ -424,11 +424,56 @@ export function Earnings({
 }
 
 /** What a cargo needs under it, in the words the vehicle list uses. */
-export function bodyFor(handling: string): string {
-  if (handling === 'refrigerated') return 'Chilled box';
-  if (handling === 'liquid') return 'Tanker';
-  if (handling === 'bulk') return 'Tipper';
-  return 'Box van';
+/** Where the pipeline writes its rendered thumbnails. */
+export function thumb(vehicleId: string): string {
+  return `thumbs/veh_${vehicleId.replace(/-/g, '_')}.png`;
+}
+
+/**
+ * Which vehicles can carry a cargo, by name.
+ *
+ * Read out of the content, because the content is the only thing that knows. The
+ * function this replaces returned invented words — "Box van", "Chilled box" —
+ * naming body *shapes* that no vehicle in the catalogue is called. So a panel
+ * would say a load wanted a box van, the player would look at a list containing a
+ * Transit van, a Rigid 7.5t, an Artic box and an Artic flatbed, and none of them
+ * was the thing they had just been told to find.
+ *
+ * A handling class is a *set* of vehicles and always was. Naming the set after one
+ * imaginary member of it was the mistake.
+ */
+export function carriersFor(handling: string): { id: string; name: string }[] {
+  return content().vehicles
+    .filter((v) => (v.handling as readonly string[]).includes(handling))
+    .map((v) => ({ id: v.id, name: v.name }));
+}
+
+/**
+ * The vehicles that can carry a cargo, drawn.
+ *
+ * "Something says it wants a box van, yet there's no such thing. If it means
+ * multiple types, it should say what is acceptable as images, and when you hover
+ * it tells you." Which is right, and it is also the cheaper answer: the pipeline
+ * already renders every vehicle, so the honest version of this constraint is the
+ * actual lorries at eighteen pixels, and a tooltip naming them for anybody who
+ * wants the words.
+ *
+ * No text at all in the normal case. A row of three silhouettes says "one of
+ * these" without having to find a noun that covers all three — which is the noun
+ * that did not exist.
+ */
+export function Carriers(
+  { handling, size = 20 }: { handling: string; size?: number },
+): JSX.Element {
+  const list = carriersFor(handling);
+  const names = list.map((v) => v.name).join(', ');
+  return (
+    <span className="carriers" title={names}>
+      {list.map((v) => (
+        <img key={v.id} className="carrier" src={thumb(v.id)} alt={v.name} title={v.name} />
+      ))}
+    </span>
+  );
 }
 
 /**

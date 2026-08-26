@@ -1827,3 +1827,34 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   color: var(--ink-dim);
   white-space: nowrap;
 }
+
+/* Which lorries can carry it, as the lorries themselves.
+   The text this replaced named body *shapes* — "Box van", "Chilled box" — that no
+   vehicle in the catalogue is actually called, so a panel would tell you to find
+   a box van and the list would contain a Transit, a Rigid 7.5t, an Artic box and
+   an Artic flatbed, none of which was the thing you had been told to look for. A
+   handling class is a set of vehicles and always was; three silhouettes say "one
+   of these" without needing a noun that covers all three. */
+.carriers {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.carrier {
+  width: 26px;
+  height: 20px;
+  object-fit: contain;
+  /* Flattened to a silhouette: this is a *constraint*, not a shop window, and
+     three full-colour renders in a row would out-shout the row's own text. */
+  opacity: 0.62;
+  filter: saturate(0.25);
+}
+.carriers:hover .carrier { opacity: 1; filter: none; }
+
+/* "No buyers" on a stock line, which is a state and not a button. */
+.stock-none { font-size: 10.5px; color: var(--ink-dim); white-space: nowrap; }
+.stock-head:disabled { cursor: default; opacity: 0.7; }
+.stock-head:disabled:hover { background: rgba(0, 0, 0, 0.035); }
+/* The market's own rows sit directly in the body now, so they need the spacing
+   the old card wrapper was providing. */
+.market .stock-head { margin-bottom: 4px; }

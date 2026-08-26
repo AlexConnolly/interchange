@@ -37,7 +37,7 @@ import { useEffect, useState, type JSX } from 'react';
 import { type World, ContractState, MoneyKind } from '@interchange/sim';
 import { content } from '@interchange/data';
 import type { Renderer } from '@interchange/render';
-import { money, bodyFor, useAnchor } from './Markers.tsx';
+import { money, Carriers, carriersFor, useAnchor } from './Markers.tsx';
 import { anchorAt } from './anchor.ts';
 import { BodyIcon, Icon } from './Icons.tsx';
 
@@ -366,7 +366,7 @@ export function Place({
                     <BodyIcon handling={cargo.handling} />
                     {v >= 0
                       ? `${C.vehicles[world.vehicles.type[v]].name} · ${board.delivered[id]} loads`
-                      : bodyFor(cargo.handling)}
+                      : <Carriers handling={cargo.handling} size={17} />}
                     {v >= 0 ? <em>yours</em> : <b>nobody on it</b>}
                   </span>
                 </div>
@@ -430,8 +430,7 @@ export function Place({
                       : <span className="pay dim">{money(board.pay[id])}<i>/t</i></span>}
                   </span>
                   <span className={`needs ${can ? '' : 'cannot'}`}>
-                    <BodyIcon handling={cargo.handling} />
-                    {bodyFor(cargo.handling)}
+                    <Carriers handling={cargo.handling} size={17} />
                     {!can && <b>you have none</b>}
                   </span>
                 </button>
@@ -689,10 +688,7 @@ function Supply({
             {perDay > 0 ? `${perDay} t a day` : 'takes it in'}
           </span>
         </span>
-        <span className="fact-body" title={`Wants a ${bodyFor(cargo.handling)}`}>
-          <BodyIcon handling={cargo.handling} />
-          {bodyFor(cargo.handling)}
-        </span>
+        <Carriers handling={cargo.handling} />
       </div>
     );
   }
@@ -839,7 +835,9 @@ function Arrange({
         <div className="why">
           {drivers.length === 0
             ? 'Every lorry is out. You need another one, or take one off a job.'
-            : `Nothing free can carry ${C.cargo[cargo].name.toLowerCase()} — that wants a ${bodyFor(C.cargo[cargo].handling).toLowerCase()}.`}
+            : `Nothing free can carry ${C.cargo[cargo].name.toLowerCase()}`
+              + ` — that wants ${carriersFor(C.cargo[cargo].handling)
+                .map((v) => v.name.toLowerCase()).join(' or ')}.`}
         </div>
       )}
       {spare.map((d) => (

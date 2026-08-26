@@ -1,40 +1,44 @@
 /**
- * The market: who wants what you are holding, and what they will give for it.
+ * The market: three tabs, because there are three questions.
  *
- * This screen exists because the player found a hole the design had not. Owning a
- * producer left you with stock and nothing to do with it — a shunt into another
- * place of your own pays nothing, and a run to somebody else's works pays a
- * *fare* rather than a price — so a farm's output piled up in its shed and the
- * only question the game could answer about it was "which lorry".
+ * It exists because the player found a hole the design had not. Owning a producer
+ * left you holding stock with nothing to do with it — a shunt into another place
+ * of your own pays nothing, and a run to somebody else's works pays a *fare*
+ * rather than a price — so a farm's output piled up in its shed and the only
+ * question the game could answer about it was "which lorry".
  *
- * ## Buyers, not terms
+ * ## Why it is tabbed and grouped
  *
- * The first version of this was a grid: three rows reading "Cash today", "In 10
- * days", "In 30 days", each with Quarter / Half / All buttons. It was a correct
- * model of the mechanic and a horrible thing to look at — "that is a horrific
- * system" — because it asked the player to compose an abstraction out of two
- * dropdowns. Nobody thinks "I would like half of my milk on ten-day terms".
+ * The screen went through two wrong shapes first, and both failed the same way:
+ * they put everything on one list.
  *
- * So the same mechanic is dressed as what it would actually be: **named buyers
- * with standing offers.** A dairy wants forty tonnes and pays on the nail; a
- * wholesaler wants a hundred and pays in a month, better. You take an offer or
- * you leave it. The tonnage and the terms come *with* the offer instead of being
- * assembled from parts, which is one decision instead of three, and it reads as a
- * world with people in it rather than a settings panel.
+ * The first was a grid of abstract terms — "Cash today / In 10 days / In 30 days"
+ * crossed with "Quarter / Half / All" — which asked the player to compose an
+ * abstraction out of two dropdowns. Nobody thinks "I would like half of my milk on
+ * ten-day terms".
  *
- * The buyers are invented and stable per cargo per week — see `marketBuyers` in
- * the simulation. They are not real places on the map, and that is deliberate: a
- * real place would need a lorry, and the whole point of this screen is that it is
- * the one thing you can do without one.
+ * The second replaced that with named buyers, which is the right *unit*, and then
+ * printed every one of them in a flat list mixed in with stock levels and pending
+ * cheques. With four cargoes and two buyers each that is eight offer lines among
+ * a dozen other rows, and the thing you came to find — how much is my milk worth —
+ * is somewhere in the middle of it.
+ *
+ * So: **Sell** groups by cargo and leads with the price *range*, which is the
+ * question ("what is milk fetching") before the decision ("which of these two
+ * buyers"). **Pending** is money owed. **History** is what you sold and got. Three
+ * questions, three tabs, and none of them is answered by scrolling past the other
+ * two.
  */
 
-import { type JSX } from 'react';
-import { type World } from '@interchange/sim';
+import { useState, type JSX } from 'react';
+import { type World, MoneyKind } from '@interchange/sim';
 import { content } from '@interchange/data';
 import { money } from './Markers.tsx';
 import { Icon } from './Icons.tsx';
 
 const C = content();
+
+type Tab = 'sell' | 'pending' | 'history';
 
 export function Market({
   world, onClose, onSold,
@@ -43,79 +47,129 @@ export function Market({
   onClose: () => void;
   onSold: () => void;
 }): JSX.Element {
+  const [tab, setTab] = useState<Tab>('sell');
+  /** Which cargo's buyers are open, or -1 for the grouped list. */
+  const [open, setOpen] = useState(-1);
+
   const held = world.stockHeld();
-  const pending = world.pendingSales();
   const offers = world.marketBuyers();
+  const pending = world.pendingSales();
+  const history = world.moneyAt(-1, 40).filter((r) => r.kind === MoneyKind.Market);
+
+  /** Offers for one cargo, and the range they span. */
+  const forCargo = (cargo: number) => offers.filter((o) => o.cargo === cargo);
+
+  const openCargo = open >= 0 ? forCargo(open) : [];
 
   return (
     <div className="bubble fixed market">
       <div className="sheet-head">
-        <span className="sheet-icon"><Icon id="builders-merchant" size={24} /></span>
+        {open >= 0 ? (
+          <button className="x" data-quiet onClick={() => setOpen(-1)} aria-label="Back">‹</button>
+        ) : (
+          <span className="sheet-icon"><Icon id="builders-merchant" size={24} /></span>
+        )}
         <div className="grow">
-          <div className="sheet-title">Market</div>
+          <div className="sheet-title">
+            {open >= 0 ? C.cargo[open].name : 'Market'}
+          </div>
           <div className="sheet-sub">
-            {offers.length === 0
-              ? held.length === 0 ? 'Nothing in stock' : 'No buyers this week'
-              : `${offers.length} ${offers.length === 1 ? 'buyer' : 'buyers'}`}
+            {open >= 0
+              ? `${openCargo.length} ${openCargo.length === 1 ? 'buyer' : 'buyers'}`
+              : 'Sell from stock, no lorry needed'}
           </div>
         </div>
         <button className="x" onClick={onClose} aria-label="Close">×</button>
       </div>
 
-      <div className="bubble-body">
-        {held.length === 0 && (
+      {open < 0 && (
+        <div className="tabs" role="tablist">
+          <button
+            className={`tab ${tab === 'sell' ? 'on' : ''}`}
+            onClick={() => setTab('sell')}
+          >Sell{held.length > 0 && <em>{held.length}</em>}</button>
+          <button
+            className={`tab ${tab === 'pending' ? 'on' : ''}`}
+            onClick={() => setTab('pending')}
+            disabled={pending.length === 0}
+          >Pending{pending.length > 0 && <em>{pending.length}</em>}</button>
+          <button
+            className={`tab ${tab === 'history' ? 'on' : ''}`}
+            onClick={() => setTab('history')}
+            disabled={history.length === 0}
+          >History</button>
+        </div>
+      )}
+
+      <div className={`bubble-body${open >= 0 ? ' slide-in' : ''}`}>
+        {/* ---- one cargo's buyers ------------------------------------- */}
+        {open >= 0 && openCargo.length === 0 && (
+          <div className="why">Nobody is buying it this week.</div>
+        )}
+        {open >= 0 && openCargo.map((o) => (
+          <button
+            key={o.key}
+            className="offer"
+            onClick={() => {
+              if (world.acceptOffer(o.key)) { setOpen(-1); onSold(); }
+            }}
+          >
+            <span className="grow">
+              <span className="offer-buyer">{o.buyer}</span>
+              <span className="offer-what">
+                {o.tonnes}t · {o.days === 0 ? 'pays on collection' : `pays in ${o.days} days`}
+              </span>
+            </span>
+            <span className="offer-sum">
+              {money(o.pence)}
+              <i>{money(o.pence / o.tonnes)}/t</i>
+            </span>
+          </button>
+        ))}
+
+        {/* ---- sell: grouped by cargo, leading with the range --------- */}
+        {open < 0 && tab === 'sell' && held.length === 0 && (
           <div className="why">
             Nothing to sell yet. Stock builds up at places you own — a farm fills
             its shed whether or not a lorry comes.
           </div>
         )}
-
-        {held.length > 0 && offers.length === 0 && (
-          <div className="why">
-            Nobody is buying what you hold this week. Offers change every week.
-          </div>
-        )}
-
-        {offers.map((o) => {
-          const cargo = C.cargo[o.cargo];
+        {open < 0 && tab === 'sell' && held.map((h) => {
+          const mine = forCargo(h.cargo);
+          const rates = mine.map((o) => o.pence / o.tonnes);
+          const low = Math.min(...rates);
+          const high = Math.max(...rates);
           return (
             <button
-              key={o.key}
-              className="offer"
-              onClick={() => { if (world.acceptOffer(o.key)) onSold(); }}
-              title={`${o.buyer} takes ${o.tonnes}t of ${cargo.name.toLowerCase()}`}
+              key={h.cargo}
+              className="stock-head"
+              disabled={mine.length === 0}
+              onClick={() => setOpen(h.cargo)}
             >
-              <span className="swatch" style={{ background: cargo.colour }} />
+              <span className="swatch" style={{ background: C.cargo[h.cargo].colour }} />
               <span className="grow">
-                <span className="offer-buyer">{o.buyer}</span>
-                <span className="offer-what">
-                  {o.tonnes}t of {cargo.name.toLowerCase()}
-                  {' · '}
-                  {o.days === 0 ? 'pays on collection' : `pays in ${o.days} days`}
+                <span className="stock-name">{C.cargo[h.cargo].name}</span>
+                <span className="stock-sub">
+                  {h.tonnes}t in your sheds
+                  {/*
+                    * The range, which is the question this screen is opened with.
+                    * One figure when both buyers happen to pay the same, because
+                    * "between £287 and £287" is a worse sentence than "£287".
+                    */}
+                  {mine.length > 0 && (low === high
+                    ? ` · ${money(low)}/t`
+                    : ` · ${money(low)}–${money(high)}/t`)}
                 </span>
               </span>
-              <span className="offer-sum">
-                {money(o.pence)}
-                <i>{money(o.pence / o.tonnes)}/t</i>
-              </span>
+              {mine.length === 0
+                ? <span className="stock-none">no buyers</span>
+                : <span className="stock-go">›</span>}
             </button>
           );
         })}
 
-        {held.length > 0 && <div className="head">In your sheds</div>}
-        {held.map((h) => (
-          <div className="fact" key={h.cargo}>
-            <span className="swatch" style={{ background: C.cargo[h.cargo].colour }} />
-            <span className="grow">
-              <span className="fact-name">{C.cargo[h.cargo].name}</span>
-              <span className="fact-sub">worth {money(h.value)}/t</span>
-            </span>
-            <span className="fact-body">{h.tonnes}t</span>
-          </div>
-        ))}
-
-        {pending.length > 0 && <div className="head">Waiting to be paid</div>}
-        {pending.map((s, i) => {
+        {/* ---- pending ------------------------------------------------ */}
+        {open < 0 && tab === 'pending' && pending.map((s, i) => {
           const days = Math.max(0, Math.round((s.dueTick - world.tick) / 3200));
           return (
             <div className="tx" key={`${s.dueTick}-${i}`}>
@@ -132,6 +186,20 @@ export function Market({
             </div>
           );
         })}
+
+        {/* ---- history ------------------------------------------------ */}
+        {open < 0 && tab === 'history' && history.map((r, i) => (
+          <div className="tx" key={`${r.tick}-${i}`}>
+            <span className="swatch" style={{ background: C.cargo[r.cargo].colour }} />
+            <span className="grow">
+              <span className="tx-why">
+                {Math.round(r.tonnes)}t of {C.cargo[r.cargo].name.toLowerCase()}
+              </span>
+              <span className="tx-when">{world.stampOf(r.tick)}</span>
+            </span>
+            <span className="tx-sum in">{money(r.pence)}</span>
+          </div>
+        ))}
       </div>
       <span className="bubble-arrow" />
     </div>
