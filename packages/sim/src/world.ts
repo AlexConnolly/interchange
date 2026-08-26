@@ -93,6 +93,19 @@ export interface TickReport {
  */
 const WIDEN_SHARE = 0.1;
 
+/**
+ * What a track on your own land costs, against the catalogue price.
+ *
+ * A fifth, where a parish widening is a tenth. The board's share is small
+ * because the parish is paying most of it out of the rates and you are only
+ * contributing; on your own field there is nobody else to pay, so it costs you
+ * more per tile and is still cheap in absolute terms — a track is £340,000 in
+ * the catalogue, so eight tiles of it is about £545,000 against a lorry at
+ * £18,000. Expensive enough to be a decision, cheap enough to be reachable
+ * around the time you buy your first business.
+ */
+const TRACK_SHARE = 0.2;
+
 /** Shared empty, so the common case allocates nothing. */
 const EMPTY_EARNINGS: { x: number; z: number; pence: number }[] = [];
 
@@ -2531,6 +2544,8 @@ export class World {
     const y = (tile / this.config.size) | 0;
     const site = this.sites.alloc(defIndex, x, y, tile, company);
     if (site === NONE) return NONE;
+    // Founding one claims its ground, the same as buying one does.
+    if (company === this.player) this.landRevision++;
     this.sites.extraction[site] = def.kind === 'extraction' ? 1 : 0;
     this.sites.built[site] = this.year;
     this.sites.modernity[site] = 100;
@@ -2848,7 +2863,11 @@ export class World {
   foundYard(x: number, y: number, name: string): number {
     const tile = y * this.config.size + x;
     const id = this.yards.alloc(x, y, tile, this.player, name);
-    if (id !== NONE) this.refreshInfluence();
+    if (id !== NONE) {
+      // A yard owns its ground like a business does.
+      this.landRevision++;
+      this.refreshInfluence();
+    }
     return id;
   }
 
@@ -3011,6 +3030,8 @@ export class World {
     const price = this.priceOf(site);
     this.companies.post(this.player, Line.AssetTrade, price);
     this.sites.owner[site] = this.player;
+    // The land it stands on is yours now too, and the ground is drawn from this.
+    this.landRevision++;
     this.refreshInfluence();
     // New standing means new work in view.
     this.offerWorkNow();
@@ -3718,6 +3739,147 @@ export class World {
 
   /** How many times the board has agreed you belong here. Widens influence. */
   standing = 0;
+
+  // ----------------------------------------------------------------- your land
+
+  /**
+   * The parcels a company owns, by owning what stands on them.
+   *
+   * "I think we need businesses to also have a set bit of LAND they own. Like
+   * the area around them. Because I might want to build a road that makes it
+   * easier. We should allow road building on your OWN land." Which is the right
+   * shape for a reason the design already half states: the planning board is
+   * rung *seven*, gated on approval and on owning four vehicles, so between
+   * buying your first business and earning the parish's ear there is nothing you
+   * can do about access at all. This is that missing agency, and it needs no new
+   * permission system because the answer is simply that it is your land.
+   *
+   * A *parcel*, not a radius. The district is already divided into fields with
+   * hard edges and hedges drawn along them — so "your land" arrives with a
+   * visual language it did not have to invent, and the boundary is somewhere the
+   * player can already see. A radius would have been a soft circle nobody could
+   * point at.
+   *
+   * The parcel the business stands in, and the ones its own tile touches, which
+   * for a farm in the corner of a field is usually two or three. Enough to lay a
+   * track across; not enough to reroute the district.
+   */
+  ownedParcels(company: number): Set<number> {
+    const out = new Set<number>();
+    const parcel = this.terrain.fields.parcel;
+    const size = this.config.size;
+    const claim = (tile: number): void => {
+      if (tile < 0 || tile >= parcel.length) return;
+      const x = tile % size;
+      const y = (tile / size) | 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+          const p = parcel[ny * size + nx];
+          if (p >= 0) out.add(p);
+        }
+      }
+    };
+    for (let s2 = 0; s2 < this.sites.count; s2++) {
+      if (this.sites.owner[s2] !== company) continue;
+      claim(this.sites.tile[s2]);
+    }
+    for (let y2 = 0; y2 < this.yards.count; y2++) {
+      if (this.yards.owner[y2] !== company) continue;
+      claim(this.yards.tile[y2]);
+    }
+    return out;
+  }
+
+  /**
+   * Can this company lay a way across this tile?
+   *
+   * Land, road or nothing. A tile already carrying a road is allowed because a
+   * track has to *join* the network to be worth anything, and the joining tile
+   * belongs to the parish rather than to you — laying nothing on it and simply
+   * connecting is not a trespass.
+   */
+  canBuildOn(company: number, tile: number, owned?: Set<number>): boolean {
+    if (tile < 0 || tile >= this.terrain.fields.parcel.length) return false;
+    if (this.terrain.height[tile] <= 0) return false;
+    if (this.layers[Mode.Road].cls[tile] !== NO_WAY) return true;
+    const parcels = owned ?? this.ownedParcels(company);
+    return parcels.has(this.terrain.fields.parcel[tile]);
+  }
+
+  /**
+   * Lay a farm track along a run of tiles you own.
+   *
+   * No board, no approval, no standing: this is the whole point of the feature.
+   * What it costs is money and the tiles have to be yours, and that is the
+   * entire rule — which is why it can sit below rung seven without competing
+   * with it. The parish decides what happens on the parish's roads; you decide
+   * what happens in your own field.
+   *
+   * A track rather than a lane, and deliberately the cheapest thing in the
+   * catalogue. Being able to lay a *road* on your own land would make the
+   * planning board pointless, and the board is the top of the ladder. A track
+   * gets a lorry off a bad approach and no further.
+   */
+  layTrack(company: number, tiles: readonly number[]): { ok: boolean; reason: string } {
+    if (tiles.length < 2) return { ok: false, reason: 'Too short to be a track.' };
+    const owned = this.ownedParcels(company);
+    const layer = this.layers[Mode.Road];
+    let fresh = 0;
+    let joins = false;
+    for (const t of tiles) {
+      if (!this.canBuildOn(company, t, owned)) {
+        return { ok: false, reason: 'That crosses land you do not own.' };
+      }
+      if (layer.cls[t] === NO_WAY) fresh++;
+      else joins = true;
+    }
+    if (fresh === 0) return { ok: false, reason: 'There is already a way along there.' };
+    /*
+     * It has to meet the network. A track from one corner of your field to
+     * another is a thing you can build in life and is of no use whatever to a
+     * lorry, and letting it be built would leave the player with an orphan road
+     * and no explanation.
+     */
+    if (!joins) {
+      for (const t of tiles) {
+        for (const d of [1, -1, this.config.size, -this.config.size]) {
+          if (layer.cls[t + d] !== NO_WAY) { joins = true; break; }
+        }
+        if (joins) break;
+      }
+    }
+    if (!joins) return { ok: false, reason: 'It has to meet a road somewhere.' };
+
+    const cls = this.trackClass();
+    if (cls < 0) return { ok: false, reason: 'Nothing to build it with.' };
+    const cost = Math.round(fresh * this.content.ways[cls].buildCost * TRACK_SHARE);
+    if (this.companies.cash[company] < cost) {
+      return { ok: false, reason: 'Not enough in the bank.' };
+    }
+    this.companies.post(company, Line.Construction, cost);
+    this.layPublicWay(Mode.Road, cls, tiles, this.wayCharge[cls], this.content.ways[cls].buildCost);
+    this.rebuild();
+    this.landRevision++;
+    return { ok: true, reason: '' };
+  }
+
+  /** Bumped whenever the ground you own, or what is on it, changes. */
+  landRevision = 0;
+
+  /** The cheapest road in the catalogue: a farm track. */
+  private trackClass(): number {
+    let best = -1;
+    let cheapest = Infinity;
+    for (let i = 0; i < this.content.ways.length; i++) {
+      const w = this.content.ways[i];
+      if (w.mode !== 'road' || w.era > this.era) continue;
+      if (w.buildCost < cheapest) { cheapest = w.buildCost; best = i; }
+    }
+    return best;
+  }
 
   /**
    * What the board would widen a country lane *to*.

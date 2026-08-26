@@ -52,6 +52,15 @@ export interface GroundSource {
   isStream: (tile: number) => boolean;
   /** 0 outside your influence, 1 well inside. The world fades out beyond it. */
   influence: (tile: number) => number;
+  /**
+   * Ground you own, by owning what stands on it.
+   *
+   * Drawn because ownership you cannot see is not ownership. It is also the one
+   * place in the game where the *field boundaries already there* are doing a
+   * second job: your land is whole parcels, so its edge is a hedge you can
+   * already point at, and the tint only has to say which side of it you are on.
+   */
+  ownedLand: (tile: number) => boolean;
 }
 
 /**
@@ -197,6 +206,23 @@ export function buildGround(
           const along = (p & 1) === 0 ? y : x;
           if (along % 2 === 0) colour = shade(colour, 0.945);
         }
+      }
+      /*
+       * A warm lift on your own ground, before the distance fade.
+       *
+       * Very slight, and warm rather than a wash of colour: a field you own is
+       * still that field with that crop in it, and tinting it blue would be the
+       * game telling you about ownership instead of showing you a farm. Three per
+       * cent up on red and down on blue is enough to read as *yours* when it sits
+       * next to a field that is not, which — because the land is whole parcels —
+       * is exactly where it always sits.
+       */
+      if (src.ownedLand(tile)) {
+        colour = [
+          Math.min(1, colour[0] * 1.05 + 0.012),
+          Math.min(1, colour[1] * 1.03 + 0.008),
+          colour[2] * 0.965,
+        ];
       }
       colour = faded(colour, src.influence(tile));
 

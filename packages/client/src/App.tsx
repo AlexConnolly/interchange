@@ -595,6 +595,7 @@ export function App(): JSX.Element {
       isStream: (t) => (world.terrain.flags[t] & TileFlag.River) !== 0
         && world.terrain.height[t] > 0,
       isYard: (t) => yardTiles.has(t),
+      ownedLand: (t) => ownedParcels.has(world.terrain.fields.parcel[t]),
       influence: (t) => world.influence.at(t),
       roadClass,
       level: layer.level,
@@ -744,6 +745,17 @@ export function App(): JSX.Element {
      * reach it is standing in its own yard, and painting tarmac under the barn is
      * what "roads are going through buildings" was.
      */
+    /*
+     * Which parcels are yours, refreshed when the answer can have changed.
+     *
+     * Recomputed on `landRevision` rather than every frame, because it walks
+     * every site and yard — and the ground mesh is cached per chunk anyway, so a
+     * fresher answer than the mesh would be a lie either way. Buying a business
+     * bumps the revision; so does laying a track on it.
+     */
+    let ownedParcels = new Set<number>();
+    let landAt = -1;
+
     const yardTiles = new Set<number>();
     /*
      * Mark a tile as built on, and drop the chunk so the tarmac goes.
@@ -2091,6 +2103,19 @@ export function App(): JSX.Element {
        * whole than to enumerate. The threshold is where those two costs cross,
        * and the list of tiles is what tells them apart.
        */
+      /*
+       * Whose land is whose, when it changes.
+       *
+       * A whole rebuild rather than a tile list: buying a business changes two or
+       * three parcels at once and a parcel is dozens of tiles spread over
+       * several chunks, so enumerating them costs more than redrawing. It happens
+       * a handful of times in a game.
+       */
+      if (world.landRevision !== landAt) {
+        landAt = world.landRevision;
+        ownedParcels = world.ownedParcels(world.player);
+        renderer.dropChunks();
+      }
       if (world.seasonRevision !== season) {
         season = world.seasonRevision;
         const dirty = world.dirtyFields;
