@@ -144,40 +144,125 @@ export function generateWorld(w: World): void {
   // Placed near towns and chosen so that whatever the region actually digs up
   // has somewhere to go. A map with four collieries and no gasworks is a map
   // where the player's only cargo is worthless.
-  const producedNearby = new Map<number, number>();
-  for (let s = 0; s < w.sites.count; s++) {
-    const outs = c.industries[w.sites.def[s]].recipe.outputs;
-    for (const id of Object.keys(outs)) {
-      const ci = c.cargoIndex.get(id);
-      if (ci !== undefined) producedNearby.set(ci, (producedNearby.get(ci) ?? 0) + 1);
+  /** What the district can supply, right now. Recomputed between waves. */
+  const supply = (): Map<number, number> => {
+    const made = new Map<number, number>();
+    for (let s = 0; s < w.sites.count; s++) {
+      const outs = c.industries[w.sites.def[s]].recipe.outputs;
+      for (const id of Object.keys(outs)) {
+        const ci = c.cargoIndex.get(id);
+        if (ci !== undefined) made.set(ci, (made.get(ci) ?? 0) + 1);
+      }
     }
-  }
+    return made;
+  };
 
-  const consumers: number[] = [];
-  c.industries.forEach((ind, i) => {
-    if (ind.fromEra > 1) return;
-    if (ind.kind !== 'processing' && ind.kind !== 'terminal') return;
-    const ins = Object.keys(ind.recipe.inputs).map((k) => c.cargoIndex.get(k) ?? -1);
-    // Only offer an industry whose first input the region can actually supply.
-    if (ins.some((ci) => ci >= 0 && (producedNearby.get(ci) ?? 0) > 0)) consumers.push(i);
-  });
+  /** Does this place consume without making anything? A shop, not a works. */
+  const isShop = (def: number): boolean =>
+    Object.keys(c.industries[def].recipe.outputs).length === 0
+    && c.industries[def].passThrough !== true;
 
-  for (let townId = 0; townId < w.towns.count; townId++) {
+  /**
+   * The industries whose input the district can supply, given what it has.
+   *
+   * Works first, shops second, and in that order for a reason beyond tidiness:
+   * a works is what makes the *next* thing possible, so it has to exist before
+   * anything that sells what it makes can be eligible at all. It also means the
+   * first pass places exactly what it placed before this two-pass business
+   * existed — which matters, because the shop takes milk and would otherwise
+   * have joined the first pass's rotation and pushed something else out of it.
+   * Measured: on the opening seed that substituted a second feed mill for the
+   * brewery, moved the milk run from a creamery twenty-eight tiles away to one
+   * thirty-six tiles away, and halved the time to a second van. Adding the shop
+   * should add the shop.
+   */
+  const eligible = (made: Map<number, number>, shops: boolean): number[] => {
+    const out: number[] = [];
+    c.industries.forEach((ind, i) => {
+      if (ind.fromEra > 1) return;
+      if (ind.kind !== 'processing' && ind.kind !== 'terminal') return;
+      if (isShop(i) !== shops) return;
+      const ins = Object.keys(ind.recipe.inputs).map((k) => c.cargoIndex.get(k) ?? -1);
+      if (ins.some((ci) => ci >= 0 && (made.get(ci) ?? 0) > 0)) out.push(i);
+    });
+    return out;
+  };
+
+  /*
+   * Two waves, and the second is the one that was missing.
+   *
+   * Eligibility was computed once, before a single processing site existed — so
+   * the only inputs the district was known to supply were the ones that come out
+   * of the ground: milk, grain, livestock, aggregate, timber. Everything one step
+   * further along was therefore ineligible for ever. A creamery placed in the
+   * loop never made the shop that sells its dairy eligible, because the list had
+   * already been drawn up.
+   *
+   * The effect was invisible and large. Of sixteen industries in the data, six —
+   * the village shop, the filling station, the builders' merchant, the freight
+   * terminal, the distribution centre and, on most seeds, the abattoir — were
+   * never generated in any district on any seed. Not rare: absent. The economy
+   * was a third of the size it was written to be, and it looked complete because
+   * the missing places were exactly the ones you never saw.
+   *
+   * So the second wave asks again, having built the first. That is all it takes:
+   * farms make milk, the first wave puts a creamery on it, and the second wave
+   * can then put a shop on the dairy.
+   */
+  for (let wave = 0; wave < 2; wave++) {
+    const consumers = eligible(supply(), wave === 1);
+    if (consumers.length === 0) continue;
     /*
-     * Two or three per settlement, not one.
+     * The second wave draws its random numbers from its own stream.
      *
-     * With farms now in the district there is far more that a processing site
-     * could usefully consume, and a district of a dozen places is what design.md
-     * asks for. One per town gave eight sites for fourteen industries, most of
-     * them duplicates of the same three.
+     * Because otherwise adding it moves the whole district. Everything after
+     * this point — the road network above all — draws from the same sequence, so
+     * six extra calls to `findSiteSpot` shift every number the road builder
+     * sees, and a seed that had a creamery twenty-eight tiles down the lane now
+     * has one at thirty-six. Nothing was placed differently; the *roads between*
+     * the same places were. It showed up as the opening job paying half again as
+     * much and the second van arriving in four minutes instead of eight, on the
+     * one seed the game actually opens on.
+     *
+     * So the wave is a side stream, seeded off the district seed and put back
+     * afterwards. Adding a generation pass should not be able to reshuffle the
+     * passes after it, and this is the line that makes that true.
      */
-    const count = 2 + (w.towns.population[townId] > 900 ? 1 : 0) + (townId % 2 === 0 ? 1 : 0);
-    for (let k = 0; k < count && consumers.length > 0; k++) {
-      const def = consumers[(townId * 3 + k) % consumers.length];
-      const spot = findSiteSpot(t, w.towns.x[townId], w.towns.y[townId], 4, 11, w);
-      if (!spot) continue;
-      w.sites.alloc(def, spot[0], spot[1], t.idx(spot[0], spot[1]), AUTHORITY);
+    const resume = wave === 1 ? w.rng.getState() : null;
+    if (wave === 1) w.rng.seed((w.config.seed ^ 0x5eed51de) | 0);
+    for (let townId = 0; townId < w.towns.count; townId++) {
+      /*
+       * Two or three per settlement, not one.
+       *
+       * With farms now in the district there is far more that a processing site
+       * could usefully consume, and a district of a dozen places is what
+       * design.md asks for. One per town gave eight sites for fourteen
+       * industries, most of them duplicates of the same three.
+       */
+      const count = wave === 0
+        ? 2 + (w.towns.population[townId] > 900 ? 1 : 0) + (townId % 2 === 0 ? 1 : 0)
+        : 1 + (w.towns.population[townId] > 900 ? 1 : 0);
+      for (let k = 0; k < count; k++) {
+        const def = consumers[(townId * 3 + k + wave * 5) % consumers.length];
+        /*
+         * A shop stands in the village; a works stands outside it.
+         *
+         * The difference is what the place is *for*. A creamery is sited away
+         * from the houses because it is noisy and takes lorries all day; a shop
+         * with no lorries of its own is on the street the people are on, and
+         * putting it eleven tiles out in a field would be the one building in
+         * the district in the wrong place. Read off the data rather than the id:
+         * anything that consumes and makes nothing is serving the people who
+         * live there, so that is where it goes.
+         */
+        const spot = isShop(def)
+          ? findSiteSpot(t, w.towns.x[townId], w.towns.y[townId], 2, 5, w)
+          : findSiteSpot(t, w.towns.x[townId], w.towns.y[townId], 4, 11, w);
+        if (!spot) continue;
+        w.sites.alloc(def, spot[0], spot[1], t.idx(spot[0], spot[1]), AUTHORITY);
+      }
     }
+    if (resume) w.rng.setState(resume);
   }
 
   /*

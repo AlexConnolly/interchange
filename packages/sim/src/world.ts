@@ -42,7 +42,8 @@ import {
 } from './fields.ts';
 import { Heap } from './heap.ts';
 import {
-  APPROVAL_DRIFT_PER_DAY, APPROVAL_PER_LOAD, APPROVAL_REST, PLANNING_FROM_VEHICLES,
+  APPROVAL_DRIFT_PER_DAY, APPROVAL_PER_LOAD, APPROVAL_REST, PARISH_PER_DAY,
+  PLANNING_FROM_VEHICLES,
   WORKS_APPROVAL, Works, levyGain,
 } from './planning.ts';
 import { Rng } from './rng.ts';
@@ -697,6 +698,53 @@ export class World {
       this.approval = Math.max(APPROVAL_REST, this.approval - APPROVAL_DRIFT_PER_DAY);
     } else if (this.approval < APPROVAL_REST) {
       this.approval = Math.min(APPROVAL_REST, this.approval + APPROVAL_DRIFT_PER_DAY);
+    }
+
+    /*
+     * And keeping the village supplied counts for something.
+     *
+     * Owning a shop is a different relationship with the parish from hauling
+     * through it. A haulier delivers and leaves; whoever owns the shop is the
+     * reason there is milk in the village at all, and that is precisely the kind
+     * of standing `planning.ts` says money cannot buy — you can buy the shop, but
+     * the approval comes from *running* it, and only while it has something on
+     * the shelves.
+     *
+     * Which is the test: a place you own that consumes and makes nothing is
+     * serving the people who live there, and it earns while it is trading. Buy
+     * the shop and let it run dry and it earns you nothing, because a shop with
+     * empty shelves is not serving anybody. Worth about a load and a half a day
+     * at full shelves — enough that owning the village shop is a real step
+     * toward the planning board and nowhere near enough to be a shortcut to it.
+     */
+    const cargoCount = this.content.cargo.length;
+    for (let s = 0; s < this.sites.count; s++) {
+      if (this.sites.owner[s] !== this.player) continue;
+      const def = this.sites.def[s];
+      if (this.recipes.outputs[def].length > 0) continue;
+      const ins = this.recipes.inputs[def];
+      if (ins.length === 0) continue;
+      /*
+       * How well supplied it is, measured on its best-stocked line rather than
+       * averaged across all of them.
+       *
+       * Averaging was the obvious version and it punished exactly the player
+       * this is for. A village shop lists milk, dairy and beer; someone eight
+       * minutes into their first game can supply milk and nothing else, so the
+       * average was a third however hard they worked at it — less than the daily
+       * drift, which meant owning the shop moved the number by four hundredths
+       * of a point a month and the whole thing may as well not have been there.
+       *
+       * The best line, then: keeping *something* on the shelves is what being
+       * the village's supplier means, and filling all three is a matter of
+       * having a bigger business, which the game rewards elsewhere.
+       */
+      let stocked = 0;
+      for (let i = 0; i < ins.length; i += 2) {
+        const cap = this.sites.capacity[s * cargoCount + ins[i]];
+        if (cap > 0) stocked = Math.max(stocked, Math.min(1, this.sites.stockOf(s, ins[i]) / cap));
+      }
+      this.approval = Math.min(100, this.approval + PARISH_PER_DAY * stocked);
     }
 
     const b = this.content.balance;
@@ -1356,6 +1404,11 @@ export class World {
        * thing planning.ts exists to avoid.
        */
       this.approval = Math.min(100, this.approval + APPROVAL_PER_LOAD);
+      // And note that it was you who brought it, so the place knows who its
+      // haulier is. `canBuySite` is the only reader; see the note there.
+      if (!isTown && target >= 0 && target < this.sites.count) {
+        this.sites.servedDay[target] = this.day;
+      }
     }
     if (company === this.player && this.earned.length < 32) {
       this.earned.push({
@@ -3001,7 +3054,37 @@ export class World {
     if (tile === NONE || !this.influence.usable(tile)) {
       return { ok: false, reason: 'Too far out. You have no standing there yet.', needs };
     }
-    for (const group of this.suppliersFor(site)) {
+    /*
+     * A shop is bought on trade, not on owning its suppliers.
+     *
+     * The rule below — own a producer of every input first — is right for a
+     * works and backwards for a shop. A creamery is genuinely the top of a chain
+     * and buying it without the milk beneath it is buying a building. A village
+     * shop is not the top of anything: it is a counter, and what makes it yours
+     * to buy is that you are the one whose van pulls up outside it. Under the
+     * ownership rule you had to own a dairy farm *and* a creamery *and* a
+     * brewery before the parish would sell you a four-hundred-pound shop, which
+     * put the smallest thing in the game behind the largest.
+     *
+     * So for a place that makes nothing, the question is whether you supply it.
+     * A fortnight, because that is long enough to be a milk round and short
+     * enough that it has to be current — let the round lapse and the shop is no
+     * longer yours to buy. It is also exactly the ladder the shop was asked for:
+     * take the contract, run it a while, buy the shop, and the farms come after.
+     */
+    const makesNothing = this.recipes.outputs[this.sites.def[site]].length === 0
+      && !this.content.industries[this.sites.def[site]]?.passThrough;
+    if (makesNothing) {
+      const served = this.sites.servedDay[site];
+      if (served < 0 || this.day - served > 14) {
+        return {
+          ok: false,
+          reason: 'You do not supply it. Run a load in first.',
+          needs,
+        };
+      }
+    }
+    for (const group of makesNothing ? [] : this.suppliersFor(site)) {
       if (!group.owned) needs.push(group.cargo);
     }
     if (needs.length > 0) {
@@ -3879,6 +3962,27 @@ export class World {
 
   /** Bumped whenever the ground you own, or what is on it, changes. */
   landRevision = 0;
+
+  /**
+   * What a lorry is doing, in one word the interface can print.
+   *
+   * "If a vehicle is resting, it still says working." It did, because the only
+   * question anything asked was whether it had a service on it — which was the
+   * whole truth right up until the fleet started knocking off at eight. A lorry
+   * with a job, parked in the dark, is not working, and telling the player it is
+   * makes the one number on the status bar a lie for ten hours a day.
+   *
+   * Four states, and the order is the order of precedence: a lorry with no job
+   * is idle whatever the hour, one stopped by the snow is stopped whatever the
+   * hour, and only then does the clock get a say. Answered here rather than in
+   * the interface because three panels ask it and they must not disagree.
+   */
+  vehicleActivity(v: number): 'idle' | 'stopped' | 'sleeping' | 'working' {
+    if (!this.vehicles.alive[v] || this.vehicles.service[v] === NONE) return 'idle';
+    if (stoppedBySnow(this.vehicleFittings[v], this.snow)) return 'stopped';
+    if (this.fleetParked) return 'sleeping';
+    return 'working';
+  }
 
   /**
    * Can a track go on this tile, and if not, why not?

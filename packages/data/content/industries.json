@@ -344,9 +344,9 @@
     "deposit": 0,
     "recipe": {
       "inputs": {
-        "meat": 2,
+        "milk": 3,
         "dairy": 2,
-        "beer": 2
+        "beer": 1
       },
       "outputs": {},
       "period": 30

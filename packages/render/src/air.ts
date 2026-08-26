@@ -382,49 +382,62 @@ export function makeAir(scene: Scene): Air {
    * of the difference between smoke and a column of dots.
    */
   const smoke = new Field(scene, {
-    count: 520,
+    count: 620,
     tiles: 0.42,
     colour: '#cfd3d2',
-    opacity: 0.34,
-    // Two and a half times its birth size by the end, which is a plume that
-    // opens out rather than a column of identical dots.
-    spread: 1.6,
+    opacity: 0.26,
+    /*
+     * Billows, rather than merely growing. Four times its birth size, which is
+     * most of what makes a column read as *mass* — a puff that keeps its size is
+     * a ball, and a stack of balls is what "plastic rubber balloons" means.
+     */
+    spread: 3.2,
     behave: (f, i, k, dt, time) => {
       const j = i * 3;
       /*
-       * Rises, slows, and leans downwind — in that order of importance.
+       * Heavy, and that is the whole correction. "It moves WAY too fast with the
+       * wind. It needs to feel HEAVY and accumulate, not flow off like plastic
+       * balloons with helium."
        *
-       * The lean builds with age rather than being applied flat, because that is
-       * what a plume does: it goes up out of the chimney and bends over as it
-       * loses the heat that was driving it. `1 - k` is the age, so the wind gets
-       * its say later and the bottom of the plume stays vertical.
+       * Three things were making it flighty, and the wind was only one:
+       *
+       * The lean *built up* over the particle's life — it accumulated sideways
+       * velocity for four seconds, so by the end it was travelling faster
+       * horizontally than it ever rose. Coal smoke does the opposite: it leaves
+       * the chimney with almost no sideways motion and the air pushes it over,
+       * which is a small steady force and not an accelerating one.
+       *
+       * It rose too fast and then stopped, because the vertical damping was
+       * strong. Real smoke goes up slowly and *keeps* going up, which is why a
+       * plume on a still day is a column rather than a mushroom.
+       *
+       * And it died young. Half of what makes smoke look thick is that the puff
+       * ahead has not gone by the time the next one arrives, so the column
+       * overlaps itself — which is a function of how long each one lives, not of
+       * how many there are.
        */
-      f.vel[j + 1] *= 1 - dt * 0.5;
-      const lean = (1 - k) * 1.4 + 0.25;
+      f.vel[j + 1] *= 1 - dt * 0.12;
+      const lean = 0.16;
       f.vel[j] += WIND_X * lean * dt;
       f.vel[j + 2] += WIND_Z * lean * dt;
+      // A slow turn in the column rather than a gust: smoke curls, it does not
+      // flap. Quarter of what it was, and on the position so it does not build.
+      f.pos[j] += Math.sin(time * 0.4 + f.seed[i]) * dt * 0.045;
+      f.pos[j + 2] += Math.cos(time * 0.33 + f.seed[i]) * dt * 0.045;
       /*
-       * And a little turbulence, shared rather than per particle.
-       *
-       * Driven by `time` and by *position along the plume* — the seed only sets
-       * where in the wobble this puff sits — so neighbouring puffs move together
-       * the way air does, instead of each choosing its own direction.
+       * In slowly and out slowly, and never quite opaque. Thickness comes from
+       * puffs overlapping, so each one has to be faint enough that four of them
+       * on top of each other is smoke rather than a wall.
        */
-      const gust = Math.sin(time * 0.9 + f.seed[i] * 0.6);
-      f.vel[j] += gust * dt * 0.10;
-      f.vel[j + 2] += Math.cos(time * 0.7 + f.seed[i] * 0.6) * dt * 0.10;
-      return Math.min(1, (1 - k) * 3.4) * k * k;
+      return Math.min(1, (1 - k) * 2.6) * Math.min(1, k * 1.6);
     },
   });
 
   /*
    * Exhaust. Small, dark, brief — a 1985 diesel at the moment it pulls away.
    *
-   * Behind the vehicle rather than under it, and that is why the heading is in
-   * the source at all. A puff that appears at the centre of a lorry looks like
-   * the lorry is on fire; a puff that appears a quarter of a tile behind it and
-   * is immediately left behind reads as an exhaust without anyone deciding it
-   * has.
+   * Behind the vehicle rather than under it, which is why the heading is read at
+   * all: a puff at the centre of a lorry looks like the lorry is on fire.
    */
   const exhaust = new Field(scene, {
     count: 200,
@@ -435,8 +448,8 @@ export function makeAir(scene: Scene): Air {
     behave: (f, i, k, dt) => {
       const j = i * 3;
       f.vel[j + 1] *= 1 - dt * 0.9;
-      // The same wind, so a lorry's exhaust and the farmhouse chimney behind it
-      // agree about which way the air is going.
+      // The same wind as everything else, so a lorry's exhaust and the farmhouse
+      // chimney behind it agree about which way the air is going.
       f.vel[j] += WIND_X * dt * 0.5;
       f.vel[j + 2] += WIND_Z * dt * 0.5;
       return Math.min(1, (1 - k) * 5) * k * k * 0.9;
@@ -580,7 +593,7 @@ export function makeAir(scene: Scene): Air {
       const cold = 0.55 + frame.snow * 0.45;
       const lit = hour < 9.5 ? 1 : hour > 16 ? 1 : 0.2;
       const smokeLevel = cold * lit * frame.level;
-      smoke.aim(0.36 * frame.level, frame.pixelsPerTile);
+      smoke.aim(0.26 * frame.level, frame.pixelsPerTile);
       if (smokeLevel > 0.02) {
         /*
          * Puffs a second from one chimney, so the density is the same whatever
@@ -595,7 +608,7 @@ export function makeAir(scene: Scene): Air {
          * and visible. The arithmetic is framerate-independent; the picture was
          * not.
          */
-        const chance = 4 * dt * smokeLevel;
+        const chance = 2.6 * dt * smokeLevel;
         for (let p = 0; p < src.placeCount; p++) {
           const x = src.px[p];
           const z = src.pz[p];
@@ -623,12 +636,18 @@ export function makeAir(scene: Scene): Air {
            * a puff leaves a chimney going *up*, and everything sideways after
            * that is the wind's doing.
            */
+          /*
+           * Slowly, and for a long time. A fifth of the rise it had and twice
+           * the life, so the column climbs at something like the speed smoke
+           * actually climbs and each puff is still there when the next four
+           * arrive — which is what accumulating looks like.
+           */
           smoke.spawn(
-            x + (Math.random() - 0.5) * 0.16,
-            groundHeightAt(src, x, z) + 1.2 + Math.random() * 0.12,
-            z + (Math.random() - 0.5) * 0.16,
-            0, 0.46 + Math.random() * 0.14, 0,
-            3.6 + Math.random() * 2.0,
+            x + (Math.random() - 0.5) * 0.13,
+            groundHeightAt(src, x, z) + 1.2 + Math.random() * 0.10,
+            z + (Math.random() - 0.5) * 0.13,
+            0, 0.13 + Math.random() * 0.07, 0,
+            7.5 + Math.random() * 4.0,
           );
         }
       }

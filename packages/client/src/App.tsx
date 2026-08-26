@@ -34,6 +34,7 @@ import {
 import { Fleet, Upgrades, Yard } from './Fleet.tsx';
 import { Planning } from './Planning.tsx';
 import { Dock } from './Dock.tsx';
+import { Icon } from './Icons.tsx';
 import { Owned, Contracts } from './Owned.tsx';
 import { Status } from './Status.tsx';
 import { Driver } from './Driver.tsx';
@@ -415,10 +416,24 @@ export function App(): JSX.Element {
    * dialogue over the top of it is the one thing that cannot help.
    */
   const [tool, setTool] = useState<'none' | 'lay' | 'lift'>('none');
+  // So the tray can animate out rather than vanish, the same way panels do.
+  const [, toolLeaving] = useLeaving(tool, tool !== 'none', 150);
   const buildingRef = useRef(false);
   buildingRef.current = building;
   const toolRef = useRef<'none' | 'lay' | 'lift'>('none');
   toolRef.current = tool;
+  /**
+   * How fast the day runs. One, two or four.
+   *
+   * Worth having now rather than earlier because the game has grown things that
+   * take a *season*: fields that want ploughing in October, a hedge that comes
+   * into leaf in April, a contract that pays over weeks. Watching for those at
+   * one minute to the hour was fine when the loop was a lorry going back and
+   * forth; it is not fine when the thing you are waiting for is a harvest.
+   */
+  const [speed, setSpeed] = useState(1);
+  const speedRef = useRef(1);
+  speedRef.current = speed;
   const bumpRef = useRef(bump);
   bumpRef.current = bump;
 
@@ -1896,9 +1911,39 @@ export function App(): JSX.Element {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape') return;
       e.preventDefault();
+      /*
+       * Unless there is a tool in hand, in which case Escape puts *that* down.
+       *
+       * Escape means "out of what I am in", and what you are in is the road
+       * tool, not the game. Pausing instead would be the one key that skipped a
+       * level on the way out, and would leave you still holding the tool behind
+       * the menu.
+       */
+      if (toolRef.current !== 'none') {
+        setTool('none');
+        setNote('');
+        return;
+      }
       setPaused((was) => !was);
     };
     window.addEventListener('keydown', onKey);
+
+    /*
+     * And a right-click puts it down too.
+     *
+     * The gesture everybody tries first, because every editor since about 1993
+     * has meant "stop doing that" by it, and the only one that needs no aiming
+     * at all — the ✕ is thirty pixels and this is the whole screen. The browser's
+     * own menu is suppressed only while a tool is in hand; the rest of the time
+     * a right-click on the page behaves as the page normally would.
+     */
+    const onContext = (e: MouseEvent): void => {
+      if (toolRef.current === 'none') return;
+      e.preventDefault();
+      setTool('none');
+      setNote('');
+    };
+    window.addEventListener('contextmenu', onContext);
 
     canvas.addEventListener('pointerdown', down);
     canvas.addEventListener('pointermove', move);
@@ -2014,9 +2059,31 @@ export function App(): JSX.Element {
       if (pausedRef.current) {
         acc = 0;
       } else {
-        acc += dt * TICKS_PER_SECOND;
+        /*
+         * Speed multiplies the tick rate here, and the renderer's world clock
+         * over there — see `timeScale` in `scene.ts`.
+         *
+         * Both, and it has to be both. This started as a multiplier on the tick
+         * rate alone, on the reasoning that scaling the whole frame would make
+         * the camera pan four times as fast, which is not what anybody means by
+         * fast-forward. True about the camera and wrong about everything else:
+         * the simulation ran four times as fast while every drawn thing kept
+         * easing toward it at real-time rates, so the lorries trailed behind
+         * their own positions and the smoke, the mist and the birds carried on as
+         * though nothing had changed. What needed separating was *world* time
+         * from *interface* time, not simulation from rendering.
+         *
+         * The 40-tick ceiling below stays where it is deliberately. It is there
+         * so a stall cannot be paid back in one enormous frame, and a fast-forward
+         * that outruns the machine should *fall behind* rather than freeze while
+         * it catches up.
+         */
+        acc += dt * TICKS_PER_SECOND * speedRef.current;
+        // The same clock the hidden-tab timer uses. The frame loop is the one
+        // advancing it while the tab is visible, so it says so.
+        simAt = now;
         let ran = 0;
-        while (acc >= 1 && ran < 40) {
+        while (acc >= 1 && ran < 40 * speedRef.current) {
           world.step();
           acc -= 1;
           ran++;
@@ -2395,6 +2462,9 @@ export function App(): JSX.Element {
         dirty.clear();
       }
 
+      // The same number the tick rate uses, so the picture and the simulation
+      // run at one speed rather than two.
+      renderer.timeScale = pausedRef.current ? 0 : speedRef.current;
       renderer.render(src, dt);
 
       /*
@@ -2503,14 +2573,78 @@ export function App(): JSX.Element {
         });
       }
     };
+    /*
+     * ---- and it keeps running when you look away -------------------------
+     *
+     * "I think the game pauses (or i dont earn money) when i switch tab." Quite
+     * right, and completely: the world was stepped only inside the frame loop,
+     * and a browser stops calling `requestAnimationFrame` the moment a tab goes
+     * to the background. Every lorry stopped mid-lane, no load was delivered and
+     * no money was earned for as long as you were reading something else. Come
+     * back and it carried on from exactly where it was, so nothing looked wrong
+     * — the clock simply had not moved.
+     *
+     * That is the wrong behaviour for a game about a business running. So while
+     * the tab is hidden the world is driven off a timer instead, stepped by the
+     * wall clock rather than by frames. Two mechanisms, one clock: `simAt` is the
+     * moment the world was last advanced to, and both the timer and the frame
+     * loop advance it to now — so whichever runs, time passes exactly once.
+     *
+     * Catching up is affordable to the point of being free. A tick measured at
+     * 3.5 microseconds, so a minute away is four milliseconds of arithmetic and
+     * an hour is a quarter of a second — which is why this can simply be honest
+     * about the elapsed time instead of quietly rounding it down. Background
+     * timers are throttled hard (a second, and after a while a minute), and that
+     * does not matter here: there is nothing to draw, so a minute's worth of
+     * ticks in one callback is the same thing as sixty callbacks of one second.
+     */
+    let simAt = performance.now();
+    /** Advance the world to now, in whole ticks. Returns nothing to draw. */
+    const advance = (): void => {
+      const now = performance.now();
+      // Four hours, which is about a second of arithmetic. A tab left open for a
+      // week should not spend a minute of the machine catching up on a fortnight
+      // of milk nobody was there to sell.
+      const secs = Math.min(4 * 3600, (now - simAt) / 1000);
+      simAt = now;
+      if (pausedRef.current) return;
+      let ticks = Math.floor(secs * TICKS_PER_SECOND * speedRef.current);
+      while (ticks-- > 0) world.step();
+    };
+    const hidden = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') advance();
+    }, 500);
+    /*
+     * And on the way back, before the first frame.
+     *
+     * The interval is not a guarantee — a browser is entitled to stop firing it
+     * altogether for a tab that has been hidden a long time, or on battery — so
+     * the wall clock is read once more the moment the tab is visible again. If
+     * the timer did its job this catches up nothing, because `simAt` is already
+     * up to date. If the timer was suspended, this is what covers the gap.
+     */
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') {
+        advance();
+        // The frame loop measures `dt` from its own last timestamp, which is now
+        // however long ago the tab was hidden. Without this the first frame back
+        // would hand every eased thing in the renderer a quarter-second step.
+        last = performance.now();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
     raf = requestAnimationFrame(loop);
     setLive({ world, renderer, src });
     setReady(true);
 
     return () => {
       cancelAnimationFrame(raf);
+      window.clearInterval(hidden);
+      document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('resize', fit);
       window.removeEventListener('keydown', onKey);
+      window.removeEventListener('contextmenu', onContext);
       canvas.removeEventListener('pointerdown', down);
       canvas.removeEventListener('pointermove', move);
       canvas.removeEventListener('pointerup', up);
@@ -2630,33 +2764,46 @@ export function App(): JSX.Element {
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
-      {tool !== 'none' && (
+      {(tool !== 'none' || toolLeaving) && (
         /*
-         * Two buttons and a sentence, above the dock.
+         * The tools, in a tray that rises out of the dock.
          *
-         * Not a panel: a panel over the district would hide the thing the tool is
-         * for. The sentence matters as much as the buttons — a mode with no
-         * explanation is a mode the player leaves by pressing Escape and never
-         * returns to.
+         * It was two text buttons, a sentence and a "Done" in a wide cream
+         * strip — a dialog wearing a toolbar's clothes, and it looked nothing
+         * like the dock two inches below it that does exactly the same job.
+         * Same glass, same corner radius, same icon-over-label buttons, so
+         * pressing Roads reads as the dock *growing a row* rather than as
+         * another piece of furniture arriving.
+         *
+         * And no "Done", because there was never anything to be done with. A
+         * mode you are in until you say otherwise ends the way modes end: an
+         * ✕, Escape, or a right-click on the district — the last being the one
+         * people reach for first, and the only one that needs no aiming.
          */
-        <div className="tool-bar">
+        <div className={`tools${tool === 'none' || toolLeaving ? ' tools-leaving' : ''}`}>
           <button
             className={`tool-btn ${tool === 'lay' ? 'on' : ''}`}
             onClick={() => { setTool('lay'); setNote(''); }}
-          >Lay track</button>
+            title="Lay a mud track on your own land, joining an existing road"
+          >
+            <Icon id="track" size={20} />
+            <span>Track</span>
+          </button>
           <button
             className={`tool-btn ${tool === 'lift' ? 'on' : ''}`}
             onClick={() => { setTool('lift'); setNote(''); }}
-          >Take up</button>
-          <span className="tool-say">
-            {note !== '' ? note
-              : tool === 'lay'
-                ? 'Click a blue mark. Only your own land, and it must join a road.'
-                : 'Click a red mark to take a track up again.'}
-          </span>
-          <button className="tool-btn" onClick={() => { setTool('none'); setNote(''); }}>
-            Done
+            title="Take up a track you laid"
+          >
+            <Icon id="pick" size={20} />
+            <span>Remove</span>
           </button>
+          <span className="tool-rule" />
+          <button
+            className="tool-x"
+            onClick={() => { setTool('none'); setNote(''); }}
+            aria-label="Put the tool down"
+            title="Put the tool down (Esc, or right-click)"
+          >&times;</button>
         </div>
       )}
       {building && (
@@ -2689,11 +2836,12 @@ export function App(): JSX.Element {
           <Status
             cash={hud.cash}
             date={hud.date}
-            out={hud.vehicles}
-            idle={hud.free}
+
             dayFraction={hud.dayFraction}
             night={hud.night}
-            weather={hud.weather}
+            speed={speed}
+
+            onSpeed={setSpeed}
             onMenu={() => { void sound.start(); setPaused(true); }}
           />
         )}

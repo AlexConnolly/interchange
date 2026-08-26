@@ -272,8 +272,22 @@ export function buildGround(
        * there you see the shape of the country and not what is in it, and the
        * detail would be a lot of triangles for a wash of fog.
        */
+      /*
+       * Not through the road. "They can now plough over the roads."
+       *
+       * Quite. The crop state is a property of the *parcel*, and a lane crossing
+       * a field does not stop the field being a field — so the tile under the
+       * tarmac is still down to barley as far as the simulation is concerned, and
+       * the corrugation was standing up through the road surface. A plough goes
+       * round a road; so does a drill; and nothing grows on it.
+       *
+       * The same test the hedges use, and for the same reason: `hasRoad` is
+       * already the question "is this tile paved", asked once and answered for
+       * everything that has to leave a gap.
+       */
       const spec = TILTH[src.crop[tile]];
-      if (spec !== undefined && src.parcel[tile] !== NO_PARCEL && src.influence(tile) > 0.10) {
+      if (spec !== undefined && src.parcel[tile] !== NO_PARCEL
+        && !src.hasRoad(tile) && src.influence(tile) > 0.10) {
         tilth(
           m, x, y, h00, h10, h01, h11, spec, colour,
           (src.parcel[tile] & 1) === 0,

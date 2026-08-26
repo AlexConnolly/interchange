@@ -47,6 +47,9 @@ const SHOTS: { name: string; query: string; wait?: number }[] = [
   { name: 'dawn-mist', query: 'across=30&time=0.02' },
   { name: 'night', query: 'across=30&time=0.62' },
   { name: 'close', query: 'across=16' },
+  { name: 'cloud-in', query: 'across=52' },
+  { name: 'cloud-full', query: 'across=70' },
+  { name: 'cloud-none', query: 'across=30' },
 ];
 
 const BASE = process.env.BASE ?? 'http://localhost:4173/';
@@ -88,7 +91,12 @@ async function main(): Promise<void> {
     if (m.type() === 'error' || m.type() === 'warning') console.log(`  [page] ${m.text()}`);
   });
 
+  /* One name, or a comma-separated few, when you only want to look at one
+   * thing. Eight shots at nine seconds of settling each is two minutes, which
+   * is too long to wait to check a single change. */
+  const only = (process.env.ONLY ?? '').split(',').filter((x) => x !== '');
   for (const shot of SHOTS) {
+    if (only.length > 0 && !only.includes(shot.name)) continue;
     const url = `${BASE}?vfx=high&${shot.query}&shot=${Date.now()}`;
     await page.goto(url, { waitUntil: 'load' });
     await page.waitForTimeout(shot.wait ?? SETTLE);

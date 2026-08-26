@@ -34,6 +34,21 @@ import { Icon } from './Icons.tsx';
 
 const C = content();
 
+/**
+ * The sim's word for what a lorry is doing, as the word to print.
+ *
+ * One table so the three lists that show it cannot drift apart, and the ellipsis
+ * on *sleeping* is doing a job: it says the state is temporary and will end on
+ * its own, which is exactly the difference between a lorry parked for the night
+ * and a lorry with nothing to do.
+ */
+const DOING: Record<string, string> = {
+  idle: 'idle',
+  working: 'working',
+  sleeping: 'sleeping…',
+  stopped: 'stopped by snow',
+};
+
 /** Where the pipeline writes its rendered thumbnails. */
 function thumb(vehicleId: string): string {
   return `thumbs/veh_${vehicleId.replace(/-/g, '_')}.png`;
@@ -97,13 +112,13 @@ export function Fleet({
     const def = C.vehicles[world.vehicles.type[v]];
     const yard = world.vehicleYard[v] ?? -1;
     const winter = (world.vehicleFittings[v] & Fitting.WinterTyres) !== 0;
-    const working = world.vehicles.service[v] !== -1;
     rows.push(
       <VehicleRow
         key={v}
         id={def.id}
         name={def.name}
-        sub={`${yard >= 0 ? world.yards.names[yard] : 'no yard'} · ${working ? 'working' : 'idle'}`}
+        sub={`${yard >= 0 ? world.yards.names[yard] : 'no yard'} · `
+          + `${DOING[world.vehicleActivity(v)]}`}
         /*
          * Only when it is actually stopped, not all year.
          *
@@ -172,7 +187,6 @@ export function Upgrades({
   const yard = world.vehicleYard[vehicle] ?? -1;
   const fitted = world.vehicleFittings[vehicle];
   const cash = world.companies.cash[world.player];
-  const working = world.vehicles.service[vehicle] !== -1;
   const snow = world.snow;
 
   return (
@@ -183,7 +197,7 @@ export function Upgrades({
           <div className="sheet-title">{def.name}</div>
           <div className="sheet-sub">
             {yard >= 0 ? world.yards.names[yard] : 'no yard'}
-            {' · '}{working ? 'working' : 'idle'}
+            {' · '}{DOING[world.vehicleActivity(vehicle)]}
           </div>
         </div>
         <button className="x" data-quiet onClick={onClose} aria-label="Close">×</button>
@@ -350,7 +364,7 @@ export function Yard({
               </div>
               <div className="sheet-sub">
                 {world.yards.names[yard]}
-                {' · '}{world.vehicles.service[viewing] !== -1 ? 'working' : 'idle'}
+                {' · '}{DOING[world.vehicleActivity(viewing)]}
               </div>
             </div>
             <button className="x" onClick={onClose} aria-label="Close">×</button>
@@ -393,7 +407,7 @@ export function Yard({
                   key={v}
                   id={def.id}
                   name={def.name}
-                  sub={`${def.capacity} t · ${world.vehicles.service[v] !== -1 ? 'working' : 'idle'}`}
+                  sub={`${def.capacity} t · ${DOING[world.vehicleActivity(v)]}`}
                   // Same rule as the fleet list, and the *second* copy of it —
                   // which is why the nag was still here after being taken off
                   // the other one. A yard's bays are a list of lorries too.

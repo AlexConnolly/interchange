@@ -195,6 +195,30 @@ function Work(): JSX.Element {
   );
 }
 
+/** A lane with a track running off it. The road tool. */
+function Track(): JSX.Element {
+  return (
+    <>
+      <path d="M3.2 19.4 7.6 4.6h2.1L5.3 19.4Z" />
+      <path d="M14.3 4.6h2.1l4.4 14.8h-2.1Z" />
+      <rect x="11" y="5" width="2" height="3.4" rx="0.9" opacity="0.55" />
+      <rect x="11" y="10.3" width="2" height="3.4" rx="0.9" opacity="0.55" />
+      <rect x="11" y="15.6" width="2" height="3.4" rx="0.9" opacity="0.55" />
+    </>
+  );
+}
+
+/** A pick, for taking a track up again. */
+function Pick(): JSX.Element {
+  return (
+    <>
+      <path d="M4.4 6.1c3.4-2 8.5-2.2 12.4.6l-1.3 1.7c-3-2.1-7-2-9.8-.4Z" />
+      <path d="M10.6 9.9l2.6 1.9-6.1 8.2a1.1 1.1 0 0 1-1.8-1.3Z" />
+      <path d="M16.8 6.7l2.7 2-2.2 2.9-2.6-1.9Z" opacity="0.55" />
+    </>
+  );
+}
+
 /**
  * Content id to pictogram.
  *
@@ -218,6 +242,8 @@ const BY_ID: Record<string, () => JSX.Element> = {
   abattoir: Cleaver,
   'village-shop': Shop,
   yard: Lorry,
+  track: Track,
+  pick: Pick,
 };
 
 /** A plain box. General haulage. */

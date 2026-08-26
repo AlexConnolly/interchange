@@ -51,6 +51,16 @@ export class SiteTable {
   readonly satisfaction = new Uint8Array(MAX_SITES);
   /** Consecutive days below the decline threshold. */
   readonly starvedDays = new Int32Array(MAX_SITES);
+  /**
+   * The day the player last delivered a load here. `-1` for never.
+   *
+   * Kept because it is the only evidence of a *relationship* between a haulier
+   * and a place. Ownership is recorded, contracts are recorded while they run
+   * and then gone, and until this there was no way to ask the question "are you
+   * the one keeping this shop supplied" — which is exactly the question that
+   * ought to decide whether the shop will sell itself to you. See `canBuySite`.
+   */
+  readonly servedDay = new Int32Array(MAX_SITES).fill(-1);
   /** Days since mothballing; past the grace period it is dead for good. */
   readonly mothballedDays = new Int32Array(MAX_SITES);
   /** Deposit richness 0..100 for extraction sites; scales output. */
@@ -115,6 +125,7 @@ export class SiteTable {
     this.y[id] = y;
     this.tile[id] = tile;
     this.owner[id] = owner;
+    this.servedDay[id] = -1;
     this.state[id] = SiteState.Thriving;
     this.satisfaction[id] = 100;
     this.richness[id] = 70;
@@ -340,23 +351,67 @@ export function stepSites(
     const modern = Math.max(MIN_MODERNITY, sites.modernity[s]);
     const scale = (gate * health * richness * amenity * modern) / 10000000000;
 
-    // Inputs first: a cycle is all-or-nothing so a half-fed steelworks does
-    // not silently eat its coke.
     const ins = r.inputs[def];
-    let feasible = 1;
-    for (let i = 0; i < ins.length; i += 2) {
-      const need = Math.max(1, Math.round(ins[i + 1] * scale));
-      if (sites.stockOf(s, ins[i]) < need) {
-        feasible = 0;
-        break;
+    const outs = r.outputs[def];
+
+    /*
+     * Inputs, and whether they are needed *together*.
+     *
+     * A works that makes something is all-or-nothing: a creamery turns milk into
+     * dairy, and a half-fed one must not silently eat its milk and produce
+     * nothing. That is the rule this started as.
+     *
+     * A place that makes *nothing* is a different animal, and treating it the
+     * same way was a bug with real consequences. A village shop takes milk,
+     * dairy and beer; it is not assembling them into anything, it is selling
+     * them over a counter, and there is no sense in which a crate of milk cannot
+     * be sold because the beer has not arrived. Under the old rule it could not
+     * sell anything at all until all three were in stock — so the shop filled up
+     * with the one cargo you could supply, stopped having room, stopped
+     * appearing as a buyer, and quietly left the game. The distribution centre,
+     * which lists five inputs, was worse: it needed all five at once and in
+     * practice never ran.
+     *
+     * So: a sink consumes each input independently, and a works consumes them
+     * together. The distinction the code needed was already in the data.
+     */
+    const together = outs.length > 0;
+    if (together) {
+      let feasible = 1;
+      for (let i = 0; i < ins.length; i += 2) {
+        const need = Math.max(1, Math.round(ins[i + 1] * scale));
+        if (sites.stockOf(s, ins[i]) < need) {
+          feasible = 0;
+          break;
+        }
       }
-    }
-    if (!feasible) continue;
-    for (let i = 0; i < ins.length; i += 2) {
-      sites.takeStock(s, ins[i], Math.max(1, Math.round(ins[i + 1] * scale)));
+      if (!feasible) continue;
+      for (let i = 0; i < ins.length; i += 2) {
+        sites.takeStock(s, ins[i], Math.max(1, Math.round(ins[i + 1] * scale)));
+      }
+    } else {
+      let sold = 0;
+      for (let i = 0; i < ins.length; i += 2) {
+        const want = Math.max(1, Math.round(ins[i + 1] * scale));
+        const have = sites.stockOf(s, ins[i]);
+        if (have <= 0) continue;
+        sites.takeStock(s, ins[i], Math.min(want, have));
+        sold += Math.min(want, have);
+      }
+      /*
+       * Trade, counted. `produced` is what the place has turned over, and for a
+       * shop that is what it sold: without this a shop's satisfaction and the
+       * per-day figures in the panel would read zero however busy it was, and
+       * the decay pass would eventually mothball a thriving shop for producing
+       * nothing.
+       */
+      sites.produced[s] += sold;
+      if (sold > 0) {
+        sites.satisfaction[s] = Math.round((sites.satisfaction[s] * 7 + 100) / 8);
+      }
+      continue;
     }
 
-    const outs = r.outputs[def];
     let made = 0;
     let blocked = 0;
     for (let i = 0; i < outs.length; i += 2) {

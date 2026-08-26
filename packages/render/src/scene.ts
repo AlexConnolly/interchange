@@ -38,6 +38,7 @@ import {
 } from './ground.ts';
 import { makeAir, type Air } from './air.ts';
 import { makeBirds, type Birds } from './birds.ts';
+import { makeClouds, type Clouds } from './clouds.ts';
 import { CAMERA_AZIMUTH, CAMERA_DISTANCE, CAMERA_ELEVATION } from './camera.ts';
 import { Mesh } from './geometry.ts';
 import { buildRoads, buildCatsEyes, type RoadSource } from './roads.ts';
@@ -527,6 +528,7 @@ export class Renderer {
     this.scene.add(this.motes.points);
     this.air = makeAir(this.scene);
     this.birds = makeBirds(this.scene);
+    this.clouds = makeClouds(this.scene);
     for (let i = 0; i < LAMP_POOL; i++) {
       // Distance rather than decay: a physically correct inverse-square falloff
       // at this scale puts everything either blown out or black, because a tile
@@ -1916,16 +1918,45 @@ export class Renderer {
 
   private counts = new Int32Array(0);
 
+  /**
+   * How fast the world moves, as a multiplier on real time. 1, 2 or 4.
+   *
+   * Set by the client from the same control that scales the tick rate, so the
+   * two cannot disagree: one number, read by the simulation for how many ticks
+   * to run and by the renderer for how fast to draw them going past.
+   */
+  timeScale = 1;
+
+  private readonly clouds: Clouds;
+
   render(src: RenderSource, dt = 1 / 60): void {
+    /*
+     * Two clocks, and the difference between them is the whole of fast-forward.
+     *
+     * `dt` is real seconds and drives the things that are *yours*: the camera
+     * flying to a place, the pan easing under your hand. Those must not speed up
+     * — nobody who asks for a faster day is asking for a twitchier camera.
+     *
+     * `wdt` is the same second times the simulation speed, and drives everything
+     * that belongs to the world: the drawn position of every lorry including
+     * other people's, the smoke, the mist, the leaves, the rain, the birds, and
+     * the shader clock that sways the trees. Without it, running at 4x sped up
+     * the *facts* and left the picture at walking pace — "that seems to only
+     * impact my vehicles, not everyone elses, or things like particles" — because
+     * the drawn position eases toward the simulated one at a fixed real-time
+     * rate, so a lorry moving four times as fast simply trailed four times as
+     * far behind where it actually was.
+     */
+    const wdt = dt * this.timeScale;
     this.stepFly(dt);
     this.followGround(src);
     this.streamChunks(src);
     this.updatePlaces(src);
     this.updateScatter(src);
-    this.updateFleet(src, dt);
+    this.updateFleet(src, wdt);
     this.placeSun(src.dayFraction);
     this.setSeason(src.snow, src);
-    this.setWeather(src.dayFraction, src.dayNumber, dt);
+    this.setWeather(src.dayFraction, src.dayNumber, wdt);
     // After the sun and the weather, because it reads `this.night`.
     this.placeLights(src, dt);
     /*
@@ -1934,7 +1965,7 @@ export class Renderer {
      */
     this.snowing = src.snow > 0.35;
     this.precipitation.update(
-      dt, this.camX, this.camY, this.camZ,
+      wdt, this.camX, this.camY, this.camZ,
       this.snowing ? 0 : this.rain,
       this.snowing ? this.rain : 0,
     );
@@ -1949,7 +1980,7 @@ export class Renderer {
      * the light, and none of them can jump at an hour boundary because there are
      * no hour boundaries.
      */
-    this.elapsed += dt;
+    this.elapsed += wdt;
     this.mood = moodAt(this.sunHeight, this.night);
     LOOK.ramp.value = this.vfx === 'off' ? 0 : this.mood.ramp;
     /*
@@ -1979,7 +2010,7 @@ export class Renderer {
      * on the snow rather than on the month so the two hand over to each other.
      */
     this.motes.update(
-      dt, this.elapsed, this.camX, this.camZ,
+      wdt, this.elapsed, this.camX, this.camZ,
       this.vfx === 'high' ? (1 - this.snowDepth) * (1 - this.night * 0.8) : 0,
     );
 
@@ -2003,14 +2034,26 @@ export class Renderer {
       day: src.dayNumber,
       autumn: src.autumn,
       level: this.vfx === 'high' ? 1 : this.vfx === 'low' ? 0.5 : 0,
-    }, dt, this.elapsed);
+    }, wdt, this.elapsed);
 
     // On at reduced as well as full: a flock crossing is two draw calls of nine
     // instances, which is cheaper than almost anything else on screen, and it is
     // the only motion in the district that is nobody's doing.
     this.birds.step(
-      src, this.camX, this.camZ, this.tilesAcross, dt,
+      src, this.camX, this.camZ, this.tilesAcross, wdt,
       this.vfx === 'off' ? 0 : 1,
+    );
+
+    /*
+     * And the cloud deck, which exists only when you are far enough out to want
+     * it. Off entirely at reduced detail as well as off: it is the one thing in
+     * the frame that is purely for looking at, so it is the first thing a
+     * machine that is struggling should stop drawing.
+     */
+    this.clouds.update(
+      this.camX, this.camZ, this.tilesAcross,
+      CLOUD_DRIFT.value, this.mood.haze, this.night,
+      this.vfx === 'high' ? 1 : 0,
     );
 
     if (this.vfx === 'off' || !this.composed) {
@@ -2259,6 +2302,7 @@ export class Renderer {
   }
 
   dispose(): void {
+    this.clouds.dispose();
     this.renderer.dispose();
   }
 }

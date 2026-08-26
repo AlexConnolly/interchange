@@ -112,3 +112,17 @@ export const APPROVAL_DRIFT_PER_DAY = 0.16;
 /** What one delivered load into the parish is worth. Small on purpose: this is
  *  meant to accumulate over months of running, not over an afternoon. */
 export const APPROVAL_PER_LOAD = 0.055;
+
+/**
+ * And what a day of keeping the village supplied is worth, per place you own
+ * that serves it, scaled by how full its shelves are.
+ *
+ * Read against the drift, which is 0.16 a day: a well-stocked shop nets a little
+ * under half a point a week, so owning one and keeping it supplied carries you
+ * from indifference to the board's hardest threshold in about ten months of game
+ * time. That is the intended shape of this rung — the shop is what makes
+ * approval start to move at all, and it is slow enough that it is a season's
+ * work rather than a purchase. Set it much lower and the drift eats it, which is
+ * where it started; much higher and the shop *is* the planning board.
+ */
+export const PARISH_PER_DAY = 0.3;

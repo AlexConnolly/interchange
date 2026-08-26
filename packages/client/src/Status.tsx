@@ -73,15 +73,14 @@ function clockTime(fraction: number): string {
 }
 
 export function Status({
-  cash, date, out, idle, dayFraction, night, weather, onMenu,
+  cash, date, dayFraction, night, speed, onSpeed, onMenu,
 }: {
   cash: number;
   date: string;
-  out: number;
-  idle: number;
   dayFraction: number;
   night: number;
-  weather: number;
+  speed: number;
+  onSpeed: (speed: number) => void;
   onMenu: () => void;
 }): JSX.Element {
   return (
@@ -99,16 +98,43 @@ export function Status({
         <span className="purse-sum">{money(cash)}</span>
       </div>
 
+      {/*
+        * The clock and the cog are two elements now, not one.
+        *
+        * They had been sharing a pill, and the pill was doing two unrelated jobs:
+        * telling you the time, which is a readout you never touch, and opening
+        * the settings, which is a button and nothing else. A readout with a
+        * button welded to its right-hand end reads as neither — you cannot tell
+        * by looking which parts of it do something. Separating them costs four
+        * pixels of gap and makes both obvious.
+        */}
+      <div className="dials">
       <div className="clock">
         <div className="clock-text">
           <span className="clock-time">{clockTime(dayFraction)}</span>
           <span className="clock-date">{date}</span>
-          <span className="clock-sub">
-            {out} out · {idle} idle
-            {weather > 0.72 ? ' · overcast' : weather < 0.22 ? ' · clear' : ''}
-          </span>
         </div>
         <DayRing fraction={dayFraction} night={night} />
+        {/*
+          * How fast the day runs, next to the day.
+          *
+          * Here rather than in the pause menu because it is a thing you change
+          * *while watching* — you speed up to get to the harvest and slow down
+          * when the harvest arrives — and a setting you reach for that often is
+          * not a setting, it is a control. Three steps and no pause button: Escape
+          * already pauses, and a fourth option that duplicated it would be the
+          * eight-control budget spent on a synonym.
+          *
+          * Clicking cycles rather than offering three buttons, because at this
+          * size three buttons is nine millimetres of target split three ways.
+          */}
+        <button
+          className="speed"
+          onClick={() => onSpeed(speed >= 4 ? 1 : speed * 2)}
+          title="Speed: click to change"
+          data-quiet
+        >{speed}&times;</button>
+      </div>
         {/*
           * One button, and it opens the menu the sound now lives in.
           *
