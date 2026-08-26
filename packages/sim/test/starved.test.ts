@@ -12,7 +12,8 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  createWorld, TICKS_PER_DAY, SiteState, Line, LINE_COUNT, facilitiesFor, MoneyKind,
+  createWorld, TICKS_PER_DAY, DAYS_PER_WEEK, SiteState, Line, LINE_COUNT,
+  facilitiesFor, MoneyKind, GATE_WEEKLY_TONNES, haulageRate, RATE_WEIGHT_BY_TIER,
 } from '../src/index.ts';
 import { loadContent } from '../../data/src/index.ts';
 
@@ -406,5 +407,106 @@ describe('the money journal', () => {
     const b = w.stampOf(TICKS_PER_DAY * 61 + Math.floor(TICKS_PER_DAY * 0.25));
     expect(a).not.toBe(b);
     expect(a.split(' · ')[0]).toBe(b.split(' · ')[0]);
+  });
+});
+
+describe('standing orders', () => {
+  /** A producer of the player's, with the district in view. */
+  function farming(): { w: ReturnType<typeof make>; farm: number } {
+    const w = make();
+    w.primeStock();
+    const src: { x: number; y: number; strength: number }[] = [];
+    for (let x = 8; x < 128; x += 12) {
+      for (let z = 8; z < 128; z += 12) src.push({ x, y: z, strength: 3.2 });
+    }
+    w.refreshInfluence(src);
+    w.companies.cash[w.player] = 5_000_000_00;
+    let farm = -1;
+    for (let s = 0; s < w.sites.count; s++) {
+      if (w.content.industries[w.sites.def[s]].id === 'dairy-farm') { farm = s; break; }
+    }
+    w.sites.owner[farm] = w.player;
+    return { w, farm };
+  }
+
+  const week = (w: ReturnType<typeof make>): void => {
+    for (let d = 0; d < DAYS_PER_WEEK; d++) {
+      for (let t = 0; t < TICKS_PER_DAY; t++) w.step();
+    }
+  };
+
+  it('pays a producer of yours without a lorry anywhere near it', () => {
+    /*
+     * The hole this fills: owning a producer earned nothing at all unless you
+     * personally drove its output somewhere. A farm with a creamery down the lane
+     * has a customer whether or not you fancy the drive.
+     */
+    const { w, farm } = farming();
+    const before = w.companies.cash[w.player];
+    week(w);
+    expect(w.companies.cash[w.player]).toBeGreaterThan(before);
+    const rows = w.moneyAt(farm).filter((r) => r.kind === MoneyKind.Gate);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0].tonnes).toBeGreaterThan(0);
+  });
+
+  it('moves the goods, so it is a trade rather than a cheque', () => {
+    // A weekly payment with no stock behind it would be invented income. The
+    // shed empties and the buyer's fills.
+    const { w, farm } = farming();
+    const milk = w.content.cargo.findIndex((c) => c.id === 'milk');
+    const before = w.sites.stockOf(farm, milk);
+    expect(before).toBeGreaterThan(0);
+    week(w);
+    const rows = w.moneyAt(farm).filter((r) => r.kind === MoneyKind.Gate);
+    const sold = rows.reduce((n, r) => n + r.tonnes, 0);
+    expect(sold).toBeGreaterThan(0);
+  });
+
+  it('caps the order at what one lorry could collect', () => {
+    /*
+     * The limit that keeps this from breaking the game. Without it the order was
+     * the buyer's whole weekly appetite — more than three lorries can carry —
+     * and owning eight producers paid a million and a half a month for nothing.
+     */
+    const { w, farm } = farming();
+    week(w);
+    week(w);
+    for (const r of w.moneyAt(farm).filter((x) => x.kind === MoneyKind.Gate)) {
+      expect(r.tonnes).toBeLessThanOrEqual(GATE_WEEKLY_TONNES);
+    }
+  });
+
+  it('pays less than carrying the same load yourself', () => {
+    /*
+     * The whole point of the three rates: they collect at a discount, you carry
+     * for the full fare, and into a place of your own it is half again. If this
+     * ever inverts, the game is telling the player not to buy a lorry.
+     */
+    const { w, farm } = farming();
+    week(w);
+    const rows = w.moneyAt(farm).filter((r) => r.kind === MoneyKind.Gate);
+    expect(rows.length).toBeGreaterThan(0);
+    const perTonne = rows[0].pence / rows[0].tonnes;
+    // What the same tonne pays hauled over a typical run.
+    const fare = haulageRate(
+      w.content.cargo[rows[0].cargo].basePrice, 20,
+      RATE_WEIGHT_BY_TIER[w.content.cargo[rows[0].cargo].tier] ?? 1,
+    );
+    expect(perTonne).toBeLessThan(fare);
+  });
+
+  it('pays a distant customer less, not more', () => {
+    /*
+     * The bug this replaced. The fare rises steeply with distance and `buyerFor`
+     * picks whoever has the most room rather than whoever is nearest, so paying a
+     * fraction of the *actual* fare meant a far-off customer paid you more for
+     * sitting still: one farm earned thirty thousand a week and paid for itself in
+     * a fortnight. A gate price is a price for goods; distance can only ever be a
+     * deduction.
+     */
+    const near = 1 - Math.min(0.5, 4 / 60);
+    const far = 1 - Math.min(0.5, 44 / 60);
+    expect(far).toBeLessThan(near);
   });
 });

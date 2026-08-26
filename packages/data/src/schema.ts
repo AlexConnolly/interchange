@@ -212,6 +212,9 @@ export const Balance = z.object({
   /** What a tonne into a business of your own is worth, against the same tonne
    *  hauled for hire. 150 means half again. */
   ownTradePct: z.number().int(),
+  /** And what a tonne collected from your gate by the buyer is worth, against
+   *  hauling it there yourself. Under 100: they deduct the cost of the lorry. */
+  gateSalePct: z.number().int(),
   /** How sharply traffic abandons an overpriced way. Higher is more elastic.
    *  design.md §3.3 — the first and primary damper. */
   tollElasticity: z.number().int(),

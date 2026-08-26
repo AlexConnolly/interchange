@@ -20,7 +20,7 @@ import { Cmd, CommandQueue, type Command } from './commands.ts';
 import {
   CompanyTable, Charter, Line, LINE_COUNT,
   ServiceTable, StopAction, MAX_STOPS, ENTRANT_NAMES, hashEconomy, SITE_PRICE_SCALE, haulageRate, HAUL_ALLOWANCE, RATE_WEIGHT_BY_TIER, CHARTER_REQUIREMENTS, stepFinance,
-  JOURNAL, MoneyKind,
+  JOURNAL, MoneyKind, GATE_WEEKLY_TONNES, GATE_REFERENCE_TILES,
 } from './economy.ts';
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
 import { Hasher } from './hash.ts';
@@ -790,11 +790,135 @@ export class World {
     return report;
   }
 
+  /**
+   * Standing orders, settled once a week.
+   *
+   * The hole this fills: owning a producer earned nothing at all unless you
+   * personally drove its output somewhere. "If you own the arable farm and
+   * there's a dependency from the local shop, I shouldn't have to have a lorry
+   * going to them — that should just be a thing." Quite: a farm with a creamery
+   * down the lane has a customer whether or not you fancy the drive. The customer
+   * sends its own lorry and takes the cost of doing so out of what it pays you,
+   * which is the whole of why this is worth less than hauling it yourself.
+   *
+   * That gives ownership three rates instead of one, and they are a ladder the
+   * player can climb without being told about it:
+   *
+   *   **45%** — they collect. Money for nothing, and the least of it.
+   *   **100%** — you carry it to somebody else. The ordinary fare.
+   *   **150%** — you carry it into a place of your own. See `ownTradePct`.
+   *
+   * So the reward for buying a lorry is not that the goods start moving; it is
+   * that you stop paying somebody else to move them. Which is the argument the
+   * game has been trying to make since the beginning, finally attached to a
+   * number.
+   *
+   * The goods really move. Stock leaves your shed and arrives in theirs, which is
+   * what keeps this honest — a weekly cheque with no lorry behind it would be an
+   * invented income, and this is a trade that would have happened anyway.
+   *
+   * Weekly rather than daily because the player has to be able to *see* it: one
+   * line in the Money tab saying where a week's output went beats a dribble of
+   * pence every four minutes.
+   */
+  private settleStandingOrders(): void {
+    const cargoCount = this.content.cargo.length;
+    const pct = this.content.balance.gateSalePct / 100;
+    for (let s = 0; s < this.sites.count; s++) {
+      if (this.sites.owner[s] !== this.player) continue;
+      const tile = this.siteAccessTile[s];
+      if (tile === NONE || !this.influence.usable(tile)) continue;
+      const outs = this.recipes.outputs[this.sites.def[s]];
+      for (let i = 0; i < outs.length; i += 2) {
+        const cargo = outs[i];
+        const have = this.sites.stockOf(s, cargo);
+        if (have <= 0) continue;
+
+        const buyer = this.buyerFor(cargo, s);
+        if (buyer === NONE) continue;
+        /*
+         * How much they take, which is the smallest of three things: what you
+         * have, what they can hold, and what they can get through in a week.
+         *
+         * The last is the one that makes this a supply chain rather than a tap.
+         * A shop that eats thirteen tonnes a week does not order forty however
+         * much you have standing about, so a farm outgrowing its local customer
+         * is a real situation the player can find themselves in — and the answer
+         * to it is a lorry and a further buyer.
+         */
+        const ins = this.recipes.inputs[this.sites.def[buyer]];
+        let eats = 0;
+        for (let k = 0; k < ins.length; k += 2) {
+          if (ins[k] !== cargo) continue;
+          eats = (ins[k + 1] * TICKS_PER_DAY * DAYS_PER_WEEK)
+            / Math.max(1, this.recipes.period[this.sites.def[buyer]]);
+        }
+        if (eats <= 0) continue;
+        const room = this.sites.capacity[buyer * cargoCount + cargo]
+          - this.sites.stockOf(buyer, cargo);
+        /*
+         * And a fourth limit, which is the one that keeps this from breaking the
+         * game: *somebody still has to drive it*.
+         *
+         * Without it the order was the buyer's entire weekly appetite, and a
+         * creamery gets through more in a week than three lorries can carry — so
+         * owning eight producers paid a million and a half a month for nothing,
+         * measured, against an opening balance of eleven thousand. Free money
+         * that scaled with businesses owned and had no lorry anywhere in it.
+         *
+         * A buyer collecting from you sends *one van, once*. Twenty-four tonnes is
+         * exactly what one small van moves in a week — measured: two round trips
+         * a day at two tonnes — so a standing order is worth about half of what
+         * your own lorry would earn on the same route, and the whole of the
+         * argument for buying the lorry survives.
+         */
+        const tonnes = Math.floor(Math.min(have, room, eats, GATE_WEEKLY_TONNES));
+        if (tonnes <= 0) continue;
+
+        const dx = this.sites.x[buyer] - this.sites.x[s];
+        const dy = this.sites.y[buyer] - this.sites.y[s];
+        const distance = Math.max(1, Math.round(Math.sqrt(dx * dx + dy * dy)));
+        /*
+         * A farm-gate price, and it does *not* rise with distance.
+         *
+         * The first version paid a fraction of the haulage rate over the actual
+         * distance, which is backwards and expensively so: the fare rises steeply
+         * with the length of the run, `buyerFor` picks whoever has the most room
+         * rather than whoever is nearest, and the result was that a *distant*
+         * customer paid you more for sitting still. Measured: one dairy farm
+         * earned thirty thousand a week and paid for itself in a fortnight,
+         * against an opening balance of eleven and a half thousand.
+         *
+         * A gate price is a price for *goods*. The transport is the buyer's
+         * problem and they take it out of what they hand over, so distance can
+         * only ever make this worse — hence a short reference haul for the value
+         * and a deduction, up to half, for how far they have to come. Which also
+         * means owning a producer next to its customer is worth more than owning
+         * one across the district, and that is a fact about the map the player can
+         * act on.
+         */
+        const rate = haulageRate(
+          this.cargoPrice[cargo], GATE_REFERENCE_TILES, this.cargoRateWeight[cargo],
+        );
+        const carriage = 1 - Math.min(0.5, distance / 60);
+        const pence = Math.round(rate * tonnes * pct * carriage);
+
+        this.sites.takeStock(s, cargo, tonnes);
+        this.sites.addStock(buyer, cargo, tonnes);
+        this.companies.post(this.player, Line.Trading, pence);
+        this.note(s, MoneyKind.Gate, pence, cargo, tonnes);
+      }
+    }
+  }
+
   private stepDay(): void {
     // The farming year, once a day. The season step is usually a no-op; the
     // catch-up brings on whatever no tractor has got round to.
     this.stepSeason();
     this.catchUpFields();
+
+    // Standing orders, on the day the week turns.
+    if (this.day % DAYS_PER_WEEK === 0) this.settleStandingOrders();
 
     /*
      * Approval drifts back toward indifference.

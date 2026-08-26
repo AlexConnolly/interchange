@@ -662,5 +662,47 @@ export const MoneyKind = {
   Traded: 2,
   /** A load carried into somebody else's place, on their contract. */
   Delivered: 3,
+  /**
+   * A standing order collected from a place of yours by whoever bought it.
+   *
+   * The passive one, and the reason it exists: owning a farm earned nothing at
+   * all unless you personally drove its output somewhere. A farm with a creamery
+   * down the lane has a customer whether or not you fancy the drive, and that
+   * customer sends its own lorry and deducts the cost of doing so. Which is
+   * exactly why it pays less than hauling it yourself — see `gateSalePct`.
+   */
+  Gate: 4,
 } as const;
 export type MoneyKind = (typeof MoneyKind)[keyof typeof MoneyKind];
+
+/**
+ * How much a buyer will collect from your gate in a week.
+ *
+ * One small van's work, and that figure is measured rather than chosen: a
+ * two-tonne van completes two round trips a day, so twenty-four tonnes is a week
+ * of one vehicle. It is the limit that makes a standing order a *trade* rather
+ * than a tap — without it the order was the buyer's whole weekly appetite, which
+ * for a creamery is more than three lorries could carry, and owning eight
+ * producers paid a million and a half a month with no lorry anywhere in it.
+ */
+export const GATE_WEEKLY_TONNES = 24;
+
+/**
+ * The haul a farm-gate price is quoted against.
+ *
+ * A gate price is a price for goods, not for a journey — so it needs a distance
+ * to be computed from, and that distance must be a *constant*, or the buyer being
+ * far away makes you richer. How far they actually have to come is then a
+ * deduction; see `settleStandingOrders`.
+ *
+ * Twenty tiles because that is a typical run in this district and the figure it
+ * produces is one anybody can check: a tonne of milk at twenty tiles is £735,
+ * which is exactly what the opening contract pays for the same tonne. So a gate
+ * price is legibly "what the load is worth, less what carrying it costs".
+ *
+ * The first attempt used eight, on the reasoning that "at the gate" means next
+ * door. It measured at eighteen hundred a week against a fifty-two thousand pound
+ * farm — a twenty-eight week payback, which is four hours of play to break even
+ * on the first business anybody buys, and turns a purchase into a penance.
+ */
+export const GATE_REFERENCE_TILES = 20;

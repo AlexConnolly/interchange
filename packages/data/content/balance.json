@@ -16,5 +16,6 @@
   "townGrowthPerDay": 4,
   "regulatorSharePct": 58,
   "openingCargo": "milk",
-  "ownTradePct": 150
+  "ownTradePct": 150,
+  "gateSalePct": 45
 }
