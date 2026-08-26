@@ -58,6 +58,7 @@ const SHOTS: { name: string; query: string; wait?: number; hover?: string }[] = 
    * state works — and that is the half with the contrast in it.
    */
   { name: 'ui-hover', query: 'across=30', hover: '.dock' },
+  { name: 'rich', query: 'across=30&happyHour=1500000' },
 ];
 
 const BASE = process.env.BASE ?? 'http://localhost:4173/';

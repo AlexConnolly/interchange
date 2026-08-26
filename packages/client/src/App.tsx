@@ -1460,7 +1460,25 @@ export function App(): JSX.Element {
        * haulage contract, which is the right texture for the first ten minutes.
        */
       const vanIndex = world.openingVehicle(opening.cargo);
-      world.companies.cash[world.player] = world.content.balance.startingCash;
+      /*
+       * The bank, and a way to open it for a look.
+       *
+       * `?happyHour=1500000` starts you with a million and a half instead of
+       * eleven and a half thousand. A query parameter rather than a change to
+       * `balance.json` on purpose: the starting figure is the first number of a
+       * ladder measured in real minutes — a second van at about ten — and half
+       * the tests in the sim are anchored to it, so making it adjustable for an
+       * afternoon's look at the ownership loop must not quietly retune the
+       * opening for everybody. In pounds, because that is what the game shows.
+       *
+       * Named the way it is because a URL is not private. `?cash=` on a link
+       * anybody can read is an invitation and a spoiler at the same time; this
+       * one at least has to be known about before it can be used.
+       */
+      const askedCash = Number(params.get('happyHour'));
+      world.companies.cash[world.player] = Number.isFinite(askedCash) && askedCash > 0
+        ? Math.round(askedCash * 100)
+        : world.content.balance.startingCash;
 
       /*
        * The yard, then the van in it.

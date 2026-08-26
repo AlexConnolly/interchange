@@ -326,7 +326,21 @@ export function useOverlayTick(fn: () => void, hz = 20): void {
 /** Money, as a haulier would say it. */
 export function money(pence: number): string {
   const p = Math.round(pence);
-  if (Math.abs(p) >= 100_000_00) return `£${(p / 100_000_00).toFixed(1)}m`;
+  /*
+   * A million pounds is a hundred million pence, and this used to say ten
+   * million.
+   *
+   * `100_000_00` reads as "a hundred thousand, in pence" because of where the
+   * underscores fall, and that is exactly what it is — so every figure over a
+   * hundred thousand pounds was divided by a hundred thousand and labelled with
+   * an m. A hundred grand in the bank showed as "£1.0m". It went unnoticed for
+   * as long as it did because nothing in the opening ten minutes of the game
+   * comes anywhere near the threshold; it surfaced the first time anybody
+   * started with a float big enough to buy a business outright, and then every
+   * price in the game was overstated tenfold at once.
+   */
+  const MILLION = 1_000_000_00;
+  if (Math.abs(p) >= MILLION) return `£${(p / MILLION).toFixed(1)}m`;
   if (Math.abs(p) >= 1_000_00) return `£${Math.round(p / 100).toLocaleString('en-GB')}`;
   return `£${(p / 100).toFixed(2)}`;
 }
