@@ -38,6 +38,16 @@ export interface GroundSource {
   crop: Uint8Array;
   /** True where a road covers the tile, so hedges leave a gap. */
   hasRoad: (tile: number) => boolean;
+  /**
+   * How much leaf there is on the district, 0..1 — see `foliage` in the sim.
+   *
+   * The hedges need the *number*, not just the tint the material applies: "you
+   * recoloured the hedges? Is that it?" A hedge in February is not a green hedge
+   * in brown, it is thinner, lower and full of holes, and none of that is a
+   * colour. So the geometry is built differently by season, and the chunk mesh is
+   * already rebuilt when the season turns.
+   */
+  leafiness: number;
   isWater: (tile: number) => boolean;
   /**
    * A stream or a river, as opposed to the sea.
@@ -363,46 +373,127 @@ function buildHedges(
 
     if (kind === 3) {
       /*
-       * Dry stone, in courses. Cotswold, which is a shape before it is a colour.
+       * Dry stone, out of stones.
        *
-       * The first version was one wedge a third thicker than a hedge and a fifth
-       * shorter, with a cap on it — which is to say it was as thick as it was
-       * tall, and a thing as thick as it is tall is a boulder. "They just look
-       * like big rocks" was exactly right.
+       * Second attempt. The first was three long courses, and "the walls need to
+       * be made of STONES not of slabs" is exactly what that was: a band running
+       * the whole length of a tile is a slab however many bands you stack, and
+       * stacking them only made it a wall built of three slabs instead of one.
        *
-       * A real one is about half a metre thick and over a metre high, so it is
-       * *thinner* than the hedge beside it and taller, and it is built in
-       * horizontal courses that batter very slightly inward as they rise. Three
-       * bands of alternating tone is what carries that at forty pixels: you
-       * cannot see a stone, but you can see the coursing, and coursing is what
-       * separates a wall from a heap.
+       * A dry stone wall is *rubble* — irregular blocks, no two the same length,
+       * the joints of one course landing over the middles of the ones below, and
+       * the whole thing battering inward as it rises. None of that survives as
+       * detail at forty pixels, but the *irregularity* does: what the eye reads
+       * is that the top edge is not straight and the shading is broken up along
+       * the run, and those two things are the difference between masonry and a
+       * kerb.
        *
-       * The coping on top is the giveaway of the region — thin stones set on
-       * edge, standing proud of the wall face and catching the sun on their top
-       * edges — so it is narrower than the courses below it and the palest thing
-       * in the boundary.
+       * So: two courses of four stones each, lengths and heights jittered from
+       * the position so a run is stable and no two tiles match, and the second
+       * course offset half a stone along to break the joints. Then the coping on
+       * top, as separate stones set on edge, because that is the one course you
+       * can genuinely pick out from the air.
        */
       const dark = faded(WALL.shadow, inf);
       const pale = faded(WALL.stone, inf);
       const cap = faded(WALL.coping, inf);
-      // Slightly thinner than a hedge, and battered in as it goes up.
-      const courses: [number, number, number, RGB][] = [
-        [0.00, 0.34, 0.92, (jitter & 1) === 0 ? pale : dark],
-        [0.34, 0.66, 0.86, (jitter & 1) === 0 ? dark : pale],
-        [0.66, 0.88, 0.80, (jitter & 2) === 0 ? pale : dark],
-      ];
-      for (const [from, to, thick, colour] of courses) {
-        const [hx, hz] = ext(T * thick, 0.5);
-        wedge(m, cx, base + h * from, cz, hx, hz, h * (to - from), 0.99, colour);
+
+      /** A deterministic 0..1 from the run position and a salt. */
+      const rnd = (salt: number): number => {
+        const n = ((jitter + salt * 2654435761) ^ (salt * 40503)) >>> 0;
+        return ((n >>> 9) & 1023) / 1023;
+      };
+
+      const stones = 4;
+      for (let course = 0; course < 2; course++) {
+        const from = course === 0 ? 0.02 : 0.44;
+        const to = course === 0 ? 0.46 : 0.86;
+        // Battered: the upper course is narrower than the one it sits on.
+        const thick = T * (course === 0 ? 0.90 : 0.78);
+        // Half a stone along, so the joints do not line up into a seam.
+        const shift = course === 0 ? 0 : 0.5 / stones;
+        for (let i = 0; i < stones; i++) {
+          const r = rnd(course * 17 + i * 5 + 1);
+          const r2 = rnd(course * 31 + i * 7 + 2);
+          // Along the run, in units of the tile.
+          const mid = ((i + 0.5) / stones + shift) % 1;
+          const half = (0.5 / stones) * (0.72 + r * 0.5);
+          // A stone that would hang off the end is simply shorter.
+          const lo = Math.max(0, mid - half);
+          const hi = Math.min(1, mid + half);
+          if (hi - lo < 0.03) continue;
+          const centre = (lo + hi) / 2 - 0.5;
+          const [hx, hz] = ext(thick * (0.86 + r2 * 0.3), (hi - lo) / 2);
+          const top = to - (1 - r2) * (to - from) * 0.22;
+          wedge(
+            m,
+            cx + (alongZ ? 0 : centre), base + h * from, cz + (alongZ ? centre : 0),
+            hx, hz, h * (top - from), 0.99,
+            (i + course) % 2 === 0 ? pale : dark,
+          );
+        }
       }
-      // And the coping, proud of the face and the palest course.
-      const [px, pz] = ext(T * 0.88, 0.5);
-      wedge(m, cx, base + h * 0.88, cz, px, pz, h * 0.16, 0.94, cap);
+
+      // The coping: five smaller stones on edge, proud of the face below.
+      for (let i = 0; i < 5; i++) {
+        const r = rnd(101 + i * 11);
+        const centre = (i + 0.5) / 5 - 0.5;
+        const [hx, hz] = ext(T * 0.84, (0.5 / 5) * 0.86);
+        wedge(
+          m,
+          cx + (alongZ ? 0 : centre), base + h * 0.84, cz + (alongZ ? centre : 0),
+          hx, hz, h * (0.15 + r * 0.06), 0.96, i % 2 === 0 ? cap : pale,
+        );
+      }
       return;
     }
 
-    const [hx, hz] = ext(T, 0.5);
-    wedge(m, cx, base, cz, hx, hz, h, TAPER, hedge);
+    /*
+     * A hedge, and what winter actually does to one.
+     *
+     * Not a recolour. A hawthorn hedge in leaf is a solid green wall you cannot
+     * see a field through; the same hedge in February is a lattice of twigs —
+     * thinner, a little lower, and *gappy*, so the ground shows between the
+     * stems. That gappiness is the whole difference, and it is geometry: no tint
+     * can put a hole in something.
+     *
+     * So in leaf it is one wedge, as before, which is both cheapest and correct —
+     * a hedge in July has no gaps. Out of leaf it becomes four stems with air
+     * between them, which costs four quads on the boundaries of a winter
+     * district and is the only time of year anything pays for it.
+     */
+    const leafy = src.leafiness;
+    if (leafy > 0.55) {
+      const [hx, hz] = ext(T, 0.5);
+      wedge(m, cx, base, cz, hx, hz, h, TAPER, hedge);
+      return;
+    }
+
+    /*
+     * Bare, or nearly. Thinner, lower, and in pieces.
+     *
+     * The stems stay the full height while the *mass* between them goes, because
+     * that is what a cut-back hedge looks like from above: the line is still
+     * there and you can see through it. Interpolated on the leaf rather than
+     * switched, so the fortnight either side of the change is a hedge thinning
+     * out and not a hedge being replaced.
+     */
+    const bareness = 1 - Math.min(1, leafy / 0.55);
+    const thin = T * (1 - bareness * 0.42);
+    const low = h * (1 - bareness * 0.14);
+    const stems = 4;
+    // The gap grows as the leaf goes: solid at the changeover, open in January.
+    const fill = 1 - bareness * 0.42;
+    for (let i = 0; i < stems; i++) {
+      const centre = (i + 0.5) / stems - 0.5;
+      const [hx, hz] = ext(thin, (0.5 / stems) * fill);
+      const wob = (((jitter >>> (i * 3)) & 7) / 7 - 0.5) * 0.10;
+      wedge(
+        m,
+        cx + (alongZ ? 0 : centre), base, cz + (alongZ ? centre : 0),
+        hx, hz, low * (0.88 + Math.abs(wob) * 2.2), TAPER + bareness * 0.12, hedge,
+      );
+    }
   };
 
   const wants = (a: number, b: number): boolean => {

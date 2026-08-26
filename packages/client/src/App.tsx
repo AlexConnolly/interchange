@@ -647,6 +647,7 @@ export function App(): JSX.Element {
       leaf: 1,
       spring: 0,
       autumn: 0,
+      leafiness: 1,
       dayNumber: 0,
     };
 
@@ -795,6 +796,7 @@ export function App(): JSX.Element {
     let ownedParcels = new Set<number>();
     let landAt = -1;
     let marksAt = '';
+    let hedgeAt = -1;
 
     const yardTiles = new Set<number>();
     /*
@@ -2178,6 +2180,15 @@ export function App(): JSX.Element {
        */
       const leafy = foliage(world.day);
       src.leaf = leafy.leaf;
+      /*
+       * The same number again, for the ground mesh rather than the material.
+       *
+       * The hedges are *built* differently by season — thinner and gappy out of
+       * leaf — so `buildHedges` needs the figure at build time, where a uniform
+       * is no use to it. Bumping the season revision when it crosses the
+       * threshold is what gets the chunks rebuilt; see below.
+       */
+      src.leafiness = leafy.leaf;
       src.spring = leafy.spring;
       src.autumn = leafy.autumn;
       /*
@@ -2315,6 +2326,26 @@ export function App(): JSX.Element {
           nowTool === 'lift' ? [0.86, 0.34, 0.32] : [0.34, 0.62, 0.92],
           src,
         );
+      }
+
+      /*
+       * Rebuild the ground when the hedges would be built differently.
+       *
+       * The hedge geometry is a function of the leaf, and the ground mesh is
+       * cached per chunk — so without this the hedges are whatever they were when
+       * the chunk was first built and the season never reaches them. Quantised to
+       * six steps across the year rather than watched continuously, because a
+       * rebuild is the expensive operation here and six of them a year is
+       * nothing; the material's tint carries the movement in between.
+       *
+       * Deliberately not folded into the crop revision. That fires monthly on a
+       * different clock, and tying one to the other would mean a hedge waiting
+       * for a field to be ploughed before it lost its leaves.
+       */
+      const hedgeStep = Math.round(leafy.leaf * 6);
+      if (hedgeStep !== hedgeAt) {
+        hedgeAt = hedgeStep;
+        renderer.dropChunks();
       }
 
       if (world.landRevision !== landAt) {
