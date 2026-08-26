@@ -17,6 +17,7 @@ import { type World, ContractState } from '@interchange/sim';
 import { content } from '@interchange/data';
 import { money, bodyFor } from './Markers.tsx';
 import { BodyIcon, Icon } from './Icons.tsx';
+import { perHour } from './Place.tsx';
 
 const C = content();
 
@@ -330,7 +331,28 @@ export function Contracts({
               <span className="job-line">
                 <span className="swatch" style={{ background: cargo.colour }} />
                 <span className="grow">{from.name} → {to.name}</span>
-                <span className="pay">{money(b.pay[r.id])}<i>/t</i></span>
+                {/*
+                  * Per hour when we can work out an hour, per tonne when we
+                  * cannot.
+                  *
+                  * A rate per tonne is not comparable between two offers — a
+                  * short run in a van and a long run in an artic can pay the
+                  * same per tonne and differ fourfold in what they are worth —
+                  * and comparing offers is the entire purpose of this list. The
+                  * place panel has shown £/hour for a while; the board that a
+                  * haulier actually works from was still showing the figure you
+                  * cannot act on.
+                  *
+                  * Falls back to the tonne rate when nothing in the fleet can
+                  * carry it, because an hourly figure for a lorry you do not own
+                  * is a number about a hypothesis.
+                  */}
+                {(() => {
+                  const hourly = perHour(world, r.id);
+                  return hourly > 0
+                    ? <span className="pay">{money(hourly)}<i>/hr</i></span>
+                    : <span className="pay">{money(b.pay[r.id])}<i>/t</i></span>;
+                })()}
               </span>
               <span
                 className={`needs${r.running ? '' : r.ready !== null ? ' can' : ' cannot'}`}

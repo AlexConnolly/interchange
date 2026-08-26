@@ -795,6 +795,20 @@ export class World {
   }
 
 
+  /**
+   * Tonnes a day this site makes of a cargo, which is the only figure that says
+   * whether owning it is worth anything.
+   *
+   * Public because the interface needs it and had no way to ask. A business
+   * showed the player its *stock* — twelve tonnes of milk standing in the yard —
+   * and nothing at all about the rate, so "is this worth buying" could only be
+   * answered by buying it and watching. Stock is a level; production is a flow,
+   * and the flow is the thing you are actually purchasing.
+   */
+  outputPerDay(site: number, cargo: number): number {
+    return this.siteOutputRate(site, cargo);
+  }
+
   /** Units per day a site can supply of a networked cargo. */
   private siteOutputRate(site: number, cargo: number): number {
     const def = this.sites.def[site];

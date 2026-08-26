@@ -51,7 +51,7 @@ const C = content();
  * back to the tonne rate — an hourly figure for a vehicle you do not have is a
  * number about a hypothesis.
  */
-function perHour(world: World, contract: number): number {
+export function perHour(world: World, contract: number): number {
   let best = 0;
   for (const d of world.driversFor(contract)) {
     if (!d.suitable) continue;
@@ -351,10 +351,25 @@ function About({
   const rows = (ids: string[], want: boolean): JSX.Element[] => ids.flatMap((id) => {
     const ci = C.cargoIndex.get(id);
     if (ci === undefined) return [];
+    /*
+     * The rate as well as the level, and for outputs it is the more useful of
+     * the two by a distance.
+     *
+     * Stock is what is standing in the yard right now; production is what will
+     * be there tomorrow and the day after. "Is this worth buying" is a question
+     * about the flow, and the panel could only answer about the level — so the
+     * only way to find out was to buy it and watch. A dairy making eight tonnes
+     * a day and one making two look identical the moment they have both got
+     * twelve tonnes in the churns.
+     */
+    const perDay = want ? 0 : world.outputPerDay(site, ci);
     return [(
       <div key={`${want ? 'i' : 'o'}${id}`} className={`stock-row ${want ? 'need' : ''}`}>
         <span className="swatch" style={{ background: C.cargo[ci].colour }} />
-        <span className="grow">{want ? `wants ${C.cargo[ci].name}` : C.cargo[ci].name}</span>
+        <span className="grow">
+          {want ? `wants ${C.cargo[ci].name}` : C.cargo[ci].name}
+          {perDay > 0 && <em className="rate">{perDay.toFixed(perDay < 10 ? 1 : 0)} t a day</em>}
+        </span>
         <span className="num">{world.sites.stockOf(site, ci)} t</span>
       </div>
     )];

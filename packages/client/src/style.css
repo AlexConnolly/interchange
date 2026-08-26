@@ -1241,3 +1241,13 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   color: var(--ink-dim);
 }
 .btn.ghost:hover { background: rgba(0, 0, 0, 0.04); color: var(--ink); }
+
+
+/* The production rate beside a cargo. Quieter than the stock figure, because
+   the stock is what you can move today and the rate is what the place *is*. */
+.stock-row .rate {
+  display: block;
+  font-style: normal;
+  font-size: 11px;
+  color: #8b8577;
+}
