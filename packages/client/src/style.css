@@ -45,7 +45,7 @@ html, body, #root, .app {
  *
  * The lesson is small and worth keeping: when a container's *role* changes from
  * "the thing you can see" to "where things go", every visual property on it has
- * to be moved to the children, not inherited by accident. `.purse` and `.dials`
+ * to be moved to the children, not inherited by accident. `.purse` and `.clock`
  * carry the glass now; this carries nothing at all.
  */
 .hud {
@@ -927,11 +927,12 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .mine-mark:hover { transform: translate(-50%, -100%) scale(1.35); }
 .bubble .veh-thumb { width: 34px; height: 34px; flex: 0 0 34px; }
 
-/* The readout, and the controls opposite it.
+/* The readout, split in two.
  *
- * Money where the eye already goes; the two buttons on the far side. The glass
+ * Money where the eye already goes; the clock on the far side, because it is
+ * ambient. Two different kinds of information were sharing a box, and the glass
  * belongs on each of them rather than on the strip that holds them. */
-.purse {
+.purse, .clock {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -949,6 +950,33 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
+.clock-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+/* The hour leads, and it leads by size: it is the figure the clock is read for.
+   Tabular figures so the panel does not twitch a pixel wider at 11:00 — a HUD
+   element that changes width every minute is a HUD element you stop trusting. */
+.clock-time {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+/* A caption, and drawn as one: small, spaced, and no wider than the hour above
+   it. The date was the same size and weight as the time, which made the pill two
+   competing lines instead of a figure with a note under it. */
+.clock-date {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .row-icon { width: 26px; flex: 0 0 26px; display: grid; place-items: center; }
 
 /* Touch: the canvas handles its own gestures.
@@ -983,22 +1011,24 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 }
 .cog:hover { color: #3a352c; transform: rotate(38deg); }
 
-/* The speed and the cog, side by side but not joined. */
+/* The clock and the cog, side by side but not joined. Aligned at the top so the
+   cog sits level with the hour rather than centring itself on a taller pill. */
 .dials {
   display: flex;
   align-items: flex-start;
   gap: 8px;
 }
-/* Each on its own glass, the same as everything else. A button floating bare on
-   the countryside was the one piece of furniture with no edge, which made it look
-   like part of the picture rather than part of the game. */
-.cog, .speed {
+/* And the cog gets its own glass, the same as everything else. A button that
+   floated bare on the countryside was the one piece of furniture with no edge,
+   which made it look like part of the picture rather than part of the game. */
+.cog {
   width: 34px;
   height: 34px;
   border-radius: 12px;
   backdrop-filter: blur(10px);
 }
-.purse { pointer-events: auto; }
+/* The readout does not take clicks, but the button inside it must. */
+.purse, .clock { pointer-events: auto; }
 
 /* ------------------------------------------------------------- pause menu */
 
@@ -1352,10 +1382,10 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
    a page you cannot read. */
 
 .purse,
+.clock,
 .dock,
 .tools,
-.cog,
-.speed {
+.cog {
   background: rgba(14, 17, 15, 0.22);
   border: 1px solid rgba(255, 255, 255, 0.09);
   box-shadow: 0 3px 16px rgba(10, 16, 12, 0.20);
@@ -1368,10 +1398,10 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
     color 260ms ease;
 }
 .purse:hover,
+.clock:hover,
 .dock:hover,
 .tools:hover,
-.cog:hover,
-.speed:hover {
+.cog:hover {
   background: rgba(12, 15, 13, 0.72);
   border-color: rgba(255, 255, 255, 0.22);
   box-shadow: 0 6px 24px rgba(8, 14, 10, 0.34);
@@ -1382,30 +1412,42 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 /* Everything written on them inherits, so the ink turns over with the panel
    rather than each label needing its own rule. */
 .purse-sum,
+.clock-time,
+.clock-date,
 .dock-btn,
 .tool-btn,
-.tool-x {
+.tool-x,
+.speed {
   color: inherit;
   text-shadow: none;
   transition: color 260ms ease;
 }
-/* How fast the day runs. Its own pill now that the clock it used to sit inside
-   is gone, matching the cog beside it: two buttons of one size read as a pair,
-   where a wide pill and a square did not. */
+/* The date and the speed are quieter than the hour in both states, which is
+   what `currentColor` at reduced opacity buys that a second colour does not. */
+.clock-date,
+.speed { opacity: 0.72; }
+
+/* How fast the day runs. Outlined in the panel's own ink and filled with
+   nothing, so it turns over with the panel instead of needing a colour of its
+   own — the previous version kept a white fill from when the furniture was
+   white, which on a dark panel is a solid tile with invisible text on it. */
 .speed {
-  display: grid;
-  place-items: center;
-  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  background: none;
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  padding: 2px 6px;
+  line-height: 1.35;
   cursor: pointer;
-  pointer-events: auto;
 }
+.speed:hover { background: rgba(255, 255, 255, 0.16); opacity: 1; }
 .purse-icon { color: #e8cf82; }
 
 /* Rules and dividers, drawn in whatever the panel's ink currently is. */
+.clock-rule,
 .tool-rule {
   width: 1px;
   align-self: stretch;

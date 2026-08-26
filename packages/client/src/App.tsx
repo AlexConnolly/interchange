@@ -3040,6 +3040,8 @@ export function App(): JSX.Element {
         {live && (
           <Status
             cash={hud.cash}
+            date={hud.date}
+            dayFraction={hud.dayFraction}
             speed={speed}
             onSpeed={setSpeed}
             onMenu={() => { void sound.start(); setPaused(true); }}
