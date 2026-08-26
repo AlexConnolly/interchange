@@ -1251,3 +1251,47 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   font-size: 11px;
   color: #8b8577;
 }
+
+
+/* ------------------------------------------------------------- the road tool
+
+   Above the dock rather than over the district, because the district is what
+   the tool is for. Two buttons, a sentence and a way out — the sentence being
+   the part that stops a mode feeling like a trap. */
+.tool-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 88px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(680px, calc(100vw - 36px));
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(247, 243, 234, 0.95);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 24px rgba(30, 40, 30, 0.24);
+  pointer-events: auto;
+  animation: dock-rise 170ms cubic-bezier(0.2, 1.35, 0.4, 1) both;
+}
+.tool-btn {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 6px 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tool-btn:hover { background: #fff; }
+/* Gold for the tool in hand, like the dock's own lit button. */
+.tool-btn.on { background: #f4c95d; border-color: #d9a72e; font-weight: 600; }
+.tool-say {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: #7d7768;
+}

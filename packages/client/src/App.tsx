@@ -397,8 +397,18 @@ export function App(): JSX.Element {
    * imperative listener next to React state, and the alternative — re-binding
    * every listener whenever build mode changes — costs more than it saves.
    */
+  /**
+   * The road tool: laying track, taking it up, or neither.
+   *
+   * A mode rather than a panel, like the depot placement it sits beside — what
+   * you need on screen while choosing where a road goes is *the district*, and a
+   * dialogue over the top of it is the one thing that cannot help.
+   */
+  const [tool, setTool] = useState<'none' | 'lay' | 'lift'>('none');
   const buildingRef = useRef(false);
   buildingRef.current = building;
+  const toolRef = useRef<'none' | 'lay' | 'lift'>('none');
+  toolRef.current = tool;
   const bumpRef = useRef(bump);
   bumpRef.current = bump;
 
@@ -650,6 +660,22 @@ export function App(): JSX.Element {
       x: number; z: number; model: number; rot: number; tile: number; evening: Evening;
     }
     const trees: Scattered[] = [];
+    /**
+     * Take the scenery off a tile a road has just gone over.
+     *
+     * The scatter is laid out once at startup and never touched again, which is
+     * exactly right for trees and exactly wrong the moment the player can put a
+     * road through one. Splicing rather than rebuilding, because the list is
+     * thousands long and a road is one tile.
+     */
+    const clearScatterAt = (tile: number): void => {
+      const tx = tile % DISTRICT;
+      const tz = Math.floor(tile / DISTRICT);
+      for (let i = trees.length - 1; i >= 0; i--) {
+        if (Math.floor(trees[i].x) !== tx || Math.floor(trees[i].z) !== tz) continue;
+        trees.splice(i, 1);
+      }
+    };
 
     /**
      * Fill a business's yard with the things that say what it is.
@@ -755,6 +781,7 @@ export function App(): JSX.Element {
      */
     let ownedParcels = new Set<number>();
     let landAt = -1;
+    let marksAt = '';
 
     const yardTiles = new Set<number>();
     /*
@@ -1663,6 +1690,29 @@ export function App(): JSX.Element {
         const d = dx * dx + dz * dz;
         if (d < bestD) { bestD = d; found = i; }
       }
+      if (toolRef.current !== 'none') {
+        /*
+         * The road tool: the click is a tile, and nothing else on the map is
+         * selectable while it is up. Deliberately — a tool that sometimes opened
+         * a farm instead of laying a road would be a tool nobody trusted.
+         */
+        const r = toolRef.current === 'lay'
+          ? world.layTrackAt(world.player, tile)
+          : world.liftTrackAt(world.player, tile);
+        if (r.ok) {
+          /*
+           * Anything standing on it goes with it. "It removes anything in its
+           * way" — trees, bales, sheep, whatever the scatter put there. They are
+           * client-side scenery, so the sim neither knows nor needs to.
+           */
+          if (toolRef.current === 'lay') clearScatterAt(tile);
+          setNote('');
+          bumpRef.current();
+        } else {
+          setNote(r.reason);
+        }
+        return;
+      }
       if (buildingRef.current) {
         // Build mode: the click is a location, not a selection.
         const r = world.foundDepot(cx, cz, `Depot ${world.yards.count}`);
@@ -2111,9 +2161,63 @@ export function App(): JSX.Element {
        * several chunks, so enumerating them costs more than redrawing. It happens
        * a handful of times in a game.
        */
+      /*
+       * The blue marks, which are the tool's whole interface.
+       *
+       * Recomputed only when something that could change the answer changes —
+       * the tool, the camera tile, or the roads — because it asks `trackHere` of
+       * every tile in view and the answer is stable while you sit still. Bounded
+       * by the frame rather than by the district: nobody can build off screen.
+       */
+      // Through the ref, not the captured state: this closure was made once and
+      // `tool` in it is whatever it was at mount. The classic trap next to a
+      // long-lived listener, and the reason `toolRef` exists at all.
+      const nowTool = toolRef.current;
+      const marksNow = `${nowTool}:${world.landRevision}:${Math.round(renderer.camX)}`
+        + `:${Math.round(renderer.camZ)}:${Math.round(renderer.tilesAcross)}`;
+      if (marksNow !== marksAt) {
+        marksAt = marksNow;
+        const list: number[] = [];
+        if (nowTool !== 'none') {
+          const owned = world.ownedParcels(world.player);
+          const half = Math.ceil(renderer.tilesAcross * 0.62);
+          const cx0 = Math.round(renderer.camX);
+          const cz0 = Math.round(renderer.camZ);
+          for (let z = cz0 - half; z <= cz0 + half; z++) {
+            for (let x = cx0 - half; x <= cx0 + half; x++) {
+              if (x < 0 || z < 0 || x >= DISTRICT || z >= DISTRICT) continue;
+              const t = z * DISTRICT + x;
+              const okHere = nowTool === 'lay'
+                ? world.trackHere(world.player, t, owned).ok
+                : world.liftHere(world.player, t, owned).ok;
+              if (okHere) list.push(t);
+            }
+          }
+        }
+        renderer.showMarks(
+          list,
+          // Blue to lay, red to lift. Two tools, two answers, no label needed.
+          nowTool === 'lift' ? [0.86, 0.34, 0.32] : [0.34, 0.62, 0.92],
+          src,
+        );
+      }
+
       if (world.landRevision !== landAt) {
         landAt = world.landRevision;
         ownedParcels = world.ownedParcels(world.player);
+        /*
+         * And re-read the roads.
+         *
+         * `roadClass` is the client's own copy, built once at startup and handed
+         * to the renderer — which is fine for a district whose roads never
+         * change and was quietly wrong the moment one could. Nothing laid during
+         * play was ever drawn: not a track from the road tool, and not the lane
+         * the parish agrees to widen at the top of the ladder, which changed the
+         * simulation while the picture stayed exactly as it was.
+         */
+        for (let i = 0; i < roadClass.length; i++) {
+          roadClass[i] = layer.cls[i] !== NO_WAY ? roadClassOf(layer.cls[i], wayNames) : -1;
+        }
         renderer.dropChunks();
       }
       if (world.seasonRevision !== season) {
@@ -2372,6 +2476,35 @@ export function App(): JSX.Element {
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
+      {tool !== 'none' && (
+        /*
+         * Two buttons and a sentence, above the dock.
+         *
+         * Not a panel: a panel over the district would hide the thing the tool is
+         * for. The sentence matters as much as the buttons — a mode with no
+         * explanation is a mode the player leaves by pressing Escape and never
+         * returns to.
+         */
+        <div className="tool-bar">
+          <button
+            className={`tool-btn ${tool === 'lay' ? 'on' : ''}`}
+            onClick={() => { setTool('lay'); setNote(''); }}
+          >Lay track</button>
+          <button
+            className={`tool-btn ${tool === 'lift' ? 'on' : ''}`}
+            onClick={() => { setTool('lift'); setNote(''); }}
+          >Take up</button>
+          <span className="tool-say">
+            {note !== '' ? note
+              : tool === 'lay'
+                ? 'Click a blue mark. Only your own land, and it must join a road.'
+                : 'Click a red mark to take a track up again.'}
+          </span>
+          <button className="tool-btn" onClick={() => { setTool('none'); setNote(''); }}>
+            Done
+          </button>
+        </div>
+      )}
       {building && (
         <div className="build-hint">
           Click a spot beside a road to put a depot there
@@ -2438,6 +2571,29 @@ export function App(): JSX.Element {
               onClick: () => setPanel(
                 panel.k === 'contracts' ? { k: 'none' } : { k: 'contracts' },
               ),
+            },
+            /*
+             * Roads, which is a *tool* rather than a screen.
+             *
+             * The one dock item that does not open a panel over the district,
+             * because what you need on screen while deciding where a road goes is
+             * the district. Pressing it puts marks on every tile you may work on
+             * and turns the map into the interface; pressing it again puts the map
+             * back. That is also why it can afford a permanent slot where "build a
+             * depot" could not: a depot is three clicks in a whole game, and a
+             * road tool is something you come back to every time you buy a field.
+             */
+            {
+              key: 'roads',
+              label: 'Roads',
+              icon: 'terminal',
+              on: tool !== 'none',
+              onClick: () => {
+                setPanel({ k: 'none' });
+                setBuilding(false);
+                setNote('');
+                setTool(tool === 'none' ? 'lay' : 'none');
+              },
             },
             /*
              * The parish appears when the parish would notice you, and not

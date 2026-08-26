@@ -1882,6 +1882,16 @@ export class World {
       this.assets.count--;
       return false;
     }
+    /*
+     * Every way laid, anywhere, bumps the revision.
+     *
+     * Here rather than at the call sites because this is the one place a road
+     * comes into existence, and the client's copy of the road map is built once
+     * at startup — so anything that lays a road without saying so is a road that
+     * never gets drawn. That was already true of the parish widening a lane: it
+     * changed the simulation, the lorries used it, and the picture never moved.
+     */
+    this.landRevision++;
     this.rebuild();
     this.router.invalidate();
     return true;
@@ -2582,6 +2592,7 @@ export class World {
       }
     }
     if (removed > 0) {
+      this.landRevision++;
       this.rebuild();
       this.router.invalidate();
     }
@@ -3868,6 +3879,135 @@ export class World {
 
   /** Bumped whenever the ground you own, or what is on it, changes. */
   landRevision = 0;
+
+  /**
+   * Can a track go on this tile, and if not, why not?
+   *
+   * The refusals are the interface. A build tool that simply does nothing when
+   * you click is a build tool the player has to reverse-engineer, and the whole
+   * point of showing where you *can* build is that the answer is visible before
+   * the click — so this is written to be asked of every tile in view, and it is
+   * cheap enough for that.
+   *
+   * Extending from an existing road rather than placing anywhere is what keeps
+   * the result usable: a track has to reach the network to be worth laying, and
+   * growing it outward tile by tile means it always does, with no route-finding
+   * and no way to draw something orphaned.
+   */
+  trackHere(
+    company: number, tile: number, owned?: Set<number>,
+  ): { ok: boolean; reason: string } {
+    const size = this.config.size;
+    if (tile < size || tile >= size * (size - 1)) {
+      return { ok: false, reason: 'Off the map.' };
+    }
+    if (this.terrain.height[tile] <= 0) return { ok: false, reason: 'That is water.' };
+    const layer = this.layers[Mode.Road];
+    if (layer.cls[tile] !== NO_WAY) return { ok: false, reason: 'Already a road.' };
+    // Not through a building. A business or a yard stands on its own tile, and
+    // the track that reaches it is drawn up to the yard rather than under it.
+    for (let s2 = 0; s2 < this.sites.count; s2++) {
+      if (this.sites.tile[s2] === tile) return { ok: false, reason: 'A building is there.' };
+    }
+    for (let y2 = 0; y2 < this.yards.count; y2++) {
+      if (this.yards.tile[y2] === tile) return { ok: false, reason: 'A building is there.' };
+    }
+    const parcels = owned ?? this.ownedParcels(company);
+    if (!parcels.has(this.terrain.fields.parcel[tile])) {
+      return { ok: false, reason: 'Not your land.' };
+    }
+    // It has to touch something that already goes somewhere.
+    for (const d of [1, -1, size, -size]) {
+      if (layer.cls[tile + d] !== NO_WAY) return { ok: true, reason: '' };
+    }
+    return { ok: false, reason: 'It has to join a road.' };
+  }
+
+  /**
+   * Lay one tile of farm track.
+   *
+   * Free, for now, and that is a deliberate stage rather than an oversight: the
+   * question this answers is whether being able to shape your own approach is
+   * *fun*, and putting a price on it before knowing that would only measure
+   * whether the price was right. `TRACK_SHARE` is still there for when it is.
+   *
+   * Laid as a two-tile run from the neighbour it joins, because the alignment
+   * planner wants a run rather than a point — and that is also the honest model:
+   * you are extending a road, not dropping a paving slab.
+   */
+  layTrackAt(company: number, tile: number): { ok: boolean; reason: string } {
+    const verdict = this.trackHere(company, tile);
+    if (!verdict.ok) return verdict;
+    const size = this.config.size;
+    const layer = this.layers[Mode.Road];
+    let from = -1;
+    for (const d of [1, -1, size, -size]) {
+      if (layer.cls[tile + d] !== NO_WAY) { from = tile + d; break; }
+    }
+    if (from < 0) return { ok: false, reason: 'It has to join a road.' };
+    const cls = this.trackClass();
+    if (cls < 0) return { ok: false, reason: 'Nothing to build it with.' };
+    if (!this.layPublicWay(Mode.Road, cls, [from, tile], this.wayCharge[cls], 0)) {
+      return { ok: false, reason: 'It would not go in there.' };
+    }
+    this.rebuild();
+    this.landRevision++;
+    return { ok: true, reason: '' };
+  }
+
+  /**
+   * Can this tile of road come up? The mirror of `trackHere`, and asked the same
+   * way: of every tile in view, to decide what to mark.
+   */
+  liftHere(
+    company: number, tile: number, owned?: Set<number>,
+  ): { ok: boolean; reason: string } {
+    const layer = this.layers[Mode.Road];
+    if (tile < 0 || tile >= layer.cls.length) return { ok: false, reason: 'Off the map.' };
+    if (layer.cls[tile] === NO_WAY) return { ok: false, reason: 'No road there.' };
+    const parcels = owned ?? this.ownedParcels(company);
+    if (!parcels.has(this.terrain.fields.parcel[tile])) {
+      return { ok: false, reason: 'Not your land.' };
+    }
+    for (let s2 = 0; s2 < this.sites.count; s2++) {
+      if (this.siteAccessTile[s2] === tile) {
+        return { ok: false, reason: 'Something needs that to get out.' };
+      }
+    }
+    for (let y2 = 0; y2 < this.yards.count; y2++) {
+      if (this.yards.tile[y2] === tile) {
+        return { ok: false, reason: 'Something needs that to get out.' };
+      }
+    }
+    return { ok: true, reason: '' };
+  }
+
+  /**
+   * Take one tile of road up again.
+   *
+   * Only on your own land, which is the same rule as building and for the same
+   * reason — and it keeps the player from unpicking the parish's lane through
+   * the village, which would be both rude and a good way to strand every
+   * business on it.
+   *
+   * A tile something needs is refused. `siteAccessTile` is a *road* tile by
+   * construction, so lifting it would leave a business with no way in and
+   * nothing on screen to explain why its lorries had stopped coming.
+   */
+  liftTrackAt(company: number, tile: number): { ok: boolean; reason: string } {
+    const verdict = this.liftHere(company, tile);
+    if (!verdict.ok) return verdict;
+    const layer = this.layers[Mode.Road];
+    const asset = layer.asset[tile];
+    if (!removeWayTile(layer, this.config.size, tile)) {
+      return { ok: false, reason: 'It would not come up.' };
+    }
+    if (asset !== NONE) this.assets.tiles[asset]--;
+    this.rebuild();
+    this.router.invalidate();
+    this.landRevision++;
+    return { ok: true, reason: '' };
+  }
 
   /** The cheapest road in the catalogue: a farm track. */
   private trackClass(): number {

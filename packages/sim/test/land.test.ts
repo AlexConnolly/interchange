@@ -137,3 +137,89 @@ describe('land you own', () => {
     expect(laid).toBe(run.length);
   });
 });
+
+/**
+ * The road tool, tile by tile.
+ *
+ * A build tool's refusals *are* its interface — the blue markers the player sees
+ * are this predicate asked of every tile in view — so what matters is that it
+ * says no for the right reasons and yes only where a track would actually be
+ * useful. Every one of these is a thing that, permitted, would leave the player
+ * with either a road through a barn or a road that goes nowhere.
+ */
+describe('the road tool', () => {
+  it('will not lay a track that joins nothing', () => {
+    const w = district();
+    ownSomething(w);
+    const owned = w.ownedParcels(w.player);
+    let lonely = -1;
+    for (let t = D; t < D * (D - 1); t++) {
+      const p = w.terrain.fields.parcel[t];
+      if (p < 0 || !owned.has(p)) continue;
+      if (w.layers[0].cls[t] !== 255) continue;
+      let touches = false;
+      for (const d of [1, -1, D, -D]) if (w.layers[0].cls[t + d] !== 255) touches = true;
+      if (touches) continue;
+      lonely = t;
+      break;
+    }
+    expect(lonely).toBeGreaterThanOrEqual(0);
+    const r = w.layTrackAt(w.player, lonely);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('join a road');
+  });
+
+  it('will not lay one on land that is not yours', () => {
+    const w = district();
+    ownSomething(w);
+    const owned = w.ownedParcels(w.player);
+    let theirs = -1;
+    for (let t = D; t < D * (D - 1); t++) {
+      const p = w.terrain.fields.parcel[t];
+      if (p < 0 || owned.has(p)) continue;
+      if (w.layers[0].cls[t] !== 255 || w.terrain.height[t] <= 0) continue;
+      let touches = false;
+      for (const d of [1, -1, D, -D]) if (w.layers[0].cls[t + d] !== 255) touches = true;
+      if (!touches) continue;
+      theirs = t;
+      break;
+    }
+    expect(theirs).toBeGreaterThanOrEqual(0);
+    expect(w.layTrackAt(w.player, theirs).reason).toContain('Not your land');
+  });
+
+  it('will not lay one through a building', () => {
+    const w = district();
+    const site = ownSomething(w);
+    const r = w.trackHere(w.player, w.sites.tile[site]);
+    expect(r.ok).toBe(false);
+    // Either verdict is correct and both are refusals; what must never happen is
+    // a yes on the tile a barn is standing on.
+    expect(['A building is there.', 'Already a road.']).toContain(r.reason);
+  });
+
+  it('lays one that extends the network, and takes it up again', () => {
+    const w = district();
+    ownSomething(w);
+    const owned = w.ownedParcels(w.player);
+    let spot = -1;
+    for (let t = D; t < D * (D - 1); t++) {
+      if (w.trackHere(w.player, t, owned).ok) { spot = t; break; }
+    }
+    expect(spot).toBeGreaterThanOrEqual(0);
+    expect(w.layTrackAt(w.player, spot).reason).toBe('');
+    expect(w.layers[0].cls[spot]).not.toBe(255);
+    // And back off again, because a tool you cannot undo is a tool nobody uses.
+    expect(w.liftTrackAt(w.player, spot).reason).toBe('');
+    expect(w.layers[0].cls[spot]).toBe(255);
+  });
+
+  it('refuses to lift a road something needs to get out', () => {
+    const w = district();
+    const site = ownSomething(w);
+    const access = w.siteAccessTile[site];
+    expect(access).toBeGreaterThanOrEqual(0);
+    const r = w.liftTrackAt(w.player, access);
+    expect(r.ok).toBe(false);
+  });
+});
