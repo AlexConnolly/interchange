@@ -15,5 +15,6 @@
   "graceDays": 60,
   "townGrowthPerDay": 4,
   "regulatorSharePct": 58,
-  "openingCargo": "milk"
+  "openingCargo": "milk",
+  "ownTradePct": 150
 }

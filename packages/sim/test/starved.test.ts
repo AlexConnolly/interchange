@@ -11,7 +11,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { createWorld, TICKS_PER_DAY, SiteState } from '../src/index.ts';
+import {
+  createWorld, TICKS_PER_DAY, SiteState, Line, LINE_COUNT, facilitiesFor,
+} from '../src/index.ts';
 import { loadContent } from '../../data/src/index.ts';
 
 loadContent();
@@ -134,5 +136,104 @@ describe('supplying a place you own', () => {
     const before = w.services.count;
     expect(w.supply(farm, shop, produce)).toBe(true);
     expect(w.services.count).toBe(before + 1);
+  });
+});
+
+describe('trading into your own business', () => {
+  /**
+   * One run, from a farm you own to a works, for a fortnight.
+   *
+   * The same seed and the same two places both times, so the route, the tonnage
+   * and the distance are identical and the only difference is who owns the far
+   * end. Comparing two real hauls rather than reaching into the payment function
+   * is the point: it is the *rule* that matters — a tonne into your own business
+   * is worth more — and a test that called the payment directly would still pass
+   * if the rule were never reached from a delivery.
+   */
+  function fortnight(ownFarEnd: boolean): { haulage: number; trading: number } {
+    const w = createWorld({ seed: 1985, size: 128, townCount: 3, companyCount: 1 });
+    w.tick = 60 * TICKS_PER_DAY;
+    const o = w.planOpening();
+    w.refreshInfluence([{ x: o.x, y: o.y, strength: 3.2 }]);
+    w.companies.cash[w.player] = 500_000_00;
+    w.primeStock();
+
+    // A farm and a works that takes what it makes.
+    let farm = -1;
+    let works = -1;
+    let cargo = -1;
+    outer: for (let a = 0; a < w.sites.count; a++) {
+      if (w.recipes.inputs[w.sites.def[a]].length > 0) continue;
+      const outs = w.recipes.outputs[w.sites.def[a]];
+      for (let i = 0; i < outs.length; i += 2) {
+        for (let b = 0; b < w.sites.count; b++) {
+          const ins = w.recipes.inputs[w.sites.def[b]];
+          for (let k = 0; k < ins.length; k += 2) {
+            if (ins[k] !== outs[i]) continue;
+            farm = a; works = b; cargo = outs[i];
+            break outer;
+          }
+        }
+      }
+    }
+    expect(farm).toBeGreaterThanOrEqual(0);
+
+    w.sites.owner[farm] = w.player;
+    if (ownFarEnd) w.sites.owner[works] = w.player;
+
+    const yard = w.foundYard(w.sites.x[farm], w.sites.y[farm] + 2, 'Yard');
+    const vi = w.openingVehicle(cargo);
+    const veh = w.content.vehicles[vi];
+    if (yard >= 0) {
+      w.yards.add(yard, facilitiesFor({
+        handling: veh.handling as readonly string[], cls: veh.class,
+      }));
+    }
+    w.buyVehicleAtYard(vi, yard);
+    expect(w.supply(farm, works, cargo)).toBe(true);
+    for (let d = 0; d < 14; d++) for (let t = 0; t < TICKS_PER_DAY; t++) w.step();
+
+    const base = w.player * LINE_COUNT;
+    return {
+      haulage: w.companies.ledgerTotal[base + Line.Haulage],
+      trading: w.companies.ledgerTotal[base + Line.Trading],
+    };
+  }
+
+  it('pays into Trading rather than Haulage, and pays half again', () => {
+    const hire = fortnight(false);
+    const mine = fortnight(true);
+
+    // Hauling to somebody else is haulage and nothing else.
+    expect(hire.haulage).toBeGreaterThan(0);
+    expect(hire.trading).toBe(0);
+
+    // Into your own, it is trading and nothing else.
+    expect(mine.trading).toBeGreaterThan(0);
+    expect(mine.haulage).toBe(0);
+
+    // And it is worth half again for the identical run.
+    expect(mine.trading / hire.haulage).toBeCloseTo(1.5, 1);
+  });
+
+  it('cannot be a money printer, because a full shed accepts nothing', () => {
+    /*
+     * The property that makes better-than-market rates safe to hand out. A
+     * business earns only while goods are physically reaching it, so what it can
+     * ever earn is capped by what it actually gets through — there is no lump sum
+     * for owning anything and no revenue that arrives while you sleep.
+     */
+    const w = createWorld({ seed: 1985, size: 128, townCount: 3, companyCount: 1 });
+    w.primeStock();
+    let works = -1;
+    for (let s = 0; s < w.sites.count; s++) {
+      if (w.recipes.inputs[w.sites.def[s]].length > 0
+        && w.recipes.outputs[w.sites.def[s]].length > 0) { works = s; break; }
+    }
+    w.sites.owner[works] = w.player;
+    const cargo = w.recipes.inputs[w.sites.def[works]][0];
+    const room = w.sites.roomFor(works, cargo);
+    expect(w.sites.addStock(works, cargo, room)).toBe(room);
+    expect(w.sites.addStock(works, cargo, 1)).toBe(0);
   });
 });

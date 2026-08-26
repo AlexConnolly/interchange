@@ -2146,11 +2146,23 @@ export function App(): JSX.Element {
        * darkest, which leaves the occasional set of headlamps crossing the
        * district rather than a stream, and makes those headlamps worth watching.
        */
+      /*
+       * The world clock, for the things in the world.
+       *
+       * The traffic and the tractors are simulated here rather than in the sim —
+       * they are scenery, and scenery that costs the economy nothing — so they
+       * were stepped on the raw frame time and did not notice fast-forward at
+       * all. At 4x the lorries and the smoke sped up and the cars kept crawling
+       * along at their own pace, which reads as the district being full of
+       * traffic that has nothing to do with the district. Same multiplier the
+       * renderer's own world clock uses; see `timeScale` in `scene.ts`.
+       */
+      const wdt = dt * (pausedRef.current ? 0 : speedRef.current);
       const awake = 1 - renderer.night * 0.92;
       ambient.demand = areaDemand(townList, renderer.camX, renderer.camZ, 22) * awake;
       const fleetEnd = n;
       n = ambient.step(
-        dt, renderer.camX, renderer.camZ, renderer.tilesAcross * 0.8, n,
+        wdt, renderer.camX, renderer.camZ, renderer.tilesAcross * 0.8, n,
         src.vx, src.vz, src.vHeading, src.vLivery, src.vModel, src.vId,
       );
       // Tractors, after the traffic. They share the vehicle arrays so they get
@@ -2162,7 +2174,7 @@ export function App(): JSX.Element {
        */
       farmwork.hour = (src.dayFraction * 24 + 6) % 24;
       n = farmwork.step(
-        dt, MACHINES, n,
+        wdt, MACHINES, n,
         src.vx, src.vz, src.vHeading, src.vLivery, src.vModel, src.vId,
       );
       // Traffic and tractors manage their own standing about, so the renderer

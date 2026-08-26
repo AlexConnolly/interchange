@@ -209,6 +209,9 @@ export const Balance = z.object({
   /** Asset valuation: multiple of trailing annual net revenue, in percent.
    *  design.md §3.3 — the second snowball damper. */
   valuationPct: z.number().int(),
+  /** What a tonne into a business of your own is worth, against the same tonne
+   *  hauled for hire. 150 means half again. */
+  ownTradePct: z.number().int(),
   /** How sharply traffic abandons an overpriced way. Higher is more elastic.
    *  design.md §3.3 — the first and primary damper. */
   tollElasticity: z.number().int(),

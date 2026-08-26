@@ -29,16 +29,25 @@ export const Line = {
   Penalties: 9,
   AssetTrade: 10,
   Subsidy: 11,
+  /**
+   * Goods moved into a business of your own.
+   *
+   * Its own line rather than more haulage, because the whole point of it is
+   * that it pays *better* than haulage and the player has to be able to see
+   * that it does. A ledger that folded the two together would be a ledger in
+   * which the reason to own anything was invisible.
+   */
+  Trading: 12,
 } as const;
 export type Line = (typeof Line)[keyof typeof Line];
-export const LINE_COUNT = 12;
+export const LINE_COUNT = 13;
 export const LINE_NAMES = [
   'Haulage', 'Contract bonuses', 'Access charges earned', 'Access charges paid',
   'Running costs', 'Construction', 'Vehicle purchase', 'Upkeep', 'Interest',
-  'Penalties', 'Asset trading', 'Subsidy',
+  'Penalties', 'Asset trading', 'Subsidy', 'Trading',
 ] as const;
 /** Which lines are income; the rest are expenditure. */
-export const LINE_IS_INCOME = [true, true, true, false, false, false, false, false, false, false, true, true];
+export const LINE_IS_INCOME = [true, true, true, false, false, false, false, false, false, false, true, true, true];
 
 /** Charters, design.md §1. Each is a licence to do a category of thing. */
 export const Charter = {

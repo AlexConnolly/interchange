@@ -1381,10 +1381,40 @@ export class World {
      * reason.
      */
     const dist = Math.max(direct, Math.min(this.vehicles.haulDistance[vehicle], direct * HAUL_ALLOWANCE));
+    const rate = haulageRate(this.cargoPrice[cargo], dist, this.cargoRateWeight[cargo]);
+    /*
+     * A tonne into a business of your own is worth half again.
+     *
+     * This is the only income owning a business has, and until now there was
+     * none at all: the ledger had twelve lines and not one of them was goods
+     * sold, so owning a creamery earned exactly nothing beyond the right to haul
+     * its output like anybody else's. The ladder's top half had no payoff in it.
+     *
+     * Paid per tonne actually delivered, and that is the important part — "it
+     * obviously feeds so you don't just get 100k out of nowhere". There is no
+     * lump sum for owning anything and no revenue that arrives while you sleep.
+     * A business earns when goods physically reach it, at the rate your lorries
+     * can bring them, and it stops earning the moment its sheds are full because
+     * a full shed accepts nothing. So the ceiling on what a business can make
+     * you is what it actually gets through, which is the property that makes
+     * this safe to hand out at better-than-market rates.
+     *
+     * Against the haulage rate rather than a price of its own, deliberately.
+     * `basePrice` looks like it should be the goods price and is not — it enters
+     * the rate at eighteen per cent, so a tonne of produce contributes ninety
+     * pence against seven hundred pounds of distance money, and charging it
+     * would be charging nothing. Expressing the trade as a multiple of the fare
+     * needs no second price scale, no wholesale-and-retail bookkeeping, and no
+     * new number the content has to keep consistent with the old one: one
+     * constant, and every load in the game is now a live question of whether it
+     * is worth more on somebody else's contract or on your own shelves.
+     */
+    const own = !isTown && target >= 0 && target < this.sites.count
+      && this.sites.owner[target] === company;
     const pence = Math.round(
-      haulageRate(this.cargoPrice[cargo], dist, this.cargoRateWeight[cargo]) * tonnes,
+      rate * tonnes * (own ? this.content.balance.ownTradePct / 100 : 1),
     );
-    this.companies.post(company, Line.Haulage, pence);
+    this.companies.post(company, own ? Line.Trading : Line.Haulage, pence);
     /*
      * And say so, if it was the player's.
      *
