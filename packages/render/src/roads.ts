@@ -32,6 +32,16 @@ import { HEIGHT_TO_WORLD } from './ground.ts';
  * the whole failure of the old renderer was that they were not.
  */
 export const RoadClass = { Track: 0, Lane: 1, Spine: 2 } as const;
+
+/**
+ * How far a bridge deck sits above the water it crosses.
+ *
+ * Exported because two modules have to agree about it exactly: this one draws the
+ * deck, and `scene.ts` lifts anything driving over it by the same amount. A
+ * constant in one place rather than the same magic number twice, because the
+ * failure mode of them disagreeing is lorries sunk into a bridge.
+ */
+export const BRIDGE_RISE = 0.10;
 export type RoadClass = (typeof RoadClass)[keyof typeof RoadClass];
 
 interface Style {
@@ -245,9 +255,15 @@ export function buildRoads(
 
       // Verge first and wider, so the surface sits inside it.
       const v = st.verge - st.half;
+      /*
+       * Over water the whole carriageway rises with the parapets. Lifting only
+       * the walls would leave a road at river level with a fence on either side,
+       * which is a ford with delusions.
+       */
+      const lift = src.isStream(tile) ? BRIDGE_RISE : 0;
       quadAt(m, cornerY, x, z,
-             sx0 - v, sz0 - v, sx1 + v, sz1 + v, -0.008, faded(ROAD.verge, inf));
-      quadAt(m, cornerY, x, z, sx0, sz0, sx1, sz1, 0, faded(st.surface, inf));
+             sx0 - v, sz0 - v, sx1 + v, sz1 + v, -0.008 + lift, faded(ROAD.verge, inf));
+      quadAt(m, cornerY, x, z, sx0, sz0, sx1, sz1, lift, faded(st.surface, inf));
 
       /*
        * A bridge, which is a road tile with water under it and a parapet on it.
@@ -265,8 +281,25 @@ export function buildRoads(
        * Two boxes.
        */
       if (src.isStream(tile)) {
+        /*
+         * The deck goes *above* the water, which it did not.
+         *
+         * The river is painted on the terrain rather than cut as a channel with a
+         * water surface in it, so the road, the water and the parapets were all
+         * at exactly the same height — and a road at water level is a ford. The
+         * only thing saying "bridge" was the two walls, and everything driving
+         * over it looked like it was driving through the river, which is what was
+         * reported.
+         *
+         * A tenth of a unit, which at this scale is about the depth of the water
+         * either side of it: enough to read as a span and to keep the wheels dry,
+         * and not so much that a lane appears to hop over a beck. `scene.ts`
+         * lifts vehicles by the same constant on the same tiles — see BRIDGE_RISE
+         * — because a deck the traffic does not know about is a deck the traffic
+         * drives underneath.
+         */
         const deck = (cornerY(x, z) + cornerY(x + 1, z)
-          + cornerY(x, z + 1) + cornerY(x + 1, z + 1)) / 4;
+          + cornerY(x, z + 1) + cornerY(x + 1, z + 1)) / 4 + BRIDGE_RISE;
         const wall = faded(WALL.stone, inf);
         const cap = faded(WALL.shadow, inf);
         const h = 0.115;

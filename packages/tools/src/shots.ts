@@ -41,7 +41,9 @@ const CHROMES = [
  * only exist at one hour: the mist is a dawn thing and nothing else in the game
  * says so, and the lit windows and street lamps only mean anything after dusk.
  */
-const SHOTS: { name: string; query: string; wait?: number; hover?: string }[] = [
+const SHOTS: {
+  name: string; query: string; wait?: number; hover?: string; click?: string[];
+}[] = [
   { name: 'afternoon', query: 'across=30' },
   { name: 'wide', query: 'across=64' },
   { name: 'dawn-mist', query: 'across=30&time=0.02' },
@@ -68,6 +70,17 @@ const SHOTS: { name: string; query: string; wait?: number; hover?: string }[] = 
    */
   { name: 'smoke', query: 'across=18&time=0.09&day=241', wait: 22000 },
   { name: 'fog-day', query: 'across=34&time=0.02&day=261', wait: 14000 },
+  /* A river crossing, close enough to see the deck and the water together. */
+  { name: 'bridge', query: 'across=12&at=37,54' },
+  /*
+   * A panel, which needs a click to exist.
+   *
+   * Half this interface only appears when something is open, and until now the
+   * screenshot tool could photograph none of it — so every change to a panel was
+   * checked by reading the CSS and hoping. Clicking a map marker is the cheapest
+   * way in: it is the same gesture a player makes.
+   */
+  { name: 'panel', query: 'across=26', click: ['.mark'] },
 ];
 
 const BASE = process.env.BASE ?? 'http://localhost:4173/';
@@ -118,6 +131,30 @@ async function main(): Promise<void> {
     const url = `${BASE}?vfx=high&${shot.query}&shot=${Date.now()}`;
     await page.goto(url, { waitUntil: 'load' });
     await page.waitForTimeout(shot.wait ?? SETTLE);
+    for (const sel of shot.click ?? []) {
+      /*
+       * The first one *on screen*, which is not the first one in the document.
+       *
+       * Map markers are positioned for the whole district and only some of them
+       * are in view, so `page.click('.mark')` picks whichever is first in DOM
+       * order and fails with "outside of the viewport" as often as not. And
+       * `force`, because the markers sit in a layer the canvas overlaps: they
+       * take pointer events and the canvas does not, but proving that to
+       * Playwright's hit-test is more trouble than dispatching the click.
+       */
+      const all = await page.locator(sel).all();
+      let clicked = false;
+      for (const el of all) {
+        const box = await el.boundingBox();
+        if (!box) continue;
+        if (box.x < 40 || box.y < 40 || box.x > 1500 || box.y > 900) continue;
+        await el.click({ force: true, timeout: 4000 });
+        clicked = true;
+        break;
+      }
+      if (!clicked) console.log(`  (nothing on screen matched ${sel})`);
+      await page.waitForTimeout(600);
+    }
     if (shot.hover) {
       await page.hover(shot.hover);
       // Long enough for the 120ms transition in, and no longer.

@@ -487,6 +487,10 @@ export function App(): JSX.Element {
       if (!live) return;
       if (live.world.supply(from, to, cargo, vehicle ?? -1)) bump();
     }, [live, bump]),
+    endRun: useCallback((service: number): void => {
+      if (!live) return;
+      if (live.world.endRun(service)) bump();
+    }, [live, bump]),
     accept: useCallback((contract: number, vehicle: number): void => {
       if (!live) return;
       if (live.world.acceptContract(contract, live.world.player, vehicle)) bump();

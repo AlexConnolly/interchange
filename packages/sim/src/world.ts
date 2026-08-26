@@ -20,6 +20,7 @@ import { Cmd, CommandQueue, type Command } from './commands.ts';
 import {
   CompanyTable, Charter, Line, LINE_COUNT,
   ServiceTable, StopAction, MAX_STOPS, ENTRANT_NAMES, hashEconomy, SITE_PRICE_SCALE, haulageRate, HAUL_ALLOWANCE, RATE_WEIGHT_BY_TIER, CHARTER_REQUIREMENTS, stepFinance,
+  JOURNAL, MoneyKind,
 } from './economy.ts';
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
 import { Hasher } from './hash.ts';
@@ -523,6 +524,93 @@ export class World {
 
 
 
+  /**
+   * Money in and out, place by place, with a reason attached.
+   *
+   * "I really want to see financials... it shows all outbound and inbound money
+   * and the time and an explanation of WHAT the transaction was." The ledger
+   * already had totals per line per company, which answers "how am I doing" and
+   * cannot answer "was buying that creamery a mistake" — for that you need the
+   * events, attributed to the place they happened at.
+   *
+   * A ring buffer, because this is a record for *reading* rather than a source of
+   * truth: cash is authoritative, and if a busy fleet pushes the oldest rows out
+   * of the window nothing is lost that the accounts depend on. Sized so a
+   * reasonably busy district holds a few weeks.
+   *
+   * Deliberately *not* in the hash and not in the save. It is derived from things
+   * that are both, so replaying a log reproduces it, and putting it in the
+   * determinism hash would make a display convenience a correctness constraint.
+   */
+  private readonly journalTick = new Int32Array(JOURNAL);
+  private readonly journalSite = new Int32Array(JOURNAL).fill(NONE);
+  private readonly journalPence = new Float64Array(JOURNAL);
+  private readonly journalKind = new Uint8Array(JOURNAL);
+  private readonly journalCargo = new Int32Array(JOURNAL).fill(NONE);
+  private readonly journalTonnes = new Float64Array(JOURNAL);
+  private journalHead = 0;
+  private journalCount = 0;
+
+  /**
+   * Write one line into it. `pence` signed: out is negative, in is positive.
+   *
+   * Signed rather than a separate in/out flag so the panel can sum a column
+   * without knowing what any of the kinds mean.
+   */
+  private note(
+    site: number, kind: MoneyKind, pence: number, cargo = NONE, tonnes = 0,
+  ): void {
+    const i = this.journalHead;
+    this.journalTick[i] = this.tick;
+    this.journalSite[i] = site;
+    this.journalPence[i] = pence;
+    this.journalKind[i] = kind;
+    this.journalCargo[i] = cargo;
+    this.journalTonnes[i] = tonnes;
+    this.journalHead = (i + 1) % JOURNAL;
+    if (this.journalCount < JOURNAL) this.journalCount++;
+  }
+
+  /**
+   * What happened at this place, newest first.
+   *
+   * Walked backwards from the write head so the caller gets recent history
+   * without sorting, and capped because a panel showing four hundred rows is a
+   * panel nobody reads.
+   */
+  moneyAt(site: number, max = 40): {
+    tick: number; pence: number; kind: MoneyKind; cargo: number; tonnes: number;
+  }[] {
+    const out: {
+      tick: number; pence: number; kind: MoneyKind; cargo: number; tonnes: number;
+    }[] = [];
+    for (let n = 0; n < this.journalCount && out.length < max; n++) {
+      const i = (this.journalHead - 1 - n + JOURNAL * 2) % JOURNAL;
+      if (this.journalSite[i] !== site) continue;
+      out.push({
+        tick: this.journalTick[i],
+        pence: this.journalPence[i],
+        kind: this.journalKind[i] as MoneyKind,
+        cargo: this.journalCargo[i],
+        tonnes: this.journalTonnes[i],
+      });
+    }
+    return out;
+  }
+
+  /** In and out since the beginning, for the summary line above the list. */
+  moneyTotals(site: number): { in: number; out: number } {
+    let inn = 0;
+    let out = 0;
+    for (let n = 0; n < this.journalCount; n++) {
+      const i = (this.journalHead - 1 - n + JOURNAL * 2) % JOURNAL;
+      if (this.journalSite[i] !== site) continue;
+      if (this.journalPence[i] >= 0) inn += this.journalPence[i];
+      else out -= this.journalPence[i];
+    }
+    return { in: inn, out };
+  }
+
   get era(): number {
     const y = this.year;
     for (let i = this.content.eras.length - 1; i >= 0; i--) {
@@ -540,6 +628,28 @@ export class World {
    * a haulage office would actually say, and cannot be divided into anything
    * that contradicts a lorry.
    */
+  /**
+   * A tick, as a date somebody could read on a docket.
+   *
+   * Week, month and the clock — and no day number, for the reason `dateString`
+   * gives below: a day is a rate bucket in this game rather than a unit, and a
+   * transaction list is not a good enough reason to break a rule that holds
+   * everywhere else. Week plus time of day orders a morning's work in sequence,
+   * which is what a ledger column is actually for.
+   */
+  stampOf(tick: number): string {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const day = Math.floor(tick / TICKS_PER_DAY);
+    const year = 1985 + Math.floor(day / DAYS_PER_YEAR);
+    const month = Math.floor((day % DAYS_PER_YEAR) / DAYS_PER_MONTH);
+    const week = Math.floor((day % DAYS_PER_MONTH) / 6) + 1;
+    // Six in the morning is zero on the dial — see HOUR in evening.ts.
+    const mins = Math.floor(((tick % TICKS_PER_DAY) / TICKS_PER_DAY) * 1440 + 6 * 60) % 1440;
+    const hh = Math.floor(mins / 60);
+    const mm = String(mins % 60).padStart(2, '0');
+    return `Wk ${week}, ${months[month]} ${year} · ${hh}:${mm}`;
+  }
+
   dateString(): string {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return `Week ${this.weekOfMonth + 1}, ${months[this.month]} ${this.year}`;
@@ -1415,6 +1525,10 @@ export class World {
       rate * tonnes * (own ? this.content.balance.ownTradePct / 100 : 1),
     );
     this.companies.post(company, own ? Line.Trading : Line.Haulage, pence);
+    if (company === this.player && !isTown && target >= 0) {
+      this.note(target, own ? MoneyKind.Traded : MoneyKind.Delivered,
+                pence, cargo, tonnes);
+    }
     /*
      * And say so, if it was the player's.
      *
@@ -3211,6 +3325,7 @@ export class World {
      * accounts would present it.
      */
     this.companies.post(this.player, Line.AssetTrade, -price);
+    this.note(site, MoneyKind.Bought, -price);
     this.sites.owner[site] = this.player;
     this.absorbContracts(site);
     // The land it stands on is yours now too, and the ground is drawn from this.
@@ -4744,6 +4859,66 @@ export class World {
         break;
       }
     }
+    this.rebuild();
+    return true;
+  }
+
+  /**
+   * The standing run bringing a cargo into a place of yours, if there is one.
+   *
+   * Asked by the panel so it can show a line that is already covered as covered,
+   * rather than offering to arrange it again. Matched on the *stops* rather than
+   * on a stored link, because a run is nothing but its stops — a two-stop service
+   * of yours that unloads this cargo here *is* the supply run, however it came to
+   * exist, which means a contract absorbed into a sourcing run is recognised
+   * without anything having to remember that is what happened to it.
+   */
+  runInto(site: number, cargo: number): { service: number; vehicle: number } | null {
+    for (let svc = 0; svc < this.services.count; svc++) {
+      if (!this.services.active[svc]) continue;
+      if (this.services.company[svc] !== this.player) continue;
+      const n = this.services.stopCount[svc];
+      let unloadsHere = false;
+      for (let k = 0; k < n; k++) {
+        const si = svc * MAX_STOPS + k;
+        if (this.services.stopKind[si] !== 0) continue;
+        if (this.services.stopTarget[si] !== site) continue;
+        if (this.services.stopCargo[si] !== cargo) continue;
+        if (this.services.stopAction[si] === StopAction.Unload
+          || this.services.stopAction[si] === StopAction.Exchange) {
+          unloadsHere = true;
+          break;
+        }
+      }
+      if (!unloadsHere) continue;
+      let vehicle = NONE;
+      for (let v = 0; v < this.vehicles.count; v++) {
+        if (this.vehicles.alive[v] && this.vehicles.service[v] === svc) { vehicle = v; break; }
+      }
+      return { service: svc, vehicle };
+    }
+    return null;
+  }
+
+  /**
+   * End a run. The lorry comes off it and goes back to the yard list.
+   *
+   * The counterpart of `supply`, and the reason the panel can be a toggle: a line
+   * with a run on it offers to take it off, and a line without one offers to put
+   * one on. Nothing else in the game can end a standing run of your own — the
+   * only way to free a lorry was to give up a *contract*, which a sourcing run is
+   * not.
+   */
+  endRun(service: number): boolean {
+    if (service < 0 || service >= this.services.count) return false;
+    if (this.services.company[service] !== this.player) return false;
+    for (let v = 0; v < this.vehicles.count; v++) {
+      if (this.vehicles.alive[v] && this.vehicles.service[v] === service) {
+        this.vehicles.service[v] = NONE;
+        this.vehicles.state[v] = VState.Idle;
+      }
+    }
+    this.services.active[service] = 0;
     this.rebuild();
     return true;
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mistAt, mistOnDay } from '../src/air.ts';
+import { mistAt, mistOnDay, firesAt } from '../src/air.ts';
 
 /**
  * When there is fog, and — more importantly — when there is not.
@@ -95,5 +95,37 @@ describe('which mornings are foggy', () => {
     }
     const full = thick.filter((m) => m > 0.9).length;
     expect(full).toBeLessThan(thick.length / 2);
+  });
+});
+
+describe('when the fires are going', () => {
+  it('is not the whole night', () => {
+    /*
+     * The old rule was `hour < 9.5 || hour > 16`, which reads as "morning and
+     * evening" and is not what it says: it ran at full strength from four in the
+     * afternoon right through midnight until half past nine. Every chimney in the
+     * district smoked all night, which is both wrong and a waste of the effect.
+     */
+    for (const hour of [0, 1, 2, 3, 4, 5]) {
+      expect(firesAt(hour), `${hour}:00`).toBeLessThan(0.1);
+    }
+  });
+
+  it('has two peaks and a trough, like a day with a coal fire in it', () => {
+    // Laid and lit first thing, damped down while the house is empty, built up
+    // again when people come home.
+    expect(firesAt(8)).toBe(1);
+    expect(firesAt(19)).toBe(1);
+    expect(firesAt(13)).toBeLessThan(0.2);
+    expect(firesAt(13)).toBeGreaterThan(0);
+  });
+
+  it('never steps, so the district does not change its mind in one frame', () => {
+    let last = firesAt(0);
+    for (let h = 0; h <= 24; h += 0.05) {
+      const now = firesAt(h);
+      expect(Math.abs(now - last), `at ${h.toFixed(2)}`).toBeLessThan(0.06);
+      last = now;
+    }
   });
 });

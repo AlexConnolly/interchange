@@ -34,7 +34,7 @@
  */
 
 import { useEffect, useState, type JSX } from 'react';
-import { type World, ContractState } from '@interchange/sim';
+import { type World, ContractState, MoneyKind } from '@interchange/sim';
 import { content } from '@interchange/data';
 import type { Renderer } from '@interchange/render';
 import { money, bodyFor, useAnchor } from './Markers.tsx';
@@ -64,6 +64,8 @@ export function perHour(world: World, contract: number): number {
 export interface PlaceActions {
   buy: (site: number) => void;
   supply: (from: number, to: number, cargo: number, vehicle?: number) => void;
+  /** Take the lorry off a standing run of yours. */
+  endRun: (service: number) => void;
   accept: (contract: number, vehicle: number) => void;
   /** Draw a job on the map: the loaded run, from pickup to drop. */
   preview: (from: number, to: number) => void;
@@ -74,7 +76,7 @@ export interface PlaceActions {
   close: () => void;
 }
 
-type Tab = 'about' | 'work' | 'supply';
+type Tab = 'about' | 'work' | 'supply' | 'money';
 
 /** Half the bubble's width, for clamping it on screen. Matches the CSS. */
 const HALF = 156;
@@ -190,6 +192,17 @@ export function Place({
           onClick={() => setTab('supply')}
           disabled={supplies.length === 0}
         >Supply{supplies.length > 0 && <em>{supplies.length}</em>}</button>
+        {/*
+          * Only for a place of yours, because it is the only place the question
+          * makes sense. Somebody else's creamery has accounts and they are not
+          * yours to read.
+          */}
+        {mine && (
+          <button
+            className={`tab ${tab === 'money' ? 'on' : ''}`}
+            onClick={() => setTab('money')}
+          >Money</button>
+        )}
       </div>
 
       <div className="bubble-body">
@@ -316,6 +329,8 @@ export function Place({
           </>
         )}
 
+        {tab === 'money' && <Money world={world} site={site} />}
+
         {tab === 'supply' && supplies.map((g) => (
           <Supply
             key={g.cargo}
@@ -326,6 +341,7 @@ export function Place({
             onGo={actions.goTo}
             onHover={(to) => actions.preview(to, site)}
             onRun={actions.supply}
+            onEnd={actions.endRun}
           />
         ))}
       </div>
@@ -480,7 +496,7 @@ function Drivers({
  * hands you the map for free.
  */
 function Supply({
-  world, site, mine, group, onGo, onHover, onRun,
+  world, site, mine, group, onGo, onHover, onRun, onEnd,
 }: {
   world: World;
   site: number;
@@ -493,10 +509,19 @@ function Supply({
   onGo: (site: number) => void;
   onHover: (site: number) => void;
   onRun: (from: number, to: number, cargo: number, vehicle: number) => void;
+  onEnd: (service: number) => void;
 }): JSX.Element {
   const [picking, setPicking] = useState(-1);
   const cargo = C.cargo[group.cargo];
   const stock = world.sites.stockOf(site, group.cargo);
+  /*
+   * Is this line already covered? That one question decides what the whole card
+   * offers, which is the shape that was asked for: "click row, select vehicle,
+   * assign — and if it's already assigned, switch the UI to click row, remove
+   * assignment." A line either has a lorry on it or it wants one, and showing
+   * both possibilities at once is what made the old version confusing.
+   */
+  const run = mine ? world.runInto(site, group.cargo) : null;
   return (
     <div className={`card supply ${group.owned ? 'met' : ''}`}>
       <div className="card-line">
@@ -525,7 +550,31 @@ function Supply({
         {bodyFor(cargo.handling)}
         {!world.fleetCanCarry(group.cargo) && <b>you have none</b>}
       </span>
-      {group.candidates.map((c) => {
+      {/*
+        * A run in hand: what is doing it, and the one thing you might want to do
+        * about it. No candidate list underneath, because offering to arrange a
+        * second lorry onto a line that already has one is offering to make a
+        * mistake.
+        */}
+      {run && (
+        <div className="running-row">
+          <span className="grow">
+            <span className="running-name">
+              {run.vehicle >= 0
+                ? C.vehicles[world.vehicles.type[run.vehicle]].name
+                : 'No lorry on it'}
+            </span>
+            <span className="running-sub">
+              {run.vehicle >= 0 ? 'running this in' : 'the run is set up but idle'}
+            </span>
+          </span>
+          <button className="running-off" onClick={() => onEnd(run.service)}>
+            Take off
+          </button>
+        </div>
+      )}
+
+      {!run && group.candidates.map((c) => {
         const yours = world.sites.owner[c.site] === world.player;
         const def = C.industries[world.sites.def[c.site]];
         /*
@@ -590,5 +639,77 @@ function Supply({
         <div className="why">Nothing in the district makes it.</div>
       )}
     </div>
+  );
+}
+
+/**
+ * What this place has cost and earned, line by line.
+ *
+ * The ledger already had totals per line per company, which answers "how am I
+ * doing" and cannot answer "was buying that creamery a mistake" — for that you
+ * need the events, attributed to the place they happened at, with a reason
+ * beside each one.
+ *
+ * ## On the date
+ *
+ * Week and month and the time of day, and no day number, which is a deliberate
+ * limit rather than an oversight: `dateString` in the simulation explains why the
+ * game never prints a day, and a transaction list is not a good enough reason to
+ * break a rule that holds everywhere else. Week plus clock orders the rows finely
+ * enough to read a morning's work in sequence, which is what the column is for.
+ */
+function Money({ world, site }: { world: World; site: number }): JSX.Element {
+  const rows = world.moneyAt(site, 40);
+  const totals = world.moneyTotals(site);
+  const net = totals.in - totals.out;
+
+  /** What a row *was*, in words, because a number with no reason is a mystery. */
+  const why = (r: { kind: number; cargo: number; tonnes: number }): string => {
+    const cargo = r.cargo >= 0 ? C.cargo[r.cargo]?.name.toLowerCase() : '';
+    const load = r.tonnes > 0 ? `${Math.round(r.tonnes)}t of ${cargo}` : cargo;
+    switch (r.kind) {
+      case MoneyKind.Bought: return 'Bought the place';
+      case MoneyKind.Sold: return 'Sold the place';
+      case MoneyKind.Traded: return `${load} brought in`;
+      case MoneyKind.Delivered: return `${load} delivered`;
+      default: return 'Money';
+    }
+  };
+
+  return (
+    <>
+      <div className="tally">
+        <span className="tally-cell in">
+          <i>In</i>
+          {money(totals.in)}
+        </span>
+        <span className="tally-cell out">
+          <i>Out</i>
+          {money(totals.out)}
+        </span>
+        <span className={`tally-cell net ${net >= 0 ? 'good' : 'bad'}`}>
+          <i>Net</i>
+          {money(net)}
+        </span>
+      </div>
+
+      {rows.length === 0 && (
+        <div className="why">
+          Nothing yet. Money shows up here as loads arrive and as you buy and sell.
+        </div>
+      )}
+
+      {rows.map((r, i) => (
+        <div className="tx" key={`${r.tick}-${i}`}>
+          <span className="grow">
+            <span className="tx-why">{why(r)}</span>
+            <span className="tx-when">{world.stampOf(r.tick)}</span>
+          </span>
+          <span className={`tx-sum ${r.pence >= 0 ? 'in' : 'out'}`}>
+            {r.pence >= 0 ? '+' : '−'}{money(Math.abs(r.pence))}
+          </span>
+        </div>
+      ))}
+    </>
   );
 }

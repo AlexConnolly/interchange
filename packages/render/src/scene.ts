@@ -41,7 +41,9 @@ import { makeBirds, type Birds } from './birds.ts';
 import { makeClouds, type Clouds } from './clouds.ts';
 import { CAMERA_AZIMUTH, CAMERA_DISTANCE, CAMERA_ELEVATION } from './camera.ts';
 import { Mesh } from './geometry.ts';
-import { buildRoads, buildCatsEyes, type RoadSource } from './roads.ts';
+import {
+  buildRoads, buildCatsEyes, BRIDGE_RISE, type RoadSource,
+} from './roads.ts';
 import type { Model } from './glb.ts';
 import { Precipitation } from './weather.ts';
 import { NIGHT, PAINT, SKY, SNOW, type RGB } from './palette.ts';
@@ -1705,7 +1707,17 @@ export class Renderer {
        * the very triangle being drawn beneath the wheels, so the ride is as
        * smooth as the ground is.
        */
-      const y = (lv !== 0 ? HEIGHT_TO_WORLD(lv) : groundHeightAt(src, x, z)) + 0.045;
+      /*
+       * And up onto the bridge, where there is one.
+       *
+       * A river is painted on the terrain rather than cut as a channel, so a
+       * crossing is a road tile at water level — which meant every vehicle
+       * crossing a beck appeared to drive through it. `roads.ts` now lifts the
+       * deck; this lifts what drives on it by the identical constant, which is
+       * why that constant is exported rather than written twice.
+       */
+      const deck = src.isStream(tile) ? BRIDGE_RISE : 0;
+      const y = (lv !== 0 ? HEIGHT_TO_WORLD(lv) : groundHeightAt(src, x, z)) + 0.045 + deck;
       /*
        * Where it is drawn, eased toward where the simulation says it is.
        *

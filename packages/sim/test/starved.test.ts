@@ -12,7 +12,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  createWorld, TICKS_PER_DAY, SiteState, Line, LINE_COUNT, facilitiesFor,
+  createWorld, TICKS_PER_DAY, SiteState, Line, LINE_COUNT, facilitiesFor, MoneyKind,
 } from '../src/index.ts';
 import { loadContent } from '../../data/src/index.ts';
 
@@ -339,5 +339,72 @@ describe('buying a business', () => {
       if (b.state[i] === 3) continue;
       expect(w.sites.owner[b.to[i]]).not.toBe(w.player);
     }
+  });
+});
+
+describe('the money journal', () => {
+  it('records what a place cost and what it has brought in, with a reason', () => {
+    /*
+     * The ledger had totals per line per company, which answers "how am I doing"
+     * and cannot answer "was buying that creamery a mistake" — for that you need
+     * the events, attributed to the place, with a reason beside each one.
+     */
+    const w = make();
+    w.primeStock();
+    let site = -1;
+    for (let s = 0; s < w.sites.count; s++) {
+      if (w.recipes.inputs[w.sites.def[s]].length > 0
+        && w.recipes.outputs[w.sites.def[s]].length > 0) { site = s; break; }
+    }
+    w.refreshInfluence([{ x: w.sites.x[site], y: w.sites.y[site], strength: 2.4 }]);
+    w.companies.cash[w.player] = 5_000_000_00;
+
+    expect(w.moneyAt(site).length).toBe(0);
+    const price = w.priceOf(site);
+    expect(w.buySite(site).ok).toBe(true);
+
+    const rows = w.moneyAt(site);
+    expect(rows.length).toBe(1);
+    expect(rows[0].kind).toBe(MoneyKind.Bought);
+    // Out is negative, so a purchase reads as money leaving.
+    expect(rows[0].pence).toBe(-price);
+
+    const totals = w.moneyTotals(site);
+    expect(totals.out).toBe(price);
+    expect(totals.in).toBe(0);
+  });
+
+  it('keeps one place out of another place s accounts', () => {
+    const w = make();
+    w.primeStock();
+    const sites: number[] = [];
+    for (let s = 0; s < w.sites.count && sites.length < 2; s++) {
+      if (w.recipes.inputs[w.sites.def[s]].length > 0) sites.push(s);
+    }
+    w.refreshInfluence(sites.map((s) => ({
+      x: w.sites.x[s], y: w.sites.y[s], strength: 2.4,
+    })));
+    w.companies.cash[w.player] = 5_000_000_00;
+    expect(w.buySite(sites[0]).ok).toBe(true);
+    expect(w.moneyAt(sites[0]).length).toBe(1);
+    expect(w.moneyAt(sites[1]).length).toBe(0);
+  });
+
+  it('stamps a tick with a week and a clock, and never a day number', () => {
+    /*
+     * `dateString` explains why the game never prints a day: a day is a rate
+     * bucket rather than a unit, and printing one next to a speed lets the
+     * arithmetic be contradicted. A transaction list is not a good enough reason
+     * to break that, so the stamp goes to the week and the clock instead — which
+     * still orders a morning's work in sequence.
+     */
+    const w = make();
+    const stamp = w.stampOf(TICKS_PER_DAY * 61 + Math.floor(TICKS_PER_DAY * 0.5));
+    expect(stamp).toMatch(/^Wk [1-4], [A-Z][a-z]{2} \d{4} · \d{1,2}:\d{2}$/);
+    // Two ticks on the same day differ by their clock, not by a date.
+    const a = w.stampOf(TICKS_PER_DAY * 61);
+    const b = w.stampOf(TICKS_PER_DAY * 61 + Math.floor(TICKS_PER_DAY * 0.25));
+    expect(a).not.toBe(b);
+    expect(a.split(' · ')[0]).toBe(b.split(' · ')[0]);
   });
 });

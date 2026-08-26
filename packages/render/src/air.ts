@@ -389,6 +389,44 @@ export function mistOnDay(day: number): number {
   return Math.min(1, 0.35 + (1 - roll / chance) * 0.8);
 }
 
+/**
+ * How hard the fires are going, by the hour.
+ *
+ * The old rule was `hour < 9.5 || hour > 16`, which reads as "morning and
+ * evening" and is not what it says: it ran at full strength from four in the
+ * afternoon right through midnight until half past nine the next morning. Every
+ * chimney in the district smoked all night, which is both wrong and a waste of
+ * the effect — a village with smoke over it at seven in the morning is somebody
+ * getting up, and one with smoke over it at four in the morning is nothing.
+ *
+ * A coal fire in 1985 has a day: laid and lit first thing, damped down and left
+ * to tick over while the house is empty, built up again when people come home,
+ * and banked or out overnight. So there are two peaks with a trough between them
+ * and a floor at night — the floor being embers rather than zero, because a
+ * grate does not go cold in an hour and a wisp at midnight is worth having.
+ *
+ * Ramped rather than switched at every edge, or the whole district would change
+ * its mind about the time on one frame.
+ */
+export function firesAt(hour: number): number {
+  const EMBERS = 0.05;
+  const BANKED = 0.14;
+  // Overnight: nearly out.
+  if (hour < 5.5) return EMBERS;
+  // Getting up: the sharpest edge in the day, because it is a real one.
+  if (hour < 7) return EMBERS + (1 - EMBERS) * ((hour - 5.5) / 1.5);
+  if (hour < 9.5) return 1;
+  // Damped down for the day.
+  if (hour < 11) return BANKED + (1 - BANKED) * (1 - (hour - 9.5) / 1.5);
+  if (hour < 16) return BANKED;
+  // Home again, and the evening is the long peak.
+  if (hour < 17.5) return BANKED + (1 - BANKED) * ((hour - 16) / 1.5);
+  if (hour < 22) return 1;
+  // Banked for the night.
+  if (hour < 23.5) return EMBERS + (1 - EMBERS) * (1 - (hour - 22) / 1.5);
+  return EMBERS;
+}
+
 export function makeAir(scene: Scene): Air {
   /*
    * Mist, and it is the one that is easy to overdo.
@@ -645,8 +683,7 @@ export function makeAir(scene: Scene): Air {
        * is cheap — there are twenty places in a district, not twenty thousand.
        */
       const cold = 0.55 + frame.snow * 0.45;
-      const lit = hour < 9.5 ? 1 : hour > 16 ? 1 : 0.2;
-      const smokeLevel = cold * lit * frame.level;
+      const smokeLevel = cold * firesAt(hour) * frame.level;
       /*
        * And it goes dark with everything else.
        *

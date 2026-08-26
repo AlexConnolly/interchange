@@ -634,3 +634,33 @@ export function hashEconomy(h: Hasher, co: CompanyTable, services: ServiceTable)
 }
 
 export { AUTHORITY, TICKS_PER_DAY, TICKS_PER_YEAR };
+
+/**
+ * How many money events the journal remembers, across the whole district.
+ *
+ * A record for reading rather than a source of truth: cash is authoritative and
+ * the ledger totals are permanent, so the oldest rows falling out of the window
+ * loses nothing the accounts depend on. Two thousand is a few weeks for a
+ * reasonably busy fleet and about sixteen kilobytes.
+ */
+export const JOURNAL = 2000;
+
+/**
+ * What a money event *was*, which is the half a ledger line cannot carry.
+ *
+ * "An explanation of WHAT the transaction was." A total under `Trading` tells
+ * you the trading went well; it cannot tell you that the creamery cost more to
+ * buy than it has yet brought in, and that is the question somebody looking at a
+ * business actually has.
+ */
+export const MoneyKind = {
+  /** Bought the place. */
+  Bought: 0,
+  /** Sold the place. */
+  Sold: 1,
+  /** A load brought into a place of yours: the trading premium. */
+  Traded: 2,
+  /** A load carried into somebody else's place, on their contract. */
+  Delivered: 3,
+} as const;
+export type MoneyKind = (typeof MoneyKind)[keyof typeof MoneyKind];
