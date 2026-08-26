@@ -38,6 +38,7 @@ import { Dock } from './Dock.tsx';
 import { Icon } from './Icons.tsx';
 import { Owned, Contracts } from './Owned.tsx';
 import { Market } from './Market.tsx';
+import { Land } from './Land.tsx';
 import { Status } from './Status.tsx';
 import { Driver } from './Driver.tsx';
 import { Place, type PlaceActions } from './Place.tsx';
@@ -425,12 +426,12 @@ export function App(): JSX.Element {
    * you need on screen while choosing where a road goes is *the district*, and a
    * dialogue over the top of it is the one thing that cannot help.
    */
-  const [tool, setTool] = useState<'none' | 'lay' | 'lift'>('none');
+  const [tool, setTool] = useState<'none' | 'lay' | 'lift' | 'land'>('none');
   // So the tray can animate out rather than vanish, the same way panels do.
   const [, toolLeaving] = useLeaving(tool, tool !== 'none', 150);
   const buildingRef = useRef(false);
   buildingRef.current = building;
-  const toolRef = useRef<'none' | 'lay' | 'lift'>('none');
+  const toolRef = useRef<'none' | 'lay' | 'lift' | 'land'>('none');
   toolRef.current = tool;
   /**
    * How fast the day runs. One, two or four.
@@ -644,7 +645,13 @@ export function App(): JSX.Element {
       isStream: (t) => (world.terrain.flags[t] & TileFlag.River) !== 0
         && world.terrain.height[t] > 0,
       isYard: (t) => yardTiles.has(t),
-      ownedLand: (t) => ownedParcels.has(world.terrain.fields.parcel[t]),
+      /*
+       * Land of yours, both kinds. A parcel that came with a business, and a block
+       * you bought outright — see `land.ts` for why those are separate ideas. The
+       * renderer does not care which; it wants to know whose field it is drawing.
+       */
+      ownedLand: (t) => ownedParcels.has(world.terrain.fields.parcel[t])
+        || world.ownsLandAt(t),
       influence: (t) => world.influence.at(t),
       roadClass,
       level: layer.level,
@@ -2901,6 +2908,16 @@ export function App(): JSX.Element {
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
+      {live && tool === 'land' && (
+        <Land
+          world={live.world}
+          camX={live.renderer.camX}
+          camZ={live.renderer.camZ}
+          tilesAcross={live.renderer.tilesAcross}
+          onBought={bump}
+        />
+      )}
+
       {(tool !== 'none' || toolLeaving) && (
         /*
          * The tools, in a tray that rises out of the dock.
@@ -2917,7 +2934,7 @@ export function App(): JSX.Element {
          * ✕, Escape, or a right-click on the district — the last being the one
          * people reach for first, and the only one that needs no aiming.
          */
-        <div className={`tools${tool === 'none' || toolLeaving ? ' tools-leaving' : ''}`}>
+        <div className={`tools${tool === 'none' || tool === 'land' || toolLeaving ? ' tools-leaving' : ''}`}>
           <button
             className={`tool-btn ${tool === 'lay' ? 'on' : ''}`}
             onClick={() => { setTool('lay'); setNote(''); }}
@@ -3037,6 +3054,24 @@ export function App(): JSX.Element {
               ),
             },
             /*
+             * Land, which like Roads is a *tool* rather than a screen — and for
+             * the same reason, more strongly. What you are choosing when you buy
+             * land is *where*, and where is the map. A list of plots could not put
+             * the question at all: the whole of it is what the square is next to.
+             */
+            {
+              key: 'land',
+              label: 'Land',
+              icon: 'quarry',
+              on: tool === 'land',
+              onClick: () => {
+                setPanel({ k: 'none' });
+                setBuilding(false);
+                setNote('');
+                setTool(tool === 'land' ? 'none' : 'land');
+              },
+            },
+            /*
              * Roads, which is a *tool* rather than a screen.
              *
              * The one dock item that does not open a panel over the district,
@@ -3051,7 +3086,9 @@ export function App(): JSX.Element {
               key: 'roads',
               label: 'Roads',
               icon: 'terminal',
-              on: tool !== 'none',
+              // Not `tool !== 'none'`: the land tool is also a tool, and lighting
+              // Roads up while somebody is buying a field says the wrong thing.
+              on: tool === 'lay' || tool === 'lift',
               onClick: () => {
                 setPanel({ k: 'none' });
                 setBuilding(false);

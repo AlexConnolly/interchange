@@ -1858,3 +1858,81 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 /* The market's own rows sit directly in the body now, so they need the spacing
    the old card wrapper was providing. */
 .market .stock-head { margin-bottom: 4px; }
+
+/* ---- land for sale ----------------------------------------------------
+
+   A price on the ground, because the decision is *where* and where is the map.
+   Small, quiet and numerous: sixty of these can be on screen at once, so any one
+   of them shouting would make a valley unreadable. Gold when chosen, which is the
+   same signal ownership uses everywhere else. */
+
+.plot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 2px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 7px;
+  background: rgba(14, 17, 15, 0.44);
+  color: #f2efe6;
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  backdrop-filter: blur(6px);
+  transition: background 120ms ease, transform 120ms ease;
+}
+.plot:hover {
+  background: rgba(14, 17, 15, 0.86);
+  transform: translate(-50%, -50%) scale(1.12);
+}
+.plot.on {
+  background: #f4c95d;
+  border-color: #d9a72e;
+  color: #4a3c14;
+  transform: translate(-50%, -50%) scale(1.12);
+}
+
+/* The confirmation. One line of what, one of how much, and two buttons — the
+   decision was made on the map and this only has to be somewhere to change your
+   mind. Above the dock, where every other transient thing lives. */
+.plot-buy {
+  position: absolute;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  width: 250px;
+  padding: 10px 12px 11px;
+  border-radius: 14px;
+  background: rgba(247, 243, 234, 0.97);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 28px rgba(30, 40, 30, 0.26);
+  color: var(--ink);
+  pointer-events: auto;
+  /*
+   * No entrance animation, and the reason is the second time this has bitten.
+   *
+   * This panel lives inside a component that re-renders as the world ticks, and a
+   * `dock-rise` on it restarted faster than its own hundred and seventy
+   * milliseconds — so it never reached the end and sat at the opening keyframe,
+   * which is `opacity: 0`. Measured: present in the DOM, correctly positioned,
+   * ninety-four pixels tall, and completely invisible.
+   *
+   * The general lesson, which is now written in two places: an animation must
+   * never be the thing that decides whether an element can be seen. A flourish on
+   * a panel that appears for two seconds is worth nothing next to the risk of it
+   * not appearing at all, so this one simply does not have one.
+   */
+  opacity: 1;
+}
+.plot-title { font-size: 13px; font-weight: 700; }
+.plot-sub {
+  font-size: 11px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+  margin-top: 1px;
+}
+.plot-row { display: flex; gap: 6px; margin-top: 9px; }
+.plot-row .btn { flex: 1; }

@@ -16,6 +16,10 @@ import {
   TICKS_PER_DAY, TICKS_PER_YEAR, DAYS_PER_MONTH, DAYS_PER_YEAR, ECONOMY_SCALE, ECOMMERCE_ERA, ECOMMERCE_SHIFT, LOAD_PATIENCE_DAYS, LOAD_PATIENCE_SHARE, CONTAINER_ERA, CONTAINER_TRANSFER_GAIN, PUBLIC_STANDARD, ENTRANT_CAPITAL, DAYS_PER_WEEK,
   ACCESS_SCALE, STALLED_DAYS,
 } from './constants.ts';
+import {
+  LandRegister, LAND_BASE, LAND_TOWN_PREMIUM, LAND_ROAD_PREMIUM, LAND_TOWN_REACH,
+  NO_OWNER,
+} from './land.ts';
 import { Cmd, CommandQueue, type Command } from './commands.ts';
 import {
   CompanyTable, Charter, Line, LINE_COUNT,
@@ -269,6 +273,8 @@ export class World {
   constructor(config: WorldConfig, content: Content) {
     this.config = config;
     this.content = content;
+    // After `config`, because it is sized from the district.
+    this.land = new LandRegister(config.size);
     this.rng = new Rng(config.seed);
     this.terrain = generateTerrain(config);
     this.tileRouter = new TileRouter(this.terrain);
@@ -5436,6 +5442,163 @@ export class World {
     return true;
   }
 
+  /**
+   * The land register, and the four questions the interface asks it.
+   *
+   * Buying land is the rung between owning a business and building one, and it is
+   * deliberately the simplest transaction in the game: no board, no approval, no
+   * charter. Money, and the block has to be somewhere you could plausibly reach.
+   */
+  readonly land: LandRegister;
+
+  /** What this block would cost. See the note on `LAND_BASE`. */
+  landPriceOf(block: number): number {
+    const size = this.config.size;
+    const c = this.land.centre(block);
+
+    // How built-up it is round here, weighted by population like `priceOf`.
+    let nearest = 1e9;
+    for (let t = 0; t < this.towns.count; t++) {
+      const dx = this.towns.x[t] - c.x;
+      const dy = this.towns.y[t] - c.y;
+      const d = Math.sqrt(dx * dx + dy * dy)
+        / Math.max(1, Math.sqrt(this.towns.population[t] / 400));
+      if (d < nearest) nearest = d;
+    }
+    const town = 1 + Math.max(0, 1 - nearest / LAND_TOWN_REACH) * (LAND_TOWN_PREMIUM - 1);
+
+    /*
+     * And what is actually on it. Walked rather than sampled: sixteen tiles is
+     * nothing, and a block that is half river should not be priced as if it were
+     * all pasture — you are buying the water as well.
+     */
+    const b = this.land.bounds(block);
+    let dry = 0;
+    let road = 0;
+    let tiles = 0;
+    for (let y = b.y0; y <= b.y1; y++) {
+      for (let x = b.x0; x <= b.x1; x++) {
+        if (x >= size || y >= size) continue;
+        const t = y * size + x;
+        tiles++;
+        if (this.terrain.height[t] > 0) dry++;
+        if (this.layers[Mode.Road].cls[t] !== NO_WAY) road++;
+      }
+    }
+    if (tiles === 0 || dry === 0) return 0;
+    const usable = dry / tiles;
+    const frontage = road > 0 ? LAND_ROAD_PREMIUM : 1;
+    return Math.round(LAND_BASE * town * frontage * usable);
+  }
+
+  /**
+   * May this company buy this block?
+   *
+   * Two ways in, and between them they are the whole rule: land you can *reach*.
+   * Either it touches land you already hold — so a holding grows outward from
+   * itself rather than appearing in patches across the district — or it has a road
+   * on it or beside it, which is how anybody gets a first foothold and how a
+   * player who has sold up can start again.
+   *
+   * Deliberately no approval and no charter. Owning land is not a favour the
+   * parish does you, and making it one would put a second gate in front of the
+   * rung that the planning board is already the top of.
+   */
+  canBuyLand(company: number, block: number): { ok: boolean; reason: string; price: number } {
+    const price = this.landPriceOf(block);
+    if (block < 0 || block >= this.land.owner.length) {
+      return { ok: false, reason: 'No such land.', price };
+    }
+    if (this.land.owner[block] === company) {
+      return { ok: false, reason: 'Already yours.', price };
+    }
+    if (this.land.owner[block] !== NO_OWNER) {
+      return { ok: false, reason: 'Somebody else holds it.', price };
+    }
+    if (price <= 0) return { ok: false, reason: 'Nothing but water.', price };
+    if (!this.landInReach(block)) {
+      return { ok: false, reason: 'Too far out. Buy toward it, or find a road.', price };
+    }
+    if (!this.landVisible(block)) {
+      return { ok: false, reason: 'You have no standing out there yet.', price };
+    }
+    if (this.companies.cash[company] < price) {
+      return { ok: false, reason: 'Not enough in the bank.', price };
+    }
+    return { ok: true, reason: '', price };
+  }
+
+  /** Touching land of the player's, or touching a road. */
+  private landInReach(block: number): boolean {
+    for (const n of this.land.neighbours(block)) {
+      if (this.land.owner[n] === this.player) return true;
+    }
+    const size = this.config.size;
+    const b = this.land.bounds(block);
+    // One tile of slop round the edge, so a lane running *along* a boundary
+    // counts as frontage for the block beside it as well as the one it is in.
+    for (let y = b.y0 - 1; y <= b.y1 + 1; y++) {
+      for (let x = b.x0 - 1; x <= b.x1 + 1; x++) {
+        if (x < 0 || y < 0 || x >= size || y >= size) continue;
+        if (this.layers[Mode.Road].cls[y * size + x] !== NO_WAY) return true;
+      }
+    }
+    return false;
+  }
+
+  /** Somewhere the player can see. The fog is the map's own limit on ambition. */
+  private landVisible(block: number): boolean {
+    const size = this.config.size;
+    const b = this.land.bounds(block);
+    for (let y = b.y0; y <= b.y1; y++) {
+      for (let x = b.x0; x <= b.x1; x++) {
+        if (x >= size || y >= size) continue;
+        if (this.influence.usable(y * size + x)) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Every block the player could buy right now, with its price.
+   *
+   * Walked whole rather than kept as a list, because the answer changes whenever a
+   * road is laid, a business is bought or the fog moves — and a stale list of
+   * things for sale is worse than a slow one. A thousand blocks with a cheap test
+   * each is nothing next to a frame.
+   */
+  landForSale(): { block: number; price: number }[] {
+    const out: { block: number; price: number }[] = [];
+    for (let b = 0; b < this.land.owner.length; b++) {
+      if (this.land.owner[b] !== NO_OWNER) continue;
+      const verdict = this.canBuyLand(this.player, b);
+      // Affordability is *not* a filter here: seeing what you cannot yet afford
+      // is how a player decides what to save for. Only reachability hides a block.
+      if (verdict.reason === 'Not enough in the bank.' || verdict.ok) {
+        out.push({ block: b, price: verdict.price });
+      }
+    }
+    return out;
+  }
+
+  /** Buy it. */
+  buyLand(block: number): { ok: boolean; reason: string } {
+    const verdict = this.canBuyLand(this.player, block);
+    if (!verdict.ok) return { ok: false, reason: verdict.reason };
+    this.companies.post(this.player, Line.AssetTrade, -verdict.price);
+    this.land.owner[block] = this.player;
+    this.note(NONE, MoneyKind.Land, -verdict.price);
+    // The ground is drawn from this, and your reach grows with it.
+    this.landRevision++;
+    this.refreshInfluence();
+    return { ok: true, reason: '' };
+  }
+
+  /** Does the player hold the block this tile is in? Read by the renderer. */
+  ownsLandAt(tile: number): boolean {
+    return this.land.owner[this.land.blockAt(tile, this.config.size)] === this.player;
+  }
+
   /** Rebuild the influence area from the yards and places you hold. */
   refreshInfluence(extra: InfluenceSource[] = []): void {
     const sources: InfluenceSource[] = [...extra];
@@ -5464,6 +5627,22 @@ export class World {
         y: this.yards.y[y],
         strength: (2.4 + Math.min(1.2, fleet * 0.16)) * carry,
       });
+    }
+    /*
+     * And the land, weakly.
+     *
+     * Weakly on purpose: a field is not a presence the way a yard is — nobody
+     * knows your name because you own a paddock — but it is *yours*, and being
+     * able to see a little further because of it is what makes buying toward
+     * something a strategy rather than a purchase. A chain of blocks creeps your
+     * reach outward at about a third the rate a business would, so walking across
+     * the district by land is possible and slow, which is the right price for
+     * doing it without ever serving anybody.
+     */
+    for (let b = 0; b < this.land.owner.length; b++) {
+      if (this.land.owner[b] !== this.player) continue;
+      const c = this.land.centre(b);
+      sources.push({ x: c.x, y: c.y, strength: 0.55 * carry });
     }
     for (let s = 0; s < this.sites.count; s++) {
       if (this.sites.owner[s] !== this.player) continue;

@@ -18,6 +18,7 @@ export * from './pathfinding.ts';
 export * from './traffic.ts';
 export * from './sites.ts';
 export * from './economy.ts';
+export * from './land.ts';
 export * from './commands.ts';
 export * from './world.ts';
 export * from './worldgen.ts';

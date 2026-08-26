@@ -683,6 +683,8 @@ export const MoneyKind = {
   Market: 6,
   /** Sold over a shop's counter, which needs nobody's agreement. */
   Counter: 7,
+  /** Land bought. Not tied to a place, because it *is* the place. */
+  Land: 8,
 } as const;
 export type MoneyKind = (typeof MoneyKind)[keyof typeof MoneyKind];
 
