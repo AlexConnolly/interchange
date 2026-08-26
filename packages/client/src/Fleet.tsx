@@ -189,38 +189,7 @@ export function Upgrades({
         <button className="x" data-quiet onClick={onClose} aria-label="Close">×</button>
       </div>
       <div className="bubble-body">
-        {FITTING_NAMES.map(([bit, name]) => {
-          const has = (fitted & bit) !== 0;
-          const cost = FITTING_COST[bit] ?? 0;
-          const stopped = bit === Fitting.WinterTyres && !has && snow >= SNOW_STOPS;
-          return (
-            <div className="fit-row" key={bit}>
-              <span className="grow">
-                <span className="driver-name">{name}</span>
-                {/*
-                  * What it is *for*, which the price alone never says. A fitting
-                  * the player cannot see the point of is a tax; one they can is a
-                  * decision, and the difference is this sentence.
-                  */}
-                <span className="driver-where">
-                  {bit === Fitting.WinterTyres
-                    ? 'Keeps working once the snow is down'
-                    : 'Fitted at the yard'}
-                </span>
-                {stopped && <span className="veh-warn">Stopped in the snow now</span>}
-              </span>
-              {has
-                ? <span className="have">Fitted</span>
-                : (
-                  <button
-                    className="btn"
-                    disabled={cash < cost}
-                    onClick={() => onFit(vehicle, bit)}
-                  >{money(cost)}</button>
-                )}
-            </div>
-          );
-        })}
+        <UpgradeRows world={world} vehicle={vehicle} onFit={onFit} />
         {yard >= 0 && (
           <button className="btn ghost" onClick={() => onGoToYard(yard)}>
             Go to {world.yards.names[yard]}
@@ -228,6 +197,63 @@ export function Upgrades({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The fittings themselves, without a panel around them.
+ *
+ * Shared because this is reached two ways — from the fleet list, where it is a
+ * screen of its own, and from inside a yard, where it has to appear *in the yard
+ * bubble*. Clicking a lorry in a yard and having the answer open in a different
+ * box at the bottom of the screen is the panel losing track of what you were
+ * looking at, and the fix is not to move the box, it is to not open a second one.
+ */
+function UpgradeRows({
+  world, vehicle, onFit,
+}: {
+  world: World;
+  vehicle: number;
+  onFit: (vehicle: number, fitting: number) => void;
+}): JSX.Element {
+  const fitted = world.vehicleFittings[vehicle];
+  const cash = world.companies.cash[world.player];
+  const snow = world.snow;
+  return (
+    <>
+      {FITTING_NAMES.map(([bit, name]) => {
+        const has = (fitted & bit) !== 0;
+        const cost = FITTING_COST[bit] ?? 0;
+        const stopped = bit === Fitting.WinterTyres && !has && snow >= SNOW_STOPS;
+        return (
+          <div className="fit-row" key={bit}>
+            <span className="grow">
+              <span className="driver-name">{name}</span>
+              {/*
+                * What it is *for*, which the price alone never says. A fitting
+                * the player cannot see the point of is a tax; one they can is a
+                * decision, and the difference is this sentence.
+                */}
+              <span className="driver-where">
+                {bit === Fitting.WinterTyres
+                  ? 'Keeps working once the snow is down'
+                  : 'Fitted at the yard'}
+              </span>
+              {stopped && <span className="veh-warn">Stopped in the snow now</span>}
+            </span>
+            {has
+              ? <span className="have">Fitted</span>
+              : (
+                <button
+                  className="btn"
+                  disabled={cash < cost}
+                  onClick={() => onFit(vehicle, bit)}
+                >{money(cost)}</button>
+              )}
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -243,24 +269,34 @@ type YardTab = 'bays' | 'kit';
  * a place take you to it.
  */
 export function Yard({
-  world, renderer, yard, onAdd, onOpenVehicle, onBuy, onClose,
+  world, renderer, yard, onAdd, onFit, onBuy, onClose,
 }: {
   world: World;
   renderer: Renderer;
   yard: number;
   onAdd: (yard: number, facility: number) => void;
-  onOpenVehicle: (vehicle: number) => void;
+  onFit: (vehicle: number, fitting: number) => void;
   onBuy: (yard: number, typeIndex: number) => void;
   onClose: () => void;
 }): JSX.Element | null {
   const [tab, setTab] = useState<YardTab>('bays');
   const [filling, setFilling] = useState(false);
+  /*
+   * A vehicle being looked at *inside* this bubble.
+   *
+   * "If I click a yard, then click a vehicle, the vehicle shows at the lower
+   * section rather than in the same window." Quite right, and the same idiom the
+   * bay-filling view already uses: the bubble is anchored over the yard, so
+   * anything you reach from it has to stay there. Opening a second box at the
+   * bottom of the screen loses the thread of what you were looking at.
+   */
+  const [viewing, setViewing] = useState(-1);
   const anchor = useAnchor(
     world, renderer,
     yard >= 0 && yard < world.yards.count ? world.yards.tile[yard] : -1,
   );
 
-  useEffect(() => { setTab('bays'); setFilling(false); }, [yard]);
+  useEffect(() => { setTab('bays'); setFilling(false); setViewing(-1); }, [yard]);
 
   if (yard < 0 || yard >= world.yards.count) return null;
   const cash = world.companies.cash[world.player];
@@ -292,6 +328,40 @@ export function Yard({
         dy: below ? 20 : -26, clamp: 166,
       }))}
     >
+      {viewing >= 0 ? (
+        <>
+          <div className="sheet-head">
+            {/* Back rather than close, because there is somewhere to go back to
+                and the yard is still the thing on screen behind this. */}
+            <button
+              className="x"
+              data-quiet
+              onClick={() => setViewing(-1)}
+              aria-label="Back to the yard"
+            >‹</button>
+            <img
+              className="veh-thumb"
+              src={thumb(C.vehicles[world.vehicles.type[viewing]].id)}
+              alt=""
+            />
+            <div className="grow">
+              <div className="sheet-title">
+                {C.vehicles[world.vehicles.type[viewing]].name}
+              </div>
+              <div className="sheet-sub">
+                {world.yards.names[yard]}
+                {' · '}{world.vehicles.service[viewing] !== -1 ? 'working' : 'idle'}
+              </div>
+            </div>
+            <button className="x" onClick={onClose} aria-label="Close">×</button>
+          </div>
+          <div className="bubble-body">
+            <UpgradeRows world={world} vehicle={viewing} onFit={onFit} />
+          </div>
+          <span className="bubble-arrow" />
+        </>
+      ) : (
+        <>
       <div className="sheet-head">
         <span className="sheet-icon"><Icon id="yard" size={24} /></span>
         <div className="grow">
@@ -328,7 +398,7 @@ export function Yard({
                   // which is why the nag was still here after being taken off
                   // the other one. A yard's bays are a list of lorries too.
                   warn={!winter && snow >= SNOW_STOPS ? 'Stopped — no winter tyres' : undefined}
-                  onClick={() => onOpenVehicle(v)}
+                  onClick={() => setViewing(v)}
                   right={<span className="veh-more">›</span>}
                 />
               );
@@ -412,6 +482,8 @@ export function Yard({
         })}
       </div>
       <span className="bubble-arrow" />
+        </>
+      )}
     </div>
   );
 }

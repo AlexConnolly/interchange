@@ -2360,7 +2360,7 @@ export function App(): JSX.Element {
           renderer={live.renderer}
           yard={shownPanel.yard}
           onAdd={addFacility}
-          onOpenVehicle={(vehicle) => setPanel({ k: 'upgrades', vehicle })}
+          onFit={fit}
           onBuy={buy}
           onClose={() => setPanel({ k: 'none' })}
         />
