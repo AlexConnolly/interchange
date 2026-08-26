@@ -96,6 +96,16 @@ class Field {
 
   private readonly alpha: Float32Array;
 
+  /**
+   * Per-particle size, which `PointsMaterial` also does not have.
+   *
+   * Smoke that does not expand is not smoke, it is a string of beads. A plume
+   * widens as it rises because it is cooling and mixing, and that widening is
+   * most of what the eye uses to tell smoke from dust — so it is worth the
+   * second attribute and the second line of shader.
+   */
+  private readonly grow: Float32Array;
+
   private readonly geo: BufferGeometry;
 
   private readonly mat: PointsMaterial;
@@ -107,26 +117,33 @@ class Field {
 
   private readonly behave: Behave;
 
+  /** How much bigger it gets over its life. Zero for anything that does not
+   *  expand — a bird-sized speck of exhaust, or mist, which is already vast. */
+  private readonly spread: number;
+
   private cursor = 0;
 
   constructor(scene: Scene, o: {
     count: number; tiles: number; colour: string; opacity: number;
-    additive?: boolean; behave: Behave; order?: number;
+    additive?: boolean; behave: Behave; order?: number; spread?: number;
   }) {
     this.count = o.count;
     this.tiles = o.tiles;
     this.behave = o.behave;
+    this.spread = o.spread ?? 0;
     this.pos = new Float32Array(o.count * 3);
     this.vel = new Float32Array(o.count * 3);
     this.life = new Float32Array(o.count);
     this.max = new Float32Array(o.count);
     this.seed = new Float32Array(o.count);
     this.alpha = new Float32Array(o.count);
+    this.grow = new Float32Array(o.count).fill(1);
     for (let i = 0; i < o.count; i++) this.seed[i] = Math.random() * 6.283;
 
     this.geo = new BufferGeometry();
     this.geo.setAttribute('position', new BufferAttribute(this.pos, 3));
     this.geo.setAttribute('aAlpha', new BufferAttribute(this.alpha, 1));
+    this.geo.setAttribute('aSize', new BufferAttribute(this.grow, 1));
     this.mat = new PointsMaterial({
       color: new Color(o.colour),
       size: 1,
@@ -216,9 +233,12 @@ class Field {
       this.pos[j + 1] += this.vel[j + 1] * dt;
       this.pos[j + 2] += this.vel[j + 2] * dt;
       this.alpha[i] = this.behave(arrays, i, k, dt, time);
+      // Grows as it ages, if the field asked for it. 1 at birth by construction.
+      this.grow[i] = 1 + (1 - k) * this.spread;
     }
     this.geo.attributes.position.needsUpdate = true;
     this.geo.attributes.aAlpha.needsUpdate = true;
+    if (this.spread > 0) this.geo.attributes.aSize.needsUpdate = true;
   }
 
   dispose(): void {
@@ -270,6 +290,27 @@ export interface Air {
 }
 
 /**
+ * The district's wind: one direction, for everything that drifts.
+ *
+ * "The particles for the chimneys just burst in a random direction. Wouldn't it
+ * be better if they were all going the same world direction?" Yes, and it is the
+ * whole difference between smoke and a firework. Each puff was leaning by a sine
+ * of *its own* seed, so nine puffs from one chimney set off nine different ways
+ * and the plume came apart at the top of the roof.
+ *
+ * Air does not work like that. Wind is a property of the *place*, so every plume
+ * in the district leans the same way at the same moment, and the only thing that
+ * should differ between two puffs is a little turbulence about that mean. One
+ * shared direction also means the plumes agree with each other across the valley,
+ * which is a thing you notice without ever looking at it.
+ *
+ * West-south-west, because the prevailing wind in England is south-westerly and
+ * it costs nothing to be right about that.
+ */
+const WIND_X = 0.80;
+const WIND_Z = -0.38;
+
+/**
  * How much mist there is, given the hour.
  *
  * Radiation fog forms overnight on still clear ground and burns off within an
@@ -307,8 +348,10 @@ export function makeAir(scene: Scene): Air {
     order: 2,
     behave: (f, i, k, dt, time) => {
       const j = i * 3;
-      f.vel[j] += Math.sin(time * 0.21 + f.seed[i]) * dt * 0.09;
-      f.vel[j + 2] += Math.cos(time * 0.17 + f.seed[i]) * dt * 0.09;
+      // On the same wind as the smoke, at a fraction of it: fog on a windy
+      // morning is fog that has already gone.
+      f.vel[j] += (WIND_X * 0.05 + Math.sin(time * 0.21 + f.seed[i]) * 0.05) * dt;
+      f.vel[j + 2] += (WIND_Z * 0.05 + Math.cos(time * 0.17 + f.seed[i]) * 0.05) * dt;
       // In slowly, out slowly, and never at full strength at the edges of its
       // life — a bank of fog has no beginning.
       return Math.min(1, (1 - k) * 4) * Math.min(1, k * 2.2);
@@ -326,14 +369,36 @@ export function makeAir(scene: Scene): Air {
    */
   const smoke = new Field(scene, {
     count: 520,
-    tiles: 0.5,
+    tiles: 0.42,
     colour: '#cfd3d2',
-    opacity: 0.36,
+    opacity: 0.34,
+    // Two and a half times its birth size by the end, which is a plume that
+    // opens out rather than a column of identical dots.
+    spread: 1.6,
     behave: (f, i, k, dt, time) => {
       const j = i * 3;
-      f.vel[j + 1] *= 1 - dt * 0.45;
-      f.vel[j] += (Math.sin(time * 0.4 + f.seed[i]) * 0.5 + 0.42) * dt * 0.34;
-      f.vel[j + 2] += Math.cos(time * 0.33 + f.seed[i]) * dt * 0.22;
+      /*
+       * Rises, slows, and leans downwind — in that order of importance.
+       *
+       * The lean builds with age rather than being applied flat, because that is
+       * what a plume does: it goes up out of the chimney and bends over as it
+       * loses the heat that was driving it. `1 - k` is the age, so the wind gets
+       * its say later and the bottom of the plume stays vertical.
+       */
+      f.vel[j + 1] *= 1 - dt * 0.5;
+      const lean = (1 - k) * 1.4 + 0.25;
+      f.vel[j] += WIND_X * lean * dt;
+      f.vel[j + 2] += WIND_Z * lean * dt;
+      /*
+       * And a little turbulence, shared rather than per particle.
+       *
+       * Driven by `time` and by *position along the plume* — the seed only sets
+       * where in the wobble this puff sits — so neighbouring puffs move together
+       * the way air does, instead of each choosing its own direction.
+       */
+      const gust = Math.sin(time * 0.9 + f.seed[i] * 0.6);
+      f.vel[j] += gust * dt * 0.10;
+      f.vel[j + 2] += Math.cos(time * 0.7 + f.seed[i] * 0.6) * dt * 0.10;
       return Math.min(1, (1 - k) * 3.4) * k * k;
     },
   });
@@ -352,9 +417,14 @@ export function makeAir(scene: Scene): Air {
     tiles: 0.22,
     colour: '#8e9092',
     opacity: 0.34,
+    spread: 1.1,
     behave: (f, i, k, dt) => {
       const j = i * 3;
       f.vel[j + 1] *= 1 - dt * 0.9;
+      // The same wind, so a lorry's exhaust and the farmhouse chimney behind it
+      // agree about which way the air is going.
+      f.vel[j] += WIND_X * dt * 0.5;
+      f.vel[j + 2] += WIND_Z * dt * 0.5;
       return Math.min(1, (1 - k) * 5) * k * k * 0.9;
     },
   });
@@ -484,13 +554,17 @@ export function makeAir(scene: Scene): Air {
            * old 0.85 put the plume *inside the roof* — depth-tested away for the
            * part of its life when it is brightest.
            */
+          /*
+           * Out of a chimney, not off a firework. The horizontal kick is gone —
+           * a puff leaves a chimney going *up*, and everything sideways after
+           * that is the wind's doing.
+           */
           smoke.spawn(
-            x + (Math.random() - 0.5) * 0.3,
-            groundHeightAt(src, x, z) + 1.2 + Math.random() * 0.18,
-            z + (Math.random() - 0.5) * 0.3,
-            (Math.random() - 0.5) * 0.08, 0.42 + Math.random() * 0.18,
-            (Math.random() - 0.5) * 0.08,
-            3.4 + Math.random() * 2.2,
+            x + (Math.random() - 0.5) * 0.16,
+            groundHeightAt(src, x, z) + 1.2 + Math.random() * 0.12,
+            z + (Math.random() - 0.5) * 0.16,
+            0, 0.46 + Math.random() * 0.14, 0,
+            3.6 + Math.random() * 2.0,
           );
         }
       }
