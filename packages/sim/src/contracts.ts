@@ -83,10 +83,22 @@ export class ContractBoard {
     return out;
   }
 
-  /** Does this place have anything worth a pin above it? */
-  hasOffer(site: number): boolean {
+  /**
+   * Does this place have anything worth a pin above it — or, given a cargo, an
+   * offer of *that* already?
+   *
+   * The per-cargo form is why this takes an argument. Blocking a second offer per
+   * *site* meant a place that makes two things could only ever offer one of them:
+   * an arable farm grows grain and produce, grain is always the bigger heap, so
+   * produce was never once offered anywhere in the district on any seed. The
+   * village shop it feeds could therefore never be supplied by contract.
+   */
+  hasOffer(site: number, cargo = -1): boolean {
     for (let i = 0; i < this.count; i++) {
-      if (this.state[i] === ContractState.Offered && this.from[i] === site) return true;
+      if (this.state[i] !== ContractState.Offered) continue;
+      if (this.from[i] !== site) continue;
+      if (cargo >= 0 && this.cargo[i] !== cargo) continue;
+      return true;
     }
     return false;
   }
@@ -111,7 +123,8 @@ export interface OfferContext {
   usable: (tile: number) => boolean;
   /** What this site has spare, as (cargo, tonnes) — the reason it wants a
    *  haulier. */
-  surplus: (site: number) => { cargo: number; tonnes: number } | null;
+  /** Every cargo this place has spare, not merely its fullest shed. */
+  surpluses: (site: number) => { cargo: number; tonnes: number }[];
   /** Somewhere that wants this cargo. */
   buyerFor: (cargo: number, notSite: number) => number;
   /** Pence a load, given the cargo and the distance. */
@@ -157,38 +170,69 @@ export function offerContracts(
    * difference between a game that starts and a game that shows you one offer
    * and refuses it.
    */
+  /*
+   * Where the scan starts, and it must not always be site zero.
+   *
+   * The board holds six offers and a district holds twenty-odd places, so the
+   * scan fills up long before it reaches the end — and starting from the same end
+   * every time meant the same handful of low-numbered sites owned the board for
+   * the whole game. Measured: fifty offers across three seeds drew on three
+   * cargoes out of thirteen, and a village shop never once appeared as a
+   * destination.
+   *
+   * Advancing the start with the clock gives every place its turn without
+   * remembering anything, and the board becomes a rolling view of the district
+   * rather than a fixed window onto the first five things the generator happened
+   * to place.
+   */
+  const spin = ctx.siteCount > 0
+    ? Math.floor(ctx.tick / 1000) % ctx.siteCount
+    : 0;
   for (let pass = 0; pass < 2 && live + made < want; pass++) {
-    for (let site = 0; site < ctx.siteCount && live + made < want; site++) {
+    for (let step = 0; step < ctx.siteCount && live + made < want; step++) {
+      const site = (spin + step) % ctx.siteCount;
       const tile = ctx.siteTile(site);
       // Only inside the influence area. The fog and the job board are the same
       // mechanism seen twice: what you can see is what you can take.
       if (!ctx.usable(tile)) continue;
-      if (board.hasOffer(site)) continue;
+      /*
+       * Every cargo the place has spare, not just its biggest heap.
+       *
+       * It used to ask for one — the fullest shed — and skip the site entirely if
+       * it already had an offer. Which is fine for a works that makes one thing
+       * and silently wrong for anything that makes two: an arable farm grows grain
+       * *and* produce, grain is always the bigger heap, and so produce was never
+       * offered anywhere in the district on any seed. The village shop that eats
+       * it could not be supplied by contract at all, which is the sort of gap that
+       * looks like a content problem and is a loop bound.
+       */
+      for (const spare of ctx.surpluses(site)) {
+        if (live + made >= want) break;
+        if (spare.tonnes <= 0) continue;
+        if (board.hasOffer(site, spare.cargo)) continue;
+        if (pass === 0 && !ctx.canCarry(spare.cargo)) continue;
+        const buyer = ctx.buyerFor(spare.cargo, site);
+        if (buyer === NONE) continue;
+        if (!ctx.usable(ctx.siteTile(buyer))) continue;
 
-      const spare = ctx.surplus(site);
-      if (!spare || spare.tonnes <= 0) continue;
-      if (pass === 0 && !ctx.canCarry(spare.cargo)) continue;
-      const buyer = ctx.buyerFor(spare.cargo, site);
-      if (buyer === NONE) continue;
-      if (!ctx.usable(ctx.siteTile(buyer))) continue;
+        const dx = ctx.siteX(buyer) - ctx.siteX(site);
+        const dy = ctx.siteY(buyer) - ctx.siteY(site);
+        const distance = Math.round(Math.sqrt(dx * dx + dy * dy));
+        if (distance < 3) continue;
 
-      const dx = ctx.siteX(buyer) - ctx.siteX(site);
-      const dy = ctx.siteY(buyer) - ctx.siteY(site);
-      const distance = Math.round(Math.sqrt(dx * dx + dy * dy));
-      if (distance < 3) continue;
-
-      const id = board.alloc();
-      if (id === NONE) break;
-      board.state[id] = ContractState.Offered;
-      board.from[id] = site;
-      board.to[id] = buyer;
-      board.cargo[id] = spare.cargo;
-      board.distance[id] = distance;
-      board.pay[id] = ctx.rate(spare.cargo, distance);
-      board.service[id] = NONE;
-      board.delivered[id] = 0;
-      board.offeredTick[id] = ctx.tick;
-      made++;
+        const id = board.alloc();
+        if (id === NONE) break;
+        board.state[id] = ContractState.Offered;
+        board.from[id] = site;
+        board.to[id] = buyer;
+        board.cargo[id] = spare.cargo;
+        board.distance[id] = distance;
+        board.pay[id] = ctx.rate(spare.cargo, distance);
+        board.service[id] = NONE;
+        board.delivered[id] = 0;
+        board.offeredTick[id] = ctx.tick;
+        made++;
+      }
     }
   }
   return made;

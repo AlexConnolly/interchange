@@ -4508,17 +4508,27 @@ export class World {
    * that already exist — the point of the contract model is that it needs no new
    * simulation, only a different way of asking.
    */
-  private surplusAt(site: number): { cargo: number; tonnes: number } | null {
-    let best = NONE;
-    let most = 0;
+  /**
+   * Everything a place has spare, biggest heap first.
+   *
+   * It used to return the single fullest shed, which is fine for a works that
+   * makes one thing and silently wrong for anything that makes two. An arable
+   * farm grows grain *and* produce; grain is always the bigger heap; so produce
+   * was never offered anywhere in the district on any seed, and the village shop
+   * that eats it could not be supplied by contract at all. That reads as missing
+   * content and was a `>` in a loop.
+   *
+   * Sorted because the board takes what it can fit and stops: the fullest shed is
+   * still the most urgent thing to shift, it is simply no longer the only thing.
+   */
+  private surplusesAt(site: number): { cargo: number; tonnes: number }[] {
+    const out: { cargo: number; tonnes: number }[] = [];
     for (const cargo of this.offersOf(site)) {
       const have = this.sites.stockOf(site, cargo);
-      if (have > most) {
-        most = have;
-        best = cargo;
-      }
+      if (have > 0) out.push({ cargo, tonnes: have });
     }
-    return best === NONE ? null : { cargo: best, tonnes: most };
+    out.sort((a, b) => b.tonnes - a.tonnes);
+    return out;
   }
 
   /**
@@ -4668,7 +4678,7 @@ export class World {
       siteX: (s) => this.sites.x[s],
       siteY: (s) => this.sites.y[s],
       usable: (tile) => tile !== NONE && this.influence.usable(tile),
-      surplus: (s) => this.surplusAt(s),
+      surpluses: (s) => this.surplusesAt(s),
       buyerFor: (cargo, not) => this.buyerFor(cargo, not),
       rate: (cargo, distance) =>
         haulageRate(this.cargoPrice[cargo], distance, this.cargoRateWeight[cargo]),
