@@ -447,8 +447,13 @@ export function makeAir(scene: Scene): Air {
    * them somewhere the eye cannot check anyway.
    */
   const leaves = new Field(scene, {
-    count: 300,
-    tiles: 0.13,
+    count: 380,
+    /*
+     * Bigger than a leaf, for the reason the daffodils are bigger than a
+     * daffodil. Measured at the zoom the game is played at, 0.13 of a tile is
+     * seven pixels — there, countable, and not something you would call a leaf.
+     */
+    tiles: 0.2,
     colour: '#c98a3e',
     opacity: 0.95,
     spread: 0,
@@ -645,7 +650,7 @@ export function makeAir(scene: Scene): Air {
       const falling = frame.autumn * frame.level;
       leaves.aim(0.95 * frame.level, frame.pixelsPerTile);
       if (falling > 0.02) {
-        leafAcc += dt * 34 * falling;
+        leafAcc += dt * 46 * falling;
         while (leafAcc >= 1) {
           leafAcc -= 1;
           const a = Math.random() * 6.283;
