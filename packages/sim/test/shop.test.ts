@@ -86,17 +86,20 @@ describe('the village shop', () => {
     expect(van?.handling).toContain('general');
   });
 
-  it('is bought on trade, not on owning its suppliers', () => {
+  it('can be bought by anybody who can afford it', () => {
+    /*
+     * It briefly could not be bought at all. The rule was that you must have run
+     * a load in first — a nice idea and an unsatisfiable one: measured, fifty
+     * contract offers across three seeds and not one had a shop as its
+     * destination, so there was no way to deliver to a shop and therefore no way
+     * to buy one. A condition with no path to meeting it is a locked door with a
+     * sign on it, which is worse than no door.
+     */
     const w = make(1985);
     const shop = shopOf(w);
     w.refreshInfluence([{ x: w.sites.x[shop], y: w.sites.y[shop], strength: 2.4 }]);
     w.companies.cash[w.player] = 50_000_00;
-
-    expect(w.canBuySite(shop).ok).toBe(false);
-    // What a delivery leaves behind. A fortnight ago is too long ago.
-    w.sites.servedDay[shop] = w.day - 30;
-    expect(w.canBuySite(shop).ok).toBe(false);
-    w.sites.servedDay[shop] = w.day;
+    expect(w.canBuySite(shop).ok, w.canBuySite(shop).reason).toBe(true);
     expect(w.buySite(shop).ok).toBe(true);
     expect(w.sites.owner[shop]).toBe(w.player);
   });
@@ -106,7 +109,6 @@ describe('the village shop', () => {
     const shop = shopOf(w);
     w.refreshInfluence([{ x: w.sites.x[shop], y: w.sites.y[shop], strength: 2.4 }]);
     w.companies.cash[w.player] = 50_000_00;
-    w.sites.servedDay[shop] = w.day;
     expect(w.buySite(shop).ok).toBe(true);
 
     const produce = w.content.cargo.findIndex((c) => c.id === 'produce');

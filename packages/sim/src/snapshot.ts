@@ -149,7 +149,6 @@ export function snapshot(w: World): ArrayBuffer {
   parts.push(w.sites.state.subarray(0, w.sites.count));
   parts.push(w.sites.satisfaction.subarray(0, w.sites.count));
   parts.push(w.sites.cycle.subarray(0, w.sites.count));
-  parts.push(w.sites.servedDay.subarray(0, w.sites.count));
   parts.push(w.sites.stock.subarray(0, w.sites.count * w.sites.cargoCount));
 
   parts.push(w.towns.population.subarray(0, w.towns.count));

@@ -1672,11 +1672,6 @@ export class World {
        * thing planning.ts exists to avoid.
        */
       this.approval = Math.min(100, this.approval + APPROVAL_PER_LOAD);
-      // And note that it was you who brought it, so the place knows who its
-      // haulier is. `canBuySite` is the only reader; see the note there.
-      if (!isTown && target >= 0 && target < this.sites.count) {
-        this.sites.servedDay[target] = this.day;
-      }
     }
     if (company === this.player && this.earned.length < 32) {
       this.earned.push({
@@ -3340,10 +3335,14 @@ export class World {
    * half price, so the cheap businesses are the ones that need what you are good
    * at.
    *
-   * One thing survives from the old rule, for shops only — see below. A shop is
-   * bought on trade, because "are you the one whose van pulls up outside" is a
-   * question about hauling rather than about owning, and hauling is the thing
-   * this game is about.
+   * There was briefly one survivor of the old rule, for shops: you had to have
+   * run a load in before the parish would sell you the counter. It was a nice
+   * idea — "are you the one whose van pulls up outside" is a question about
+   * hauling rather than owning — and it was *unsatisfiable*, which is worse than
+   * wrong. Measured: fifty contract offers across three seeds and not one of them
+   * had a shop as its destination, so there was no way to deliver a load to a
+   * shop and therefore no way to ever buy one. A condition with no path to
+   * meeting it is a locked door with a sign on it.
    */
   canBuySite(site: number): { ok: boolean; reason: string; needs: number[] } {
     const needs: number[] = [];
@@ -3356,36 +3355,6 @@ export class World {
     const tile = this.siteAccessTile[site];
     if (tile === NONE || !this.influence.usable(tile)) {
       return { ok: false, reason: 'Too far out. You have no standing there yet.', needs };
-    }
-    /*
-     * A shop is bought on trade, not on owning its suppliers.
-     *
-     * The rule below — own a producer of every input first — is right for a
-     * works and backwards for a shop. A creamery is genuinely the top of a chain
-     * and buying it without the milk beneath it is buying a building. A village
-     * shop is not the top of anything: it is a counter, and what makes it yours
-     * to buy is that you are the one whose van pulls up outside it. Under the
-     * ownership rule you had to own a dairy farm *and* a creamery *and* a
-     * brewery before the parish would sell you a four-hundred-pound shop, which
-     * put the smallest thing in the game behind the largest.
-     *
-     * So for a place that makes nothing, the question is whether you supply it.
-     * A fortnight, because that is long enough to be a milk round and short
-     * enough that it has to be current — let the round lapse and the shop is no
-     * longer yours to buy. It is also exactly the ladder the shop was asked for:
-     * take the contract, run it a while, buy the shop, and the farms come after.
-     */
-    const makesNothing = this.recipes.outputs[this.sites.def[site]].length === 0
-      && !this.content.industries[this.sites.def[site]]?.passThrough;
-    if (makesNothing) {
-      const served = this.sites.servedDay[site];
-      if (served < 0 || this.day - served > 14) {
-        return {
-          ok: false,
-          reason: 'You do not supply it. Run a load in first.',
-          needs,
-        };
-      }
     }
     /*
      * And whether you can pay for it, which nothing checked.
@@ -3407,7 +3376,7 @@ export class World {
      * to say what you will have to arrange, which is the useful half of what the
      * old rule was doing.
      */
-    for (const group of makesNothing ? [] : this.suppliersFor(site)) {
+    for (const group of this.suppliersFor(site)) {
       if (!group.owned) needs.push(group.cargo);
     }
     if (this.companies.cash[this.player] < this.priceOf(site)) {

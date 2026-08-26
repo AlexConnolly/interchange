@@ -654,6 +654,7 @@ export function App(): JSX.Element {
       vModel: new Uint8Array(512),
       vId: new Int32Array(512),
       vStopped: new Uint8Array(512),
+      vMotor: new Uint8Array(512),
       placeCount: 0,
       px: new Float32Array(320),
       pz: new Float32Array(320),
@@ -2252,15 +2253,31 @@ export function App(): JSX.Element {
         wdt, MACHINES, n,
         src.vx, src.vz, src.vHeading, src.vLivery, src.vModel, src.vId,
       );
+      // Traffic and tractors manage their own standing about, so the renderer
+      // should ease them normally.
+      for (let k = fleetEnd; k < n; k++) src.vStopped[k] = 0;
+      /*
+       * Everything written so far burns diesel. The livestock below does not.
+       *
+       * Marked in one place at the boundary rather than by each system as it
+       * writes its own rows: "everything before the animals" is a single fact,
+       * and stating it once is harder to get wrong than four systems each
+       * remembering to. See `vMotor` in scene.ts for what goes wrong without it —
+       * sheep with headlamps and an exhaust plume.
+       */
+      const engines = n;
+      for (let k = 0; k < engines; k++) src.vMotor[k] = 1;
+
       // And the livestock, which is the slowest thing in the district by a long
       // way and the only one that is not going anywhere.
       n = grazing.step(
         wdt, renderer.camX, renderer.camZ, n,
         src.vx, src.vz, src.vHeading, src.vLivery, src.vModel, src.vId,
       );
-      // Traffic and tractors manage their own standing about, so the renderer
-      // should ease them normally.
-      for (let k = fleetEnd; k < n; k++) src.vStopped[k] = 0;
+      for (let k = engines; k < n; k++) {
+        src.vMotor[k] = 0;
+        src.vStopped[k] = 0;
+      }
       src.vehicleCount = n;
 
       /*

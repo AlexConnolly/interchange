@@ -65,16 +65,6 @@ export class SiteTable {
   readonly fed = new Uint8Array(MAX_SITES).fill(100);
   /** Consecutive days below the decline threshold. */
   readonly starvedDays = new Int32Array(MAX_SITES);
-  /**
-   * The day the player last delivered a load here. `-1` for never.
-   *
-   * Kept because it is the only evidence of a *relationship* between a haulier
-   * and a place. Ownership is recorded, contracts are recorded while they run
-   * and then gone, and until this there was no way to ask the question "are you
-   * the one keeping this shop supplied" — which is exactly the question that
-   * ought to decide whether the shop will sell itself to you. See `canBuySite`.
-   */
-  readonly servedDay = new Int32Array(MAX_SITES).fill(-1);
   /** Days since mothballing; past the grace period it is dead for good. */
   readonly mothballedDays = new Int32Array(MAX_SITES);
   /** Deposit richness 0..100 for extraction sites; scales output. */
@@ -139,7 +129,6 @@ export class SiteTable {
     this.y[id] = y;
     this.tile[id] = tile;
     this.owner[id] = owner;
-    this.servedDay[id] = -1;
     this.fed[id] = 100;
     this.state[id] = SiteState.Thriving;
     this.satisfaction[id] = 100;

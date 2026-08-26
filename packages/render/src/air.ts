@@ -284,6 +284,8 @@ export interface AirSource extends GroundSource {
   vz: Float32Array;
   vHeading: Float32Array;
   vStopped: Uint8Array;
+  /** 1 if it has an engine, 0 if it is a cow. See `vMotor` in scene.ts. */
+  vMotor: Uint8Array;
   /**
    * The scatter, because the falling leaves come off the trees in it.
    *
@@ -778,6 +780,9 @@ export function makeAir(scene: Scene): Air {
           // Standing still, standing quiet. A parked lorry with smoke coming off
           // it is a lorry somebody left running.
           if (src.vStopped[v] === 1) continue;
+          // And nothing without an engine. The grazing animals ride in these
+          // same arrays, and a cow with an exhaust plume is a memorable bug.
+          if (src.vMotor[v] === 0) continue;
           const x = src.vx[v];
           const z = src.vz[v];
           if (Math.abs(x - frame.camX) > reach || Math.abs(z - frame.camZ) > reach) continue;

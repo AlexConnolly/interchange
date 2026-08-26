@@ -131,7 +131,6 @@ describe('supplying a place you own', () => {
 
     w.refreshInfluence([{ x: w.sites.x[shop], y: w.sites.y[shop], strength: 2.4 }]);
     w.companies.cash[w.player] = 500_000_00;
-    w.sites.servedDay[shop] = w.day;
     expect(w.buySite(shop).ok).toBe(true);
 
     const before = w.services.count;

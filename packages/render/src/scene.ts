@@ -175,6 +175,20 @@ export interface RenderSource extends GroundSource, RoadSource {
    */
   vStopped: Uint8Array;
   /**
+   * Has this thing got an engine? 1 for anything with a motor, 0 for a cow.
+   *
+   * The vehicle arrays are how *everything* that moves gets drawn — the fleet,
+   * the traffic, the tractors and, since livestock started grazing, the animals.
+   * Which is the right architecture and left one assumption unstated: that
+   * whatever is in these arrays burns diesel. So the sheep were given headlamps
+   * at dusk and a puff of exhaust behind them.
+   *
+   * A flag rather than a model-index test, because the two systems that care live
+   * in different files and neither should have to know which model index is a cow
+   * this week.
+   */
+  vMotor: Uint8Array;
+  /**
    * Buildings. One per business, plus the village housing.
    *
    * Fed as a flat list rather than read off the world, because *which* of them
@@ -1752,7 +1766,7 @@ export class Renderer {
         this.tmp.updateMatrix();
         const at = this.counts[slot]++;
         batch.setMatrixAt(at, this.tmp.matrix);
-        this.lamps[mi][li]?.setMatrixAt(at, this.tmp.matrix);
+        if (src.vMotor[i]) this.lamps[mi][li]?.setMatrixAt(at, this.tmp.matrix);
         continue;
       }
       if (seen === undefined || Math.abs(seen.x - x) + Math.abs(seen.z - z) > 3) {
@@ -1871,7 +1885,8 @@ export class Renderer {
       // is the same lorry drawn by a material that ignores the light.
       const n = this.counts[slot]++;
       batch.setMatrixAt(n, this.tmp.matrix);
-      this.lamps[mi][li]?.setMatrixAt(n, this.tmp.matrix);
+      // No lamps on livestock. See `vMotor`.
+      if (src.vMotor[i]) this.lamps[mi][li]?.setMatrixAt(n, this.tmp.matrix);
       /*
        * A few per cent of colour variation per vehicle, from its own id.
        *
