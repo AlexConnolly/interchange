@@ -271,6 +271,23 @@ export const RUN = {
   loaded: hex('#f0c04a'),
 };
 
+/**
+ * The land you are looking at, in two greens.
+ *
+ * Brighter than the grass rather than a different hue from it, which is how a
+ * highlighter works on paper: a blue or a gold patch would read as "something has
+ * been placed here", and nothing has been — this is a *selection*, and a selection
+ * should look like the thing it is selecting, lit up.
+ */
+export const PLOT = {
+  /** Over the ground. Faint, so the field underneath is still a field. */
+  wash: hex('#8ce08a'),
+  /** The edge, which is what actually answers "where does it stop". Brighter than
+   *  the wash by a long way, because it is drawn at the same low opacity and a
+   *  border that reads as a border has to earn it in saturation. */
+  edge: hex('#2ef066'),
+};
+
 export const SEMANTIC = {
   yours: hex('#f0c04a'),
   offered: hex('#4ab0d0'),

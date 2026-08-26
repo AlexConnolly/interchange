@@ -16,8 +16,9 @@
  * test each costs nothing next to a frame of the district.
  */
 
-import { useState, type JSX } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { type World } from '@interchange/sim';
+import type { Renderer } from '@interchange/render';
 import { money } from './Markers.tsx';
 import { anchorAt } from './anchor.ts';
 
@@ -32,9 +33,11 @@ import { anchorAt } from './anchor.ts';
 const CHIPS = 60;
 
 export function Land({
-  world, camX, camZ, tilesAcross, onBought,
+  world, renderer, src, camX, camZ, tilesAcross, onBought,
 }: {
   world: World;
+  renderer: Renderer;
+  src: Parameters<Renderer['showPlot']>[1];
   camX: number;
   camZ: number;
   tilesAcross: number;
@@ -64,8 +67,38 @@ export function Land({
   const verdict = chosen >= 0 ? world.canBuyLand(world.player, chosen) : null;
   const bounds = chosen >= 0 ? world.land.bounds(chosen) : null;
 
+  /*
+   * The green square on the ground, drawn by the renderer rather than by this.
+   *
+   * An effect rather than a call in the render body, so the *teardown* is somewhere
+   * — a highlight left behind on a plot nobody has selected is the same bug as a
+   * route line left on the map, and that one took two goes to notice. Closing the
+   * tool unmounts this component, which clears it.
+   */
+  useEffect(() => {
+    renderer.showPlot(bounds, src);
+    return () => renderer.showPlot(null, src);
+  }, [renderer, src, bounds?.x0, bounds?.y0, bounds?.x1, bounds?.y1]);
+
   return (
     <>
+      {/*
+        * Somewhere to click that means "not that one".
+        *
+        * Behind the price chips and over everything else, so a press on open
+        * country deselects — which is the gesture anybody tries first and the one
+        * the panel's Back button is only a formal version of. It exists only while
+        * something is selected, so it never eats a click that had somewhere else
+        * to go.
+        */}
+      {chosen >= 0 && (
+        <button
+          className="plot-away"
+          onClick={() => setChosen(-1)}
+          aria-label="Nothing selected"
+        />
+      )}
+
       {near.map((s) => {
         const height = world.terrain.height[
           Math.min(size * size - 1, Math.floor(s.c.y) * size + Math.floor(s.c.x))

@@ -2911,6 +2911,8 @@ export function App(): JSX.Element {
       {live && tool === 'land' && (
         <Land
           world={live.world}
+          renderer={live.renderer}
+          src={live.src}
           camX={live.renderer.camX}
           camZ={live.renderer.camZ}
           tilesAcross={live.renderer.tilesAcross}

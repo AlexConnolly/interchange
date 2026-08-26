@@ -46,7 +46,7 @@ import {
 } from './roads.ts';
 import type { Model } from './glb.ts';
 import { Precipitation } from './weather.ts';
-import { NIGHT, PAINT, SKY, SNOW, type RGB } from './palette.ts';
+import { NIGHT, PAINT, PLOT, SKY, SNOW, type RGB } from './palette.ts';
 import {
   LOOK, aimFog, aimShade, buildComposer, makeFog, makeMotes, moodAt, stylise,
   type Composed, type Mood, type Motes,
@@ -291,6 +291,8 @@ export class Renderer {
   private readonly material: MeshLambertMaterial;
   private readonly roadMaterial: MeshLambertMaterial;
   private readonly routeMaterial: MeshBasicMaterial;
+
+  private readonly plotMaterial: MeshBasicMaterial;
   private readonly streetGlow: MeshBasicMaterial;
   /** Everything that emits: cat's eyes and lamps. Unlit, additive, and its
    *  opacity is how far into the night we are. */
@@ -469,6 +471,23 @@ export class Renderer {
      * legible thing on it. Unlit means the two run colours are exactly the two
      * colours the palette authored, at every hour of every season.
      */
+    /*
+     * The plot highlight, on its own material at half the route line's opacity.
+     *
+     * A route is a *statement* — this is where the lorry goes — and wants to be
+     * opaque enough to read over anything. A selection is a *tint*: the whole
+     * point is that you can still see the field you are buying, so a bright green
+     * at eighty-five per cent turns four acres of pasture into a painted rectangle
+     * and hides the thing being sold.
+     */
+    this.plotMaterial = new MeshBasicMaterial({
+      vertexColors: true,
+      side: DoubleSide,
+      transparent: true,
+      opacity: 0.42,
+      depthWrite: false,
+    });
+
     this.routeMaterial = new MeshBasicMaterial({
       vertexColors: true,
       side: DoubleSide,
@@ -2233,6 +2252,104 @@ export class Renderer {
     this.markMesh.receiveShadow = false;
     this.scene.add(this.markMesh);
   }
+
+  /**
+   * The plot you are looking at: a wash inside a border.
+   *
+   * A separate mesh from the road tool's marks, and from the route line, because
+   * all three can be on screen at once and each means something different. This one
+   * means "*this* square, the one the price belongs to" — which needs an edge more
+   * than it needs a fill, because the whole question a player is asking is where the
+   * square stops.
+   *
+   * Hence both. The wash says which ground is included and stays faint enough that
+   * the field underneath is still a field; the border is what actually answers the
+   * question, drawn as four long thin quads rather than a line, because a line
+   * primitive is one pixel wide at every zoom and this has to read at fourteen
+   * tiles across and at seventy.
+   *
+   * Green, on a green field, and it works for the same reason a highlighter works
+   * on white paper: it is not a different hue from the grass, it is a much brighter
+   * one. A colour chosen for contrast with the ground — blue, gold — would say
+   * "something has been placed here", and nothing has. This is a selection.
+   */
+  showPlot(
+    bounds: { x0: number; y0: number; x1: number; y1: number } | null,
+    src: RenderSource,
+  ): void {
+    const key = bounds ? `${bounds.x0},${bounds.y0},${bounds.x1},${bounds.y1}` : '';
+    if (key === this.plotKey) return;
+    this.plotKey = key;
+    if (this.plotMesh) {
+      this.scene.remove(this.plotMesh);
+      this.plotMesh.geometry.dispose();
+      this.plotMesh = null;
+    }
+    if (!bounds) return;
+
+    const sz = src.size;
+    const x0 = bounds.x0;
+    const z0 = bounds.y0;
+    const x1 = bounds.x1 + 1;
+    const z1 = bounds.y1 + 1;
+    const tiles = (x1 - x0) * (z1 - z0);
+    // A quad per tile for the wash, plus four for the border.
+    const m = new Mesh((tiles + 4) * 6);
+
+    /*
+     * The wash is drawn per tile rather than as one big quad, and it has to be:
+     * the ground is not flat, so a single quad across sixteen tiles would sink
+     * into every rise and float over every dip. Following the surface tile by tile
+     * is the same thing `showMarks` does and for the same reason.
+     */
+    for (let z = z0; z < z1; z++) {
+      for (let x = x0; x < x1; x++) {
+        if (x < 0 || z < 0 || x >= sz || z >= sz) continue;
+        const y = this.groundTop(src, x + 0.5, z + 0.5) + 0.03;
+        m.quad(
+          x, y, z, x + 1, y, z, x + 1, y, z + 1, x, y, z + 1, PLOT.wash,
+        );
+      }
+    }
+
+    // And the border, one strip per side, each following the ground along its run.
+    const w = 0.14;
+    const edge = (
+      ax: number, az: number, bx: number, bz: number, nx: number, nz: number,
+    ): void => {
+      const steps = Math.max(1, Math.round(Math.abs(bx - ax) + Math.abs(bz - az)));
+      for (let i = 0; i < steps; i++) {
+        const t0 = i / steps;
+        const t1 = (i + 1) / steps;
+        const px0 = ax + (bx - ax) * t0;
+        const pz0 = az + (bz - az) * t0;
+        const px1 = ax + (bx - ax) * t1;
+        const pz1 = az + (bz - az) * t1;
+        const y0 = this.groundTop(src, px0 + nx * w * 0.5, pz0 + nz * w * 0.5) + 0.05;
+        const y1 = this.groundTop(src, px1 + nx * w * 0.5, pz1 + nz * w * 0.5) + 0.05;
+        m.quad(
+          px0, y0, pz0,
+          px1, y1, pz1,
+          px1 + nx * w, y1, pz1 + nz * w,
+          px0 + nx * w, y0, pz0 + nz * w,
+          PLOT.edge,
+        );
+      }
+    };
+    edge(x0, z0, x1, z0, 0, 1);
+    edge(x0, z1, x1, z1, 0, -1);
+    edge(x0, z0, x0, z1, 1, 0);
+    edge(x1, z0, x1, z1, -1, 0);
+
+    this.plotMesh = toMesh(m, this.plotMaterial);
+    this.plotMesh.castShadow = false;
+    this.plotMesh.receiveShadow = false;
+    this.scene.add(this.plotMesh);
+  }
+
+  private plotMesh: ReturnType<typeof toMesh> | null = null;
+
+  private plotKey = '';
 
   private markMesh: ReturnType<typeof toMesh> | null = null;
 

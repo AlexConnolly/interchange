@@ -1480,18 +1480,35 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 
 /* The markers, same treatment and the most important of it: there are a dozen
    of them and they sit *on* the picture rather than at its edge. */
+/* ---- no transitions on anything the map repositions ---------------------
+
+   Every one of these elements is placed from the camera each frame, so React
+   re-renders it sixty times a second — and a CSS transition on an element that
+   re-renders faster than its own duration *never completes*. It restarts from its
+   opening value each time and the computed style sits there for ever.
+
+   Which means the hover state on the map markers had never once worked. Measured:
+   background `rgba(14,17,15,0.3)` idle, and `rgba(14,17,15,0.3)` again through five
+   samples over a second and a half while hovered. The whole "quiet until you reach
+   for it" behaviour was dead on arrival on the one set of elements it mattered most
+   for, and it looked like a design that simply had not been applied.
+
+   This is the third instance of one bug: a time-based CSS effect on a
+   frequently-re-rendered element. Two entrance animations sat on their opening
+   keyframe and a chip's colour sat on its old value. The rule to take from it is
+   that on anything the map moves, state changes must be *instant* — a hover that
+   snaps is a hover that works, and 260ms of easing is worth nothing next to that. */
+
 .mark-face {
   background: rgba(14, 17, 15, 0.30);
   border-color: rgba(255, 255, 255, 0.14);
   color: #f2efe6;
   text-shadow: none;
-  transition: background 260ms ease, border-color 260ms ease, color 260ms ease;
 }
 .mark:hover .mark-face {
   background: rgba(12, 15, 13, 0.80);
   border-color: rgba(255, 255, 255, 0.30);
   color: #fffdf6;
-  transition-duration: 120ms;
 }
 /* Yours reads gold in both — dimmed when idle, and never inverted. It is the
    only colour coding on the map and losing it would cost the one thing it is
@@ -1499,8 +1516,8 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .mark.mine .mark-face { background: rgba(126, 95, 20, 0.46); color: #f7e3ac; }
 .mark.mine:hover .mark-face { background: rgba(163, 124, 27, 0.86); color: #ffeec0; }
 .mark-dot { border-color: rgba(255, 255, 255, 0.5); }
-.mine-mark { opacity: 0.55; transition: opacity 260ms ease; }
-.mine-mark:hover { opacity: 1; transition-duration: 120ms; }
+.mine-mark { opacity: 0.55; }
+.mine-mark:hover { opacity: 1; }
 
 
 /* ------------------------------------------------- the money tab
@@ -1882,16 +1899,25 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   cursor: pointer;
   pointer-events: auto;
   backdrop-filter: blur(6px);
-  transition: background 120ms ease, transform 120ms ease;
 }
 .plot:hover {
   background: rgba(14, 17, 15, 0.86);
   transform: translate(-50%, -50%) scale(1.12);
 }
+/* The chosen plot, green to match the square drawn on the ground under it. Gold
+   would say "yours"; green says "this one", and the price stays legible because the
+   price is still the thing being decided.
+
+   One rule rather than two. The colour was first added as a second `.plot.on`
+   block further down the file, which by every reading of the cascade should have
+   won and did not — the rule was present, parsed, last, and the element carried
+   both classes, and the computed background stayed the idle one. Rather than keep
+   chasing that, the declaration lives with the transform it belongs to, where
+   there is no ordering question to get wrong. */
 .plot.on {
-  background: #f4c95d;
-  border-color: #d9a72e;
-  color: #4a3c14;
+  background: #58d878;
+  border-color: #2fae52;
+  color: #123d1e;
   transform: translate(-50%, -50%) scale(1.12);
 }
 
@@ -1936,3 +1962,15 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 }
 .plot-row { display: flex; gap: 6px; margin-top: 9px; }
 .plot-row .btn { flex: 1; }
+
+/* Somewhere to click that means "not that one". Over the world and under the
+   chips, so a press on open country deselects and a press on a price does not. */
+.plot-away {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: default;
+  pointer-events: auto;
+}
