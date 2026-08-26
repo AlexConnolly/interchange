@@ -135,9 +135,18 @@ export class Grazing {
     while (this.beasts.length < ANIMALS) {
       const b: Beast = {
         anchor: -1, x: 0, z: 0, tx: 0, tz: 0, wait: 0, heading: 0,
-        // Two thirds sheep, because there are more sheep than cattle in England
-        // and a mixed field of both in equal numbers looks like a petting zoo.
-        cattle: Math.random() < 0.34,
+        /*
+         * Two thirds sheep, because there are more sheep than cattle in England
+         * and a field of both in equal numbers looks like a petting zoo.
+         *
+         * By index rather than by coin toss. A toss gives the right *average* and
+         * no guarantee about any particular herd, which made a test asserting
+         * "mostly sheep" fail about once in every few hundred runs — an assertion
+         * that is usually true is worse than none, because the failure teaches
+         * nobody anything. Counting instead makes the mix exact and means a field
+         * does not reshuffle its livestock between one look and the next.
+         */
+        cattle: this.beasts.length % 3 === 0,
       };
       this.settle(b, this.beasts.length + 1);
       this.beasts.push(b);

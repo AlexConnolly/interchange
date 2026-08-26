@@ -611,7 +611,7 @@ html, body, #root, .app {
 }
 .bubble {
   transform-origin: 50% 100%;
-  animation: bubble-pop 150ms cubic-bezier(0.2, 1.5, 0.4, 1) both;
+  animation: bubble-pop 150ms cubic-bezier(0.2, 1.5, 0.4, 1);
 }
 .bubble.below, .bubble.adrift {
   transform-origin: 50% 0%;
@@ -639,7 +639,7 @@ html, body, #root, .app {
   from { opacity: 0; transform: translate(-50%, -100%) scale(0.55); }
   to   { opacity: 1; transform: translate(-50%, -100%) scale(1); }
 }
-.mark { animation: mark-pop 190ms cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+.mark { animation: mark-pop 190ms cubic-bezier(0.2, 1.4, 0.4, 1); }
 /* The hover transform must not fight the animation once it has finished:
    `both` holds the end state, and a later rule with the same specificity wins.
    Naming the transform again here is deliberate. */
@@ -726,7 +726,7 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   bottom: var(--dock-rise);
   transform: translateX(-50%);
   transform-origin: 50% 100%;
-  animation: dock-rise 170ms cubic-bezier(0.2, 1.35, 0.4, 1) both;
+  animation: dock-rise 170ms cubic-bezier(0.2, 1.35, 0.4, 1);
 }
 .bubble.fixed .bubble-arrow { display: none; }
 /* Grows from the bar rather than popping in place: a short lift and a slight
@@ -1047,7 +1047,7 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   backdrop-filter: blur(7px) saturate(0.9);
   pointer-events: auto;
   z-index: 40;
-  animation: veil-in 160ms ease-out both;
+  animation: veil-in 160ms ease-out;
 }
 @keyframes veil-in { from { opacity: 0; } to { opacity: 1; } }
 
@@ -1060,7 +1060,7 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   background: rgba(247, 243, 234, 0.97);
   box-shadow: 0 18px 60px rgba(20, 28, 22, 0.4);
   color: var(--ink);
-  animation: pause-in 200ms cubic-bezier(0.2, 1.1, 0.4, 1) both;
+  animation: pause-in 200ms cubic-bezier(0.2, 1.1, 0.4, 1);
 }
 @keyframes pause-in {
   from { opacity: 0; transform: translateY(10px) scale(0.985); }
@@ -1300,7 +1300,7 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   backdrop-filter: blur(10px);
   box-shadow: 0 6px 24px rgba(30, 40, 30, 0.24);
   pointer-events: auto;
-  animation: dock-rise 170ms cubic-bezier(0.2, 1.35, 0.4, 1) both;
+  animation: dock-rise 170ms cubic-bezier(0.2, 1.35, 0.4, 1);
 }
 /* Down into the dock rather than straight out, so putting the tool away is the
    same gesture in reverse. */
@@ -1745,7 +1745,36 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
    Short and sharp: 190ms with a small overshoot going in. Long enough to see the
    direction, too short to wait for. */
 
-.slide-in { animation: slide-from-right 190ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+/*
+ * ---- a note on fill modes, which cost an afternoon -----------------------
+ *
+ * Every *entrance* animation in this file runs without a fill mode, and every
+ * *exit* keeps `both`. The distinction is not stylistic.
+ *
+ * An entrance's opening keyframe is a lie about where the thing is — offset,
+ * scaled, transparent. `both` holds that lie whenever the animation is not
+ * playing, which includes "has not started yet" and "never ran". An exit's
+ * closing keyframe is the state it must stay in until it is unmounted, so an
+ * exit needs `both` and cannot break layout by having it: the element is on its
+ * way out either way.
+ *
+ * No fill mode, and that is the whole of a bug worth remembering.
+ *
+ * These were written with `both`, which holds the *from* keyframe before the
+ * animation runs and the *to* keyframe after. If the animation never runs — a
+ * browser that has not composited, a machine under load, anything — `both` leaves
+ * the element parked on the opening frame for ever. Measured: the panel body sat
+ * eighty-one pixels to the right of its own panel two full seconds after opening,
+ * which is exactly the twenty-six per cent below, with its right-hand side
+ * clipped off. The content did not span the panel because it was not *in* the
+ * panel.
+ *
+ * Without a fill mode the element's resting style applies at every moment except
+ * while the animation is actually playing. So the worst case is that the slide is
+ * not seen, which is a missing flourish rather than a broken layout — and a
+ * decoration must never be able to decide where anything sits.
+ */
+.slide-in { animation: slide-from-right 190ms cubic-bezier(0.22, 1, 0.36, 1); }
 @keyframes slide-from-right {
   from { opacity: 0; transform: translateX(26%); }
   to { opacity: 1; transform: translateX(0); }
@@ -1753,7 +1782,7 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 
 /* And the pane behind it goes the other way, so a back press reads as reversing
    rather than as a second forward step. */
-.slide-back { animation: slide-from-left 190ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.slide-back { animation: slide-from-left 190ms cubic-bezier(0.22, 1, 0.36, 1); }
 @keyframes slide-from-left {
   from { opacity: 0; transform: translateX(-26%); }
   to { opacity: 1; transform: translateX(0); }
