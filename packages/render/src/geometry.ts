@@ -39,6 +39,8 @@ export class Mesh {
   private colBuf: Float32Array;
   private emitBuf: Float32Array;
   private takeBuf: Float32Array;
+
+  private leafBuf: Float32Array;
   private n = 0;
 
   /**
@@ -57,12 +59,30 @@ export class Mesh {
    */
   take = 1;
 
+  /**
+   * Whether the surfaces added from now on are foliage, 0 or 1. A pen state,
+   * like `take`.
+   *
+   * The pipeline models get this from a material name — see `LEAF_MATERIAL` — but
+   * the hedges are built here, by hand, in world coordinates, and they are
+   * *vegetation*: "what about the hedges, surely all vegetation should have its
+   * instance for each season". Quite. Without this a district went gold in
+   * October with every hedge in it still in full July green, which is worse than
+   * no seasons at all because it says the game noticed and then stopped halfway.
+   *
+   * A dry stone wall and a post-and-rail fence are drawn by the same code and
+   * must *not* get it, which is the whole reason it is a pen rather than a
+   * property of the mesh.
+   */
+  leaf = 0;
+
   constructor(expectedVertices = 512) {
     const cap = Math.max(64, expectedVertices);
     this.posBuf = new Float32Array(cap * 3);
     this.colBuf = new Float32Array(cap * 3);
     this.emitBuf = new Float32Array(cap);
     this.takeBuf = new Float32Array(cap);
+    this.leafBuf = new Float32Array(cap);
   }
 
   get vertexCount(): number {
@@ -81,10 +101,13 @@ export class Mesh {
     c.set(this.colBuf);
     e.set(this.emitBuf);
     t.set(this.takeBuf);
+    const lf = new Float32Array(cap);
+    lf.set(this.leafBuf);
     this.posBuf = p;
     this.colBuf = c;
     this.emitBuf = e;
     this.takeBuf = t;
+    this.leafBuf = lf;
   }
 
   private v(x: number, y: number, z: number, c: RGB, e: number): void {
@@ -97,6 +120,7 @@ export class Mesh {
     this.colBuf[i + 2] = c[2];
     this.emitBuf[this.n] = e;
     this.takeBuf[this.n] = this.take;
+    this.leafBuf[this.n] = this.leaf;
     this.n++;
   }
 
@@ -115,6 +139,7 @@ export class Mesh {
     this.colBuf.set(other.colBuf.subarray(0, count * 3), o);
     this.emitBuf.set(other.emitBuf.subarray(0, count), this.n);
     this.takeBuf.set(other.takeBuf.subarray(0, count), this.n);
+    this.leafBuf.set(other.leafBuf.subarray(0, count), this.n);
     this.n += count;
   }
 
@@ -416,6 +441,7 @@ export class Mesh {
     g.setAttribute('color', new BufferAttribute(this.colBuf.subarray(0, this.n * 3), 3));
     g.setAttribute('emit', new BufferAttribute(this.emitBuf.subarray(0, this.n), 1));
     g.setAttribute('snowTake', new BufferAttribute(this.takeBuf.subarray(0, this.n), 1));
+    g.setAttribute('leaf', new BufferAttribute(this.leafBuf.subarray(0, this.n), 1));
     /*
      * Livery, as a per-vertex mask rather than a whole-mesh multiply.
      *

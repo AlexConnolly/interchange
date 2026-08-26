@@ -137,9 +137,26 @@ export const FENCE = {
   post: hex('#6f6049'),
 };
 
+/**
+ * Dry stone, and it is Cotswold limestone rather than granite.
+ *
+ * "The stone fences are absolutely hilarious. They just look like big rocks.
+ * I'm thinking like Cotswold stone." Two faults, and the colour was the smaller
+ * one: a grey wall in a green field reads as concrete, and the honey is most of
+ * why a limestone country looks like one. The bigger fault was the shape — see
+ * `boundary` in ground.ts.
+ *
+ * Three shades because a dry stone wall is *coursed*, and courses are the whole
+ * signature: a wall built without them is a heap. At forty pixels you cannot see
+ * a single stone, but you can see two or three horizontal bands of slightly
+ * different tone, and that is what says built-by-hand rather than tipped.
+ */
 export const WALL = {
-  stone: hex('#8e8d85'),
-  shadow: hex('#75746d'),
+  stone: hex('#c6ae86'),
+  shadow: hex('#ab9269'),
+  /** The coping: stones set on edge along the top, and paler for catching the
+   *  sun on their upward faces. */
+  coping: hex('#d3bd97'),
 };
 
 export const TREE = {

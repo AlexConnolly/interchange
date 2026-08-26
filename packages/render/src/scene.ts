@@ -1390,7 +1390,13 @@ export class Renderer {
       b.dispose();
     }
     this.scatterBatches = models.map((model) => {
-      const mesh = new InstancedMesh(model.body, litMaterial({}), capacity);
+      const mesh = new InstancedMesh(
+        model.body,
+        // Trees. The one layer whose leaves may change shape as well as colour,
+        // because a scatter model's origin is the foot of its own trunk.
+        litMaterial({ shrinkLeaves: true }),
+        capacity,
+      );
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.frustumCulled = false;
@@ -2294,8 +2300,8 @@ function lerpColour(into: Color, from: RGB, to: RGB, k: number): void {
  *   they get darker in winter, not lighter.
  */
 function litMaterial(
-  { livery, takes = 1, to = SNOW.lit }:
-  { livery?: RGB; takes?: number; to?: RGB },
+  { livery, takes = 1, to = SNOW.lit, shrinkLeaves = false }:
+  { livery?: RGB; takes?: number; to?: RGB; shrinkLeaves?: boolean },
 ): MeshLambertMaterial {
   // Every lit material carries the hue ramp, applied at the end of this
   // function so it chains onto the snow, cloud and livery injections below
@@ -2311,6 +2317,7 @@ function litMaterial(
     shader.uniforms.uAutumn = AUTUMN_UNIFORM;
     shader.uniforms.uSpringLeaf = { value: new Color(...SPRING_LEAF) };
     shader.uniforms.uAutumnLeaf = { value: new Color(...AUTUMN_LEAF) };
+    shader.uniforms.uBareLeaf = { value: new Color(...BARE_LEAF) };
     shader.uniforms.uSnowTake = { value: takes };
     shader.uniforms.uSnowColour = { value: snowColour };
     shader.uniforms.uCloud = CLOUD_AMOUNT;
@@ -2325,6 +2332,7 @@ uniform float uSpring;
 uniform float uAutumn;
 uniform vec3 uSpringLeaf;
 uniform vec3 uAutumnLeaf;
+uniform vec3 uBareLeaf;
 varying vec3 vSkyPos;
 ${shader.vertexShader}`;
     if (tint) {
@@ -2359,13 +2367,27 @@ ${vs}`.replace(
      * Broadleaf models are swapped for `tree_bare` in deep winter anyway; this is
      * what carries the fortnight either side of the swap, so nothing snaps.
      */
+    /*
+     * The shrink is *only* for geometry whose origin is the thing it hangs on.
+     *
+     * Scaling a vertex about the object origin is right for a tree — the origin
+     * is the foot of the trunk, so the canopy pulls in towards the stem — and
+     * catastrophic for the hedges, which are one mesh per chunk with world
+     * coordinates baked into the vertices. There, the same line would drag every
+     * hedge in the chunk towards its corner. So the hedges take the colour and
+     * not the shape, and a hedge in February is twigs by being grey-brown rather
+     * than by being smaller.
+     */
+    const shrink = shrinkLeaves
+      ? `	float leafShrink = mix( 0.34, 1.0, clamp( uLeaf, 0.0, 1.0 ) );
+	transformed.xz *= mix( 1.0, leafShrink, leaf );
+	transformed.y *= mix( 1.0, mix( 0.86, 1.0, clamp( uLeaf, 0.0, 1.0 ) ), leaf );
+`
+      : '';
     vs = vs.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
-	float leafShrink = mix( 0.34, 1.0, clamp( uLeaf, 0.0, 1.0 ) );
-	transformed.xz *= mix( 1.0, leafShrink, leaf );
-	transformed.y *= mix( 1.0, mix( 0.86, 1.0, clamp( uLeaf, 0.0, 1.0 ) ), leaf );
-#ifdef USE_INSTANCING
+${shrink}#ifdef USE_INSTANCING
 	vSkyPos = ( modelMatrix * instanceMatrix * vec4( transformed, 1.0 ) ).xyz;
 #else
 	vSkyPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
@@ -2430,6 +2452,10 @@ ${shader.fragmentShader}`.replace(
 	 */
 	vColor = mix( vColor, uSpringLeaf, clamp( uSpring * leaf * 0.85, 0.0, 1.0 ) );
 	vColor = mix( vColor, uAutumnLeaf, clamp( uAutumn * leaf * 0.92, 0.0, 1.0 ) );
+	// And then bare, but only once the turn is over: in October the leaf is half
+	// gone and the gold is at its peak, and blending the two there gives mud.
+	vColor = mix( vColor, uBareLeaf,
+		clamp( ( 1.0 - uLeaf ) * ( 1.0 - uAutumn ) * leaf * 0.88, 0.0, 1.0 ) );
 	// Capped at 0.9, and the cap matters more than the colour. Mixing all the
 	// way to one flat white erased every fold in the ground and every crop row
 	// with it: a field in January became a blank sheet, and a district of blank
@@ -2485,6 +2511,17 @@ const AUTUMN_UNIFORM = { value: 0 };
  */
 const SPRING_LEAF: RGB = [0.62, 0.78, 0.30];
 const AUTUMN_LEAF: RGB = [0.80, 0.44, 0.16];
+
+/**
+ * And bare: what is left of a hedge in February.
+ *
+ * A hawthorn hedge does not disappear in winter, it goes to twigs — grey-brown,
+ * and *darker* than the summer green, which is the opposite of what one expects
+ * from "the leaves have gone". It matters because a hedge is a line, and the
+ * lines are what hold the picture together: they have to still be there in
+ * January, just not green.
+ */
+const BARE_LEAF: RGB = [0.38, 0.34, 0.27];
 
 /**
  * Weather, which is three numbers and the best value for money in the file.

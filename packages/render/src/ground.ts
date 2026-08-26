@@ -304,6 +304,29 @@ function buildHedges(
     const ext = (t: number, l: number): [number, number] => (
       alongZ ? [t, l] : [l, t]);
 
+    /*
+     * The two green kinds are vegetation; the other two are not.
+     *
+     * `m.leaf` is a pen — see `Mesh.leaf` — so it has to be set before the
+     * geometry and cleared after, and this is exactly why it is a pen rather
+     * than a property of the mesh: the same function draws a hawthorn hedge and
+     * a dry stone wall a yard apart, and a wall that turned gold in October
+     * would be worse than nothing.
+     */
+    /*
+     * Partly, not wholly — the attribute is a *degree* and a hedge is not a
+     * canopy.
+     *
+     * At 1 every hedge in the district went the same full gold as the beech
+     * woods in October, and two things went wrong at once: the country read as
+     * straw, and the hedges became hard to tell from the honey stone walls, which
+     * is the one distinction the boundary code exists to draw. A hawthorn hedge
+     * does turn, but it is thick, twiggy and half evergreen at the base, so it
+     * goes a duller russet and it does it less. An overgrown one is more canopy
+     * and less hedge, so it goes further.
+     */
+    m.leaf = kind === 0 ? 0.55 : kind === 1 ? 0.72 : 0;
+
     if (kind === 1) {
       // Overgrown: nearly twice as thick and a little taller, and it keeps the
       // hedge colour — an old hedge is the same plant, left alone.
@@ -340,18 +363,41 @@ function buildHedges(
 
     if (kind === 3) {
       /*
-       * Dry stone. Vertical rather than tapered, because that is what makes it
-       * read as *built* — a hedge narrows toward the top and a wall does not, and
-       * that silhouette difference survives at any zoom the game is played at.
-       * A course of paler stone along the top catches the light the way a coping
-       * does.
+       * Dry stone, in courses. Cotswold, which is a shape before it is a colour.
+       *
+       * The first version was one wedge a third thicker than a hedge and a fifth
+       * shorter, with a cap on it — which is to say it was as thick as it was
+       * tall, and a thing as thick as it is tall is a boulder. "They just look
+       * like big rocks" was exactly right.
+       *
+       * A real one is about half a metre thick and over a metre high, so it is
+       * *thinner* than the hedge beside it and taller, and it is built in
+       * horizontal courses that batter very slightly inward as they rise. Three
+       * bands of alternating tone is what carries that at forty pixels: you
+       * cannot see a stone, but you can see the coursing, and coursing is what
+       * separates a wall from a heap.
+       *
+       * The coping on top is the giveaway of the region — thin stones set on
+       * edge, standing proud of the wall face and catching the sun on their top
+       * edges — so it is narrower than the courses below it and the palest thing
+       * in the boundary.
        */
-      const stone = faded((jitter & 3) === 0 ? WALL.stone : WALL.shadow, inf);
-      const cap = faded(WALL.stone, inf);
-      const [hx, hz] = ext(T * 1.3, 0.5);
-      wedge(m, cx, base, cz, hx, hz, h * 0.82, 0.97, stone);
-      const [cx2, cz2] = ext(T * 1.45, 0.5);
-      wedge(m, cx, base + h * 0.82, cz, cx2, cz2, h * 0.09, 0.9, cap);
+      const dark = faded(WALL.shadow, inf);
+      const pale = faded(WALL.stone, inf);
+      const cap = faded(WALL.coping, inf);
+      // Slightly thinner than a hedge, and battered in as it goes up.
+      const courses: [number, number, number, RGB][] = [
+        [0.00, 0.34, 0.92, (jitter & 1) === 0 ? pale : dark],
+        [0.34, 0.66, 0.86, (jitter & 1) === 0 ? dark : pale],
+        [0.66, 0.88, 0.80, (jitter & 2) === 0 ? pale : dark],
+      ];
+      for (const [from, to, thick, colour] of courses) {
+        const [hx, hz] = ext(T * thick, 0.5);
+        wedge(m, cx, base + h * from, cz, hx, hz, h * (to - from), 0.99, colour);
+      }
+      // And the coping, proud of the face and the palest course.
+      const [px, pz] = ext(T * 0.88, 0.5);
+      wedge(m, cx, base + h * 0.88, cz, px, pz, h * 0.16, 0.94, cap);
       return;
     }
 
@@ -410,6 +456,15 @@ function buildHedges(
       }
     }
   }
+  /*
+   * Put the pen back down.
+   *
+   * `m.leaf` is a pen and this mesh is shared with the ground itself, so leaving
+   * it up would make the next thing drawn into it — a field, a road — turn gold
+   * in October. Once at the end rather than after every boundary, because
+   * nothing between here and there draws anything.
+   */
+  m.leaf = 0;
 }
 
 /** A tapered box: four sides and a narrower top. Six quads and it is a hedge. */
