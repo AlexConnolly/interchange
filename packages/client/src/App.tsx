@@ -2606,6 +2606,18 @@ export function App(): JSX.Element {
       );
       heard.length = 0;
       for (let i = 0; i < src.vehicleCount; i++) {
+        /*
+         * Engines only, which is the third thing the livestock broke.
+         *
+         * They ride in the vehicle arrays, so they were being handed engine
+         * voices — and there are forty-eight of them, nearly stationary, so they
+         * won the nearest-first contest and held the whole pool. The engine you
+         * could hear was a sheep at a fixed distance, which is why the sound
+         * stopped tracking the lorry you were watching: "the tractor noises don't
+         * seem to be distant from the camera any more". The distance model was
+         * fine. It was aimed at the wrong things.
+         */
+        if (src.vMotor[i] === 0) continue;
         const model = src.vModel[i];
         heard.push({
           id: src.vId[i],

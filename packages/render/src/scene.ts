@@ -1697,8 +1697,10 @@ export class Renderer {
     // generator for nothing.
     if (this.counts.length !== models * liveries) {
       this.counts = new Int32Array(models * liveries);
+      this.lampCounts = new Int32Array(models * liveries);
     }
     this.counts.fill(0);
+    this.lampCounts.fill(0);
 
     for (let i = 0; i < src.vehicleCount; i++) {
       const mi = src.vModel[i] % models;
@@ -1766,7 +1768,9 @@ export class Renderer {
         this.tmp.updateMatrix();
         const at = this.counts[slot]++;
         batch.setMatrixAt(at, this.tmp.matrix);
-        if (src.vMotor[i]) this.lamps[mi][li]?.setMatrixAt(at, this.tmp.matrix);
+        if (src.vMotor[i]) {
+          this.lamps[mi][li]?.setMatrixAt(this.lampCounts[slot]++, this.tmp.matrix);
+        }
         continue;
       }
       if (seen === undefined || Math.abs(seen.x - x) + Math.abs(seen.z - z) > 3) {
@@ -1885,8 +1889,10 @@ export class Renderer {
       // is the same lorry drawn by a material that ignores the light.
       const n = this.counts[slot]++;
       batch.setMatrixAt(n, this.tmp.matrix);
-      // No lamps on livestock. See `vMotor`.
-      if (src.vMotor[i]) this.lamps[mi][li]?.setMatrixAt(n, this.tmp.matrix);
+      // No lamps on livestock, and packed on their own counter — see `lampCounts`.
+      if (src.vMotor[i]) {
+        this.lamps[mi][li]?.setMatrixAt(this.lampCounts[slot]++, this.tmp.matrix);
+      }
       /*
        * A few per cent of colour variation per vehicle, from its own id.
        *
@@ -1935,8 +1941,9 @@ export class Renderer {
           // Nothing to draw in daylight, and switching the batch off outright
           // is cheaper than drawing several hundred transparent quads at zero
           // opacity.
-          lamp.count = n;
-          lamp.visible = n > 0 && this.night > 0.01;
+          const ln = this.lampCounts[mi * liveries + li];
+          lamp.count = ln;
+          lamp.visible = ln > 0 && this.night > 0.01;
           lamp.instanceMatrix.needsUpdate = true;
         }
       }
@@ -1944,6 +1951,21 @@ export class Renderer {
   }
 
   private counts = new Int32Array(0);
+  /**
+   * Lamp instances used per batch, counted separately from bodies.
+   *
+   * Because not everything drawn from the vehicle arrays has headlamps, and the
+   * first attempt at that — skipping the lamp's `setMatrixAt` for an animal —
+   * does not work. The lamp mesh's instance count was still the *body* count, so
+   * every slot that was skipped kept whatever matrix it last held and drew a pair
+   * of headlamps at a stale position. The sheep still had lights on them at night;
+   * they were simply somebody else's lights.
+   *
+   * A lamp does not have to share its body's instance index, so the fix is to
+   * pack them densely on their own counter and let the mesh draw only what was
+   * actually written.
+   */
+  private lampCounts = new Int32Array(0);
 
   /**
    * How fast the world moves, as a multiplier on real time. 1, 2 or 4.

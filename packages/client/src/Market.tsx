@@ -1,41 +1,40 @@
 /**
- * The market: what you are holding, and what somebody will give you for it.
+ * The market: who wants what you are holding, and what they will give for it.
  *
- * This screen exists because the player found a hole the design had not: owning a
- * producer left you with stock and nothing to do with it. Hauling it into another
- * place of your own is a shunt and pays nothing; hauling it to somebody else's
- * works pays a *fare* rather than a price. So a farm's output piled up in its shed
- * and the only question the game could answer about it was "which lorry".
+ * This screen exists because the player found a hole the design had not. Owning a
+ * producer left you with stock and nothing to do with it — a shunt into another
+ * place of your own pays nothing, and a run to somebody else's works pays a
+ * *fare* rather than a price — so a farm's output piled up in its shed and the
+ * only question the game could answer about it was "which lorry".
  *
- * A market answers a different question — "what is this worth, and when do you
- * want the money" — and it needs no lorry at all. Which is deliberate: a haulage
- * game should have exactly one thing you can do without a vehicle, and it should
- * pay worse than the vehicle would.
+ * ## Buyers, not terms
  *
- * ## Why the terms are the whole interface
+ * The first version of this was a grid: three rows reading "Cash today", "In 10
+ * days", "In 30 days", each with Quarter / Half / All buttons. It was a correct
+ * model of the mechanic and a horrible thing to look at — "that is a horrific
+ * system" — because it asked the player to compose an abstraction out of two
+ * dropdowns. Nobody thinks "I would like half of my milk on ten-day terms".
  *
- * There is one axis: **patience**. Cash today at a third of the value, ten days at
- * two thirds, a month at all of it. No haggling, no market movements, no supply
- * and demand — those would each be a system to learn, and none of them would say
- * anything the three columns do not. What the player is actually deciding is
- * whether they need money *now*, which is a real decision in a business where the
- * next lorry costs six thousand pounds.
+ * So the same mechanic is dressed as what it would actually be: **named buyers
+ * with standing offers.** A dairy wants forty tonnes and pays on the nail; a
+ * wholesaler wants a hundred and pays in a month, better. You take an offer or
+ * you leave it. The tonnage and the terms come *with* the offer instead of being
+ * assembled from parts, which is one decision instead of three, and it reads as a
+ * world with people in it rather than a settings panel.
+ *
+ * The buyers are invented and stable per cargo per week — see `marketBuyers` in
+ * the simulation. They are not real places on the map, and that is deliberate: a
+ * real place would need a lorry, and the whole point of this screen is that it is
+ * the one thing you can do without one.
  */
 
-import { useState, type JSX } from 'react';
+import { type JSX } from 'react';
 import { type World } from '@interchange/sim';
 import { content } from '@interchange/data';
 import { money } from './Markers.tsx';
 import { Icon } from './Icons.tsx';
 
 const C = content();
-
-/** How much of a line to sell. Coarse on purpose: this is not a spreadsheet. */
-const SHARES = [
-  { label: 'Quarter', of: 0.25 },
-  { label: 'Half', of: 0.5 },
-  { label: 'All', of: 1 },
-];
 
 export function Market({
   world, onClose, onSold,
@@ -44,25 +43,26 @@ export function Market({
   onClose: () => void;
   onSold: () => void;
 }): JSX.Element {
-  /** Which cargo's terms are open. One at a time: this is a decision, not a form. */
-  const [open, setOpen] = useState(-1);
   const held = world.stockHeld();
   const pending = world.pendingSales();
+  const offers = world.marketBuyers();
 
   return (
-    <div className="panel market">
+    <div className="bubble fixed market">
       <div className="sheet-head">
-        <span className="sheet-icon"><Icon id="terminal" size={24} /></span>
+        <span className="sheet-icon"><Icon id="builders-merchant" size={24} /></span>
         <div className="grow">
           <div className="sheet-title">Market</div>
           <div className="sheet-sub">
-            {held.length === 0 ? 'Nothing in stock' : `${held.length} to sell`}
+            {offers.length === 0
+              ? held.length === 0 ? 'Nothing in stock' : 'No buyers this week'
+              : `${offers.length} ${offers.length === 1 ? 'buyer' : 'buyers'}`}
           </div>
         </div>
         <button className="x" onClick={onClose} aria-label="Close">×</button>
       </div>
 
-      <div className="panel-body">
+      <div className="bubble-body">
         {held.length === 0 && (
           <div className="why">
             Nothing to sell yet. Stock builds up at places you own — a farm fills
@@ -70,65 +70,49 @@ export function Market({
           </div>
         )}
 
-        {held.map((h) => {
-          const cargo = C.cargo[h.cargo];
-          const offers = world.marketOffers(h.cargo);
-          return (
-            <div className="stock-card" key={h.cargo}>
-              <button
-                className="stock-head"
-                onClick={() => setOpen(open === h.cargo ? -1 : h.cargo)}
-              >
-                <span className="swatch" style={{ background: cargo.colour }} />
-                <span className="grow">
-                  <span className="stock-name">{cargo.name}</span>
-                  {/*
-                    * What it cost to make, which is the number that turns a pile
-                    * of stock into a decision. Derived from the recipe that makes
-                    * it — the value of a thing's inputs *is* what it cost, in a
-                    * game where inputs are the only cost.
-                    */}
-                  <span className="stock-sub">
-                    {h.tonnes}t · worth {money(h.value)}/t
-                  </span>
-                </span>
-                <span className="stock-total">{money(h.value * h.tonnes)}</span>
-                <span className="stock-go">{open === h.cargo ? '⌄' : '›'}</span>
-              </button>
+        {held.length > 0 && offers.length === 0 && (
+          <div className="why">
+            Nobody is buying what you hold this week. Offers change every week.
+          </div>
+        )}
 
-              {open === h.cargo && (
-                <div className="terms">
-                  {offers.map((o, term) => (
-                    <div className="term" key={o.days}>
-                      <span className="term-when">
-                        {o.days === 0 ? 'Cash today' : `In ${o.days} days`}
-                      </span>
-                      <span className="term-rate">{money(o.pence)}<i>/t</i></span>
-                      <span className="term-buttons">
-                        {SHARES.map((sh) => {
-                          const tonnes = Math.max(1, Math.floor(h.tonnes * sh.of));
-                          return (
-                            <button
-                              key={sh.label}
-                              className="term-sell"
-                              title={`${tonnes}t for ${money(o.pence * tonnes)}`}
-                              onClick={() => {
-                                if (world.sellOnMarket(h.cargo, tonnes, term)) {
-                                  setOpen(-1);
-                                  onSold();
-                                }
-                              }}
-                            >{sh.label}</button>
-                          );
-                        })}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+        {offers.map((o) => {
+          const cargo = C.cargo[o.cargo];
+          return (
+            <button
+              key={o.key}
+              className="offer"
+              onClick={() => { if (world.acceptOffer(o.key)) onSold(); }}
+              title={`${o.buyer} takes ${o.tonnes}t of ${cargo.name.toLowerCase()}`}
+            >
+              <span className="swatch" style={{ background: cargo.colour }} />
+              <span className="grow">
+                <span className="offer-buyer">{o.buyer}</span>
+                <span className="offer-what">
+                  {o.tonnes}t of {cargo.name.toLowerCase()}
+                  {' · '}
+                  {o.days === 0 ? 'pays on collection' : `pays in ${o.days} days`}
+                </span>
+              </span>
+              <span className="offer-sum">
+                {money(o.pence)}
+                <i>{money(o.pence / o.tonnes)}/t</i>
+              </span>
+            </button>
           );
         })}
+
+        {held.length > 0 && <div className="head">In your sheds</div>}
+        {held.map((h) => (
+          <div className="fact" key={h.cargo}>
+            <span className="swatch" style={{ background: C.cargo[h.cargo].colour }} />
+            <span className="grow">
+              <span className="fact-name">{C.cargo[h.cargo].name}</span>
+              <span className="fact-sub">worth {money(h.value)}/t</span>
+            </span>
+            <span className="fact-body">{h.tonnes}t</span>
+          </div>
+        ))}
 
         {pending.length > 0 && <div className="head">Waiting to be paid</div>}
         {pending.map((s, i) => {
@@ -137,7 +121,9 @@ export function Market({
             <div className="tx" key={`${s.dueTick}-${i}`}>
               <span className="swatch" style={{ background: C.cargo[s.cargo].colour }} />
               <span className="grow">
-                <span className="tx-why">{s.tonnes}t of {C.cargo[s.cargo].name.toLowerCase()}</span>
+                <span className="tx-why">
+                  {s.tonnes}t of {C.cargo[s.cargo].name.toLowerCase()}
+                </span>
                 <span className="tx-when">
                   {days === 0 ? 'due today' : days === 1 ? 'tomorrow' : `in ${days} days`}
                 </span>
@@ -147,6 +133,7 @@ export function Market({
           );
         })}
       </div>
+      <span className="bubble-arrow" />
     </div>
   );
 }

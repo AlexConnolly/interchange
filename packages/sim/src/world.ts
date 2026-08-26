@@ -21,6 +21,7 @@ import {
   CompanyTable, Charter, Line, LINE_COUNT,
   ServiceTable, StopAction, MAX_STOPS, ENTRANT_NAMES, hashEconomy, SITE_PRICE_SCALE, haulageRate, HAUL_ALLOWANCE, RATE_WEIGHT_BY_TIER, CHARTER_REQUIREMENTS, stepFinance,
   JOURNAL, MoneyKind, GATE_WEEKLY_TONNES, GATE_REFERENCE_TILES,
+  BUYER_NAMES,
   MARKET_TERMS, MAX_PENDING_SALES, RETAIL_PCT, GOODS_SCALE,
   type MarketOffer,
 } from './economy.ts';
@@ -1026,6 +1027,109 @@ export class World {
     return true;
   }
 
+  /**
+   * Who is buying this week, and what they will give.
+   *
+   * The same mechanic as the three abstract terms it replaces — a price against a
+   * settlement delay — dressed as the thing it would actually be. A grid of
+   * "Cash today / In 10 days / In 30 days" crossed with "Quarter / Half / All"
+   * asks the player to compose an abstraction out of two dropdowns, and nobody
+   * thinks "I would like half of my milk on ten-day terms". A named buyer wanting
+   * forty tonnes by Friday is one decision, and it reads as a world with people in
+   * it rather than a settings panel.
+   *
+   * Generated rather than stored, from the week and the cargo, so the list is
+   * stable while you look at it and different next week without anything having to
+   * be saved. The buyers are invented and are not places on the map: a place on
+   * the map would need a lorry, and this screen is the one thing in the game you
+   * can do without one.
+   *
+   * Only for cargoes you actually hold — an offer you cannot take is furniture.
+   */
+  /**
+   * A small integer hash, for things that must look arbitrary and be stable.
+   *
+   * Not `this.rng`: drawing from the simulation's stream to decide what a *panel*
+   * shows would make the world's future depend on whether anybody opened a
+   * screen, which is the one thing determinism cannot survive. A pure function of
+   * its input has no such reach.
+   */
+  private static mix(n: number): number {
+    let x = n | 0;
+    x = Math.imul(x ^ (x >>> 16), 0x21f0aaad);
+    x = Math.imul(x ^ (x >>> 15), 0x735a2d97);
+    return (x ^ (x >>> 15)) >>> 0;
+  }
+
+  marketBuyers(): {
+    key: string; cargo: number; buyer: string; tonnes: number;
+    pence: number; days: number;
+  }[] {
+    const week = Math.floor(this.day / DAYS_PER_WEEK);
+    const out: {
+      key: string; cargo: number; buyer: string; tonnes: number;
+      pence: number; days: number;
+    }[] = [];
+    for (const h of this.stockHeld()) {
+      /*
+       * One or two buyers per cargo, chosen by a hash of the week so the same
+       * week always shows the same offers. Two at most: a list long enough to
+       * shop around in is a list long enough to be a chore.
+       */
+      const seed = h.cargo * 7919 + week * 104729;
+      const many = 1 + (World.mix(seed) % 2);
+      for (let i = 0; i < many; i++) {
+        const r1 = World.mix(seed + i * 31 + 1);
+        const r2 = World.mix(seed + i * 31 + 2);
+        const r3 = World.mix(seed + i * 31 + 3);
+        const term = MARKET_TERMS[r1 % MARKET_TERMS.length];
+        /*
+         * How much they want, capped by what you have. A buyer asking for more
+         * than you hold is an offer you cannot take, and an offer you cannot take
+         * is the thing this screen was full of before.
+         */
+        const want = Math.max(1, Math.min(h.tonnes, 8 + (r2 % 40)));
+        const rate = Math.max(1, Math.round((h.value * term.multiple) / 100));
+        out.push({
+          key: `${week}:${h.cargo}:${i}`,
+          cargo: h.cargo,
+          buyer: BUYER_NAMES[r3 % BUYER_NAMES.length],
+          tonnes: want,
+          pence: rate * want,
+          days: term.days,
+        });
+      }
+    }
+    // And nothing already sold: an offer is a one-off, not a standing order.
+    const live = out.filter((o) => !this.taken.has(o.key));
+    out.length = 0;
+    out.push(...live);
+    // Best price per tonne first, because that is what anybody scans for.
+    out.sort((a, b) => b.pence / b.tonnes - a.pence / a.tonnes);
+    return out;
+  }
+
+  /**
+   * Take one of this week's offers.
+   *
+   * Keyed by the offer's own string rather than by index, so a list that
+   * regenerates between the render and the click cannot sell the wrong thing —
+   * which an index would do silently and at the worst possible moment.
+   */
+  acceptOffer(key: string): boolean {
+    const offer = this.marketBuyers().find((o) => o.key === key);
+    if (!offer) return false;
+    if (this.taken.has(key)) return false;
+    if (!this.sellOnMarket(offer.cargo, offer.tonnes, MARKET_TERMS.findIndex(
+      (t) => t.days === offer.days,
+    ))) return false;
+    this.taken.add(key);
+    return true;
+  }
+
+  /** Offers already taken, so the same one cannot be sold twice in a week. */
+  private readonly taken = new Set<string>();
+
   /** Sales agreed and not yet paid, soonest first. */
   pendingSales(): { cargo: number; tonnes: number; pence: number; dueTick: number }[] {
     return [...this.pending].sort((a, b) => a.dueTick - b.dueTick);
@@ -1284,6 +1388,26 @@ export class World {
    */
   outputPerDay(site: number, cargo: number): number {
     return this.siteOutputRate(site, cargo);
+  }
+
+  /**
+   * Tonnes a day this site gets *through* of a cargo — its appetite.
+   *
+   * The mirror of `outputPerDay`, and the one fact that makes somebody else's
+   * works meaningful to a haulier: it says how often a lorry would have to turn
+   * up. Read off the recipe rather than measured, so it is right the moment the
+   * panel opens instead of after a week of watching.
+   */
+  intakePerDay(site: number, cargo: number): number {
+    if (site < 0 || site >= this.sites.count) return 0;
+    const def = this.sites.def[site];
+    const ins = this.recipes.inputs[def];
+    for (let i = 0; i < ins.length; i += 2) {
+      if (ins[i] !== cargo) continue;
+      const cyclesPerDay = TICKS_PER_DAY / Math.max(1, this.recipes.period[def]);
+      return Math.round(ins[i + 1] * cyclesPerDay);
+    }
+    return 0;
   }
 
   /** Units per day a site can supply of a networked cargo. */

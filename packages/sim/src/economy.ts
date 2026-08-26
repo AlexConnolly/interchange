@@ -800,3 +800,24 @@ export const RETAIL_PCT = 260;
  * game's systems, not a property of milk.
  */
 export const GOODS_SCALE = 51;
+
+/**
+ * Who buys things, for the market screen.
+ *
+ * Invented merchants rather than places on the map, and English rather than
+ * generic, because the list's whole job is to make a price feel like a
+ * transaction with somebody. "Hollins & Sons" wanting forty tonnes is a
+ * different thing to read than "Offer 3".
+ */
+export const BUYER_NAMES = [
+  'Hollins & Sons',
+  'Pethick Wholesale',
+  'The Co-operative',
+  'Ashby Brothers',
+  'Marchford Provisions',
+  'Netherby Trading',
+  'Wraycroft & Co',
+  'Lindley Merchants',
+  'Barrowclough Ltd',
+  'Sowerby Supply',
+] as const;

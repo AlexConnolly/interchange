@@ -128,6 +128,23 @@ export function Place({
     setCame(false);
   }, [site]);
 
+  /*
+   * The route line cannot outlive the row that asked for it.
+   *
+   * It is drawn on hover and cleared on un-hover, which is fine until the row
+   * stops existing while the pointer is still over it — close the panel, switch
+   * tab, drill into the arrange page, and `onMouseLeave` never fires because
+   * there is nothing left to leave. The line then stays on the map for ever with
+   * nothing on screen explaining it: "the lines between the A to B can sometimes
+   * be retained so the yellow thing is there."
+   *
+   * A hover is a *transient* thing owned by whatever is showing, so clearing it
+   * belongs in a teardown rather than in every handler that might be the last
+   * one. This runs on unmount and whenever the view changes underneath it, which
+   * is every way a row can vanish.
+   */
+  useEffect(() => () => actions.preview(-1, -1), [actions, site, tab, arranging]);
+
   if (site < 0 || site >= world.sites.count) return null;
   const def = C.industries[world.sites.def[site]];
   const mine = world.sites.owner[site] === world.player;
@@ -636,42 +653,46 @@ function Supply({
    */
   const cargo = C.cargo[group.cargo];
   const stock = world.sites.stockOf(site, group.cargo);
+  /*
+   * How much of it the place gets through in a day.
+   *
+   * The one number that makes an input meaningful to a haulier: it says how often
+   * a lorry would have to turn up. Read off the recipe rather than measured, so
+   * it is right the instant the panel opens rather than after a week of watching.
+   */
+  const perDay = world.intakePerDay(site, group.cargo);
   const run = !mine ? null
     : outward ? world.runOutOf(site, group.cargo)
       : world.runInto(site, group.cargo);
 
   if (!mine) {
-    // Somebody else's place: this is a reference list, not a control panel.
+    /*
+     * Somebody else's place: one line, and nothing to press.
+     *
+     * This used to be a card containing a card — a bordered box with the cargo
+     * name and the word "needed", and inside it a list of every supplier as a
+     * button. "That horrible square within a square and a *needed* — that's just
+     * plain wrong", and it was, for a reason worth naming: it was built as a
+     * control panel for a place the player has no control over. Nothing in it
+     * could be acted on, so every affordance it offered was a lie.
+     *
+     * What a player wants from somebody else's works is the *fact*: this is what
+     * goes into it, and this is the lorry it would take. That is one line, and it
+     * asks nothing.
+     */
     return (
-      <div className={`card supply ${group.owned ? 'met' : ''}`}>
-        <div className="card-line">
-          <span className="swatch" style={{ background: cargo.colour }} />
-          <strong>{cargo.name}</strong>
-          {group.owned
-            ? <span className="have">✓ yours</span>
-            : <span className="to">needed</span>}
-        </div>
-        {group.candidates.map((c) => (
-          <button
-            key={c.site}
-            className="driver"
-            onClick={() => onGo(c.site)}
-            onMouseEnter={() => onHover(c.site)}
-            onMouseLeave={() => onHover(-1)}
-          >
-            <span className="supply-icon" style={{ color: C.industries[world.sites.def[c.site]].colour }}>
-              <Icon id={C.industries[world.sites.def[c.site]].id} size={17} />
-            </span>
-            <span className="grow">
-              <span className="driver-name">{C.industries[world.sites.def[c.site]].name}</span>
-              <span className="driver-where">{c.distance} tiles away</span>
-            </span>
-            <span className="driver-no">go</span>
-          </button>
-        ))}
-        {group.candidates.length === 0 && group.hidden === 0 && (
-          <div className="why">Nothing in the district makes it.</div>
-        )}
+      <div className="fact">
+        <span className="swatch" style={{ background: cargo.colour }} />
+        <span className="grow">
+          <span className="fact-name">{cargo.name}</span>
+          <span className="fact-sub">
+            {perDay > 0 ? `${perDay} t a day` : 'takes it in'}
+          </span>
+        </span>
+        <span className="fact-body" title={`Wants a ${bodyFor(cargo.handling)}`}>
+          <BodyIcon handling={cargo.handling} />
+          {bodyFor(cargo.handling)}
+        </span>
       </div>
     );
   }
