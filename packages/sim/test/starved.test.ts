@@ -139,16 +139,13 @@ describe('supplying a place you own', () => {
   });
 });
 
-describe('trading into your own business', () => {
+describe('being paid', () => {
   /**
    * One run, from a farm you own to a works, for a fortnight.
    *
    * The same seed and the same two places both times, so the route, the tonnage
-   * and the distance are identical and the only difference is who owns the far
-   * end. Comparing two real hauls rather than reaching into the payment function
-   * is the point: it is the *rule* that matters — a tonne into your own business
-   * is worth more — and a test that called the payment directly would still pass
-   * if the rule were never reached from a delivery.
+   * and the distance are identical and the only thing that differs is who owns
+   * the far end.
    */
   function fortnight(ownFarEnd: boolean): { haulage: number; trading: number } {
     const w = createWorld({ seed: 1985, size: 128, townCount: 3, companyCount: 1 });
@@ -158,7 +155,6 @@ describe('trading into your own business', () => {
     w.companies.cash[w.player] = 500_000_00;
     w.primeStock();
 
-    // A farm and a works that takes what it makes.
     let farm = -1;
     let works = -1;
     let cargo = -1;
@@ -200,41 +196,75 @@ describe('trading into your own business', () => {
     };
   }
 
-  it('pays into Trading rather than Haulage, and pays half again', () => {
+  it('pays the fare for a load into somebody else s place', () => {
     const hire = fortnight(false);
-    const mine = fortnight(true);
-
-    // Hauling to somebody else is haulage and nothing else.
     expect(hire.haulage).toBeGreaterThan(0);
-    expect(hire.trading).toBe(0);
-
-    // Into your own, it is trading and nothing else.
-    expect(mine.trading).toBeGreaterThan(0);
-    expect(mine.haulage).toBe(0);
-
-    // And it is worth half again for the identical run.
-    expect(mine.trading / hire.haulage).toBeCloseTo(1.5, 1);
   });
 
-  it('cannot be a money printer, because a full shed accepts nothing', () => {
+  it('pays nothing at all for carrying your own goods to your own shed', () => {
     /*
-     * The property that makes better-than-market rates safe to hand out. A
-     * business earns only while goods are physically reaching it, so what it can
-     * ever earn is capped by what it actually gets through — there is no lump sum
-     * for owning anything and no revenue that arrives while you sleep.
+     * This paid half again the fare, on the reasoning that owning a business
+     * should beat hauling for hire. It does, but not like this: "I brought in two
+     * tons of milk and I made two point five grand", and "I shouldn't get paid to
+     * take my own stuff, I should get paid for the stuff itself." Both are the
+     * same objection and both are right — bringing milk into your own creamery is
+     * *buying stock*. Nothing has been sold and nobody has been served.
+     *
+     * The money in a chain you own comes out of its far end: the market, a
+     * standing order, or a shop counter.
+     */
+    const mine = fortnight(true);
+    expect(mine.haulage).toBe(0);
+    expect(mine.trading).toBe(0);
+  });
+
+  it('sells over a shop counter without anybody arranging it', () => {
+    /*
+     * "The village shop is the only place where whatever you give to it, as long
+     * as it's a thing, it always sells." Everything else needs a customer found
+     * for it; a shop faces the public, and the public turns up.
      */
     const w = createWorld({ seed: 1985, size: 128, townCount: 3, companyCount: 1 });
     w.primeStock();
-    let works = -1;
-    for (let s = 0; s < w.sites.count; s++) {
-      if (w.recipes.inputs[w.sites.def[s]].length > 0
-        && w.recipes.outputs[w.sites.def[s]].length > 0) { works = s; break; }
+    const src: { x: number; y: number; strength: number }[] = [];
+    for (let x = 8; x < 128; x += 12) {
+      for (let z = 8; z < 128; z += 12) src.push({ x, y: z, strength: 3.2 });
     }
-    w.sites.owner[works] = w.player;
-    const cargo = w.recipes.inputs[w.sites.def[works]][0];
-    const room = w.sites.roomFor(works, cargo);
-    expect(w.sites.addStock(works, cargo, room)).toBe(room);
-    expect(w.sites.addStock(works, cargo, 1)).toBe(0);
+    w.refreshInfluence(src);
+    w.companies.cash[w.player] = 500_000_00;
+    let shop = -1;
+    for (let s = 0; s < w.sites.count; s++) {
+      if (w.content.industries[w.sites.def[s]].id === 'village-shop') { shop = s; break; }
+    }
+    expect(w.buySite(shop).ok).toBe(true);
+    const produce = w.content.cargo.findIndex((c) => c.id === 'produce');
+
+    const before = w.companies.cash[w.player];
+    for (let d = 0; d < 6; d++) {
+      w.sites.addStock(shop, produce, 4);
+      for (let t = 0; t < TICKS_PER_DAY; t++) w.step();
+    }
+    expect(w.companies.cash[w.player]).toBeGreaterThan(before);
+    const till = w.moneyAt(shop).filter((r) => r.kind === MoneyKind.Counter);
+    expect(till.length).toBeGreaterThan(0);
+  });
+
+  it('does not sell over the counter for somebody else s shop', () => {
+    // The till belongs to whoever owns the shop. Nothing else in the game pays
+    // the player for trade they have no part in.
+    const w = createWorld({ seed: 1985, size: 128, townCount: 3, companyCount: 1 });
+    w.primeStock();
+    let shop = -1;
+    for (let s = 0; s < w.sites.count; s++) {
+      if (w.content.industries[w.sites.def[s]].id === 'village-shop') { shop = s; break; }
+    }
+    const produce = w.content.cargo.findIndex((c) => c.id === 'produce');
+    const before = w.companies.cash[w.player];
+    for (let d = 0; d < 6; d++) {
+      w.sites.addStock(shop, produce, 8);
+      for (let t = 0; t < TICKS_PER_DAY; t++) w.step();
+    }
+    expect(w.companies.cash[w.player]).toBe(before);
   });
 });
 

@@ -1661,3 +1661,105 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 }
 .from-change:hover { color: #4a3c14; }
 .driver.on { border-color: #d9a72e; background: rgba(244, 201, 93, 0.16); }
+
+/* ---- the market -------------------------------------------------------- */
+
+.market { width: 300px; }
+
+/* One cargo you hold. The head is a statement — how much, what it is worth —
+   and pressing it opens the terms, one line at a time, because choosing when to
+   be paid is a decision and not a form to fill in. */
+.stock-card { margin-bottom: 5px; }
+.stock-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid rgba(0, 0, 0, 0.10);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.035);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.stock-head:hover { background: #fff; }
+.stock-head .grow { display: flex; flex-direction: column; min-width: 0; }
+.stock-name { font-size: 12.5px; font-weight: 600; }
+.stock-sub { font-size: 10.5px; color: var(--ink-dim); }
+.stock-total {
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.stock-go { color: var(--ink-dim); font-size: 15px; line-height: 1; }
+
+/* The three terms. One axis — patience — so they read down as a scale rather
+   than across as options. */
+.terms { padding: 5px 2px 2px; }
+.term {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px;
+  border-radius: 8px;
+}
+.term:hover { background: rgba(0, 0, 0, 0.03); }
+.term-when { flex: 1; font-size: 11.5px; color: var(--ink-dim); }
+.term-rate {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 62px;
+  text-align: right;
+}
+.term-rate i { font-style: normal; font-weight: 400; font-size: 10px; color: var(--ink-dim); }
+.term-buttons { display: flex; gap: 3px; }
+.term-sell {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--ink);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+.term-sell:hover { background: #f4c95d; border-color: #d9a72e; color: #4a3c14; }
+
+/* ---- one page sliding onto another ------------------------------------
+
+   "When I said slide out, I didn't mean it should slide upwards. I meant that
+   nice little thing where the UI slides horizontally to the left, and then you
+   click back and it goes backwards."
+
+   Which is the phone-settings gesture, and the reason it reads so well is that
+   the *direction carries the meaning*: forward is leftward, back is rightward,
+   and the panel never changes size or position while it happens. What was here
+   before grew the bubble downwards and then dropped a page into it, which is a
+   new thing appearing rather than the same thing moving — and appearing has no
+   direction, so it cannot tell you which way you went.
+
+   Short and sharp: 190ms with a small overshoot going in. Long enough to see the
+   direction, too short to wait for. */
+
+.slide-in { animation: slide-from-right 190ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes slide-from-right {
+  from { opacity: 0; transform: translateX(26%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* And the pane behind it goes the other way, so a back press reads as reversing
+   rather than as a second forward step. */
+.slide-back { animation: slide-from-left 190ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes slide-from-left {
+  from { opacity: 0; transform: translateX(-26%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* The bubble clips its pages, or a sliding one is briefly visible outside the
+   rounded corner. `visible` elsewhere because the little arrow pokes out of the
+   bottom, so it is only the body that hides its overflow. */
+.bubble-body { overflow-x: hidden; }

@@ -69,6 +69,17 @@ export class SiteTable {
   readonly mothballedDays = new Int32Array(MAX_SITES);
   /** Deposit richness 0..100 for extraction sites; scales output. */
   readonly richness = new Uint8Array(MAX_SITES);
+  /**
+   * Sold over the counter since anybody last collected the figure, per cargo.
+   *
+   * A queue rather than a running total, and drained by `sellOverTheCounter` in
+   * the world. Sites are stepped in a module that deliberately knows nothing
+   * about companies or money — it deals in stock and cycles — so the fact that
+   * something sold is recorded here and *priced* somewhere that knows what a
+   * pound is.
+   */
+  readonly counter: Int32Array;
+
   /** Production multiplier 0..100 from the three-network requirement. */
   readonly powered = new Uint8Array(MAX_SITES);
   readonly watered = new Uint8Array(MAX_SITES);
@@ -118,6 +129,7 @@ export class SiteTable {
   constructor(cargoCount: number) {
     this.cargoCount = cargoCount;
     this.stock = new Int32Array(MAX_SITES * cargoCount);
+    this.counter = new Int32Array(MAX_SITES * cargoCount);
     this.capacity = new Int32Array(MAX_SITES * cargoCount);
   }
 
@@ -404,8 +416,23 @@ export function stepSites(
         const want = Math.max(1, Math.round(ins[i + 1] * scale));
         const have = sites.stockOf(s, ins[i]);
         if (have <= 0) continue;
-        sites.takeStock(s, ins[i], Math.min(want, have));
-        sold += Math.min(want, have);
+        const took = Math.min(want, have);
+        sites.takeStock(s, ins[i], took);
+        sold += took;
+        /*
+         * And it goes over a counter, which is what makes a shop a shop.
+         *
+         * "The village shop is the only place where whatever you give to it, as
+         * long as it's a thing, it always sells." Everything else in the district
+         * needs a buyer arranged — a lorry to somebody's works, or a sale on the
+         * market. A shop needs nobody: it faces the public, and the public turns
+         * up on its own.
+         *
+         * Recorded per cargo rather than as a lump so the owner's accounts can say
+         * what actually sold, and left for the world to price: this table knows
+         * about stock and cycles and has no business knowing about money.
+         */
+        sites.counter[s * cargoCount + ins[i]] += took;
       }
       /*
        * Trade, counted. `produced` is what the place has turned over, and for a

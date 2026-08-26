@@ -103,6 +103,12 @@ export function Place({
    */
   const [arranging, setArranging] = useState<{ cargo: number; from: number } | null>(null);
   /*
+   * Did we just come *back* from the sub-view? Only then does the main page slide
+   * in from the left — opening the panel fresh should not animate as though you
+   * had pressed back on something.
+   */
+  const [came, setCame] = useState(false);
+  /*
    * Follow the place.
    *
    * The camera glides when a place is opened, and the bubble has to stay on it
@@ -113,7 +119,12 @@ export function Place({
 
   // A new place resets to its first tab: the question "what is this" comes
   // before "what is it offering", always.
-  useEffect(() => { setTab('about'); setAssigning(-1); setArranging(null); }, [site]);
+  useEffect(() => {
+    setTab('about');
+    setAssigning(-1);
+    setArranging(null);
+    setCame(false);
+  }, [site]);
 
   if (site < 0 || site >= world.sites.count) return null;
   const def = C.industries[world.sites.def[site]];
@@ -176,7 +187,7 @@ export function Place({
           <button
             className="x"
             data-quiet
-            onClick={() => setArranging(null)}
+            onClick={() => { setArranging(null); setCame(true); }}
             aria-label="Back"
           >‹</button>
         ) : (
@@ -202,7 +213,7 @@ export function Place({
         * by showing all three at once.
         */}
       {arranging && (
-        <div className="bubble-body">
+        <div className="bubble-body slide-in">
           <Arrange
             world={world}
             site={site}
@@ -219,6 +230,16 @@ export function Place({
         </div>
       )}
 
+      {/*
+        * In and Out, not "Work" and "Supply".
+        *
+        * "It's not work. If I own it, it's not work" — quite right, and the two
+        * words were doing three jobs between them. What a place has going on is
+        * goods arriving and goods leaving, and that is true whether you own it or
+        * somebody else does: for a place of yours, In is what you have to arrange
+        * and Out is what it sells; for anybody else's, In is who could supply it
+        * and Out is the work they are offering. One pair of words, both readings.
+        */}
       <div className="tabs" role="tablist" hidden={arranging !== null}>
         <button
           className={`tab ${tab === 'about' ? 'on' : ''}`}
@@ -228,12 +249,12 @@ export function Place({
           className={`tab ${tab === 'work' ? 'on' : ''}`}
           onClick={() => setTab('work')}
           disabled={jobs === 0}
-        >Work{jobs > 0 && <em>{jobs}</em>}</button>
+        >Out{jobs > 0 && <em>{jobs}</em>}</button>
         <button
           className={`tab ${tab === 'supply' ? 'on' : ''}`}
           onClick={() => setTab('supply')}
           disabled={supplies.length === 0}
-        >Supply{supplies.length > 0 && <em>{supplies.length}</em>}</button>
+        >In{supplies.length > 0 && <em>{supplies.length}</em>}</button>
         {/*
           * Only for a place of yours, because it is the only place the question
           * makes sense. Somebody else's creamery has accounts and they are not
@@ -247,7 +268,10 @@ export function Place({
         )}
       </div>
 
-      <div className="bubble-body" hidden={arranging !== null}>
+      <div
+        className={`bubble-body${came ? ' slide-back' : ''}`}
+        hidden={arranging !== null}
+      >
         {tab === 'about' && (
           <About world={world} site={site} mine={mine} verdict={verdict} actions={actions} />
         )}
@@ -346,7 +370,7 @@ export function Place({
               );
             })}
 
-            {buyers.length > 0 && <div className="head">Who takes it</div>}
+            {buyers.length > 0 && <div className="head">Where it goes</div>}
             {buyers.map((b) => (
               <button
                 key={`${b.site}-${b.cargo}`}
@@ -382,7 +406,7 @@ export function Place({
             group={g}
             onGo={actions.goTo}
             onHover={(to) => actions.preview(to, site)}
-            onArrange={(cargo, from) => setArranging({ cargo, from })}
+            onArrange={(cargo, from) => { setCame(false); setArranging({ cargo, from }); }}
             onEnd={actions.endRun}
           />
         ))}

@@ -21,6 +21,8 @@ import {
   CompanyTable, Charter, Line, LINE_COUNT,
   ServiceTable, StopAction, MAX_STOPS, ENTRANT_NAMES, hashEconomy, SITE_PRICE_SCALE, haulageRate, HAUL_ALLOWANCE, RATE_WEIGHT_BY_TIER, CHARTER_REQUIREMENTS, stepFinance,
   JOURNAL, MoneyKind, GATE_WEEKLY_TONNES, GATE_REFERENCE_TILES,
+  MARKET_TERMS, MAX_PENDING_SALES, RETAIL_PCT, GOODS_SCALE,
+  type MarketOffer,
 } from './economy.ts';
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
 import { Hasher } from './hash.ts';
@@ -911,6 +913,184 @@ export class World {
     }
   }
 
+  /**
+   * What a tonne of something is worth, before anybody haggles.
+   *
+   * Derived from the content rather than authored, and the derivation is the
+   * point: a thing is worth what went into it. A cargo with no recipe behind it —
+   * milk out of a cow, stone out of a hole — is worth its own `basePrice`, and
+   * anything made from other things is worth the sum of what it consumes plus a
+   * margin for the making. So dairy is dearer than milk because it took six milk
+   * to make four dairy, and nobody had to type that in.
+   *
+   * This is also the "what did it cost me to produce" figure the market shows,
+   * seen from the other side: the value of a thing's inputs *is* what it cost to
+   * make, in a game where the inputs are the only cost.
+   */
+  valueOf(cargo: number): number {
+    if (cargo < 0 || cargo >= this.valueCache.length) return 0;
+    if (this.valueCache[cargo] > 0) return this.valueCache[cargo];
+    const base = (this.content.cargo[cargo]?.basePrice ?? 0) * GOODS_SCALE;
+    // Set before recursing, so a recipe that consumes what it makes terminates
+    // instead of eating the stack. No content should do that; content is data.
+    this.valueCache[cargo] = base;
+    let best = base;
+    for (const ind of this.content.industries) {
+      const made = ind.recipe.outputs[this.content.cargo[cargo].id];
+      if (!made || made <= 0) continue;
+      let inputs = 0;
+      for (const [id, amount] of Object.entries(ind.recipe.inputs)) {
+        const ci = this.content.cargoIndex.get(id);
+        if (ci === undefined || ci === cargo) continue;
+        inputs += this.valueOf(ci) * amount;
+      }
+      // A quarter on top for the making, which is the only thing in the game
+      // that says processing is worth doing at all.
+      const worth = Math.round((inputs / made) * 1.25) + base;
+      if (worth > best) best = worth;
+    }
+    this.valueCache[cargo] = best;
+    return best;
+  }
+
+  private readonly valueCache = new Float64Array(64);
+
+  /** What the market will pay for a tonne, on each of the three terms. */
+  marketOffers(cargo: number): MarketOffer[] {
+    const value = this.valueOf(cargo);
+    return MARKET_TERMS.map((t) => ({
+      days: t.days,
+      pence: Math.max(1, Math.round((value * t.multiple) / 100)),
+    }));
+  }
+
+  /**
+   * Everything you hold, cargo by cargo, wherever it is standing.
+   *
+   * Aggregated across places because that is the question the market asks — "how
+   * much milk have you got" — and the answer does not depend on which shed it is
+   * in. Where it is matters to a lorry and not to a buyer.
+   */
+  stockHeld(): { cargo: number; tonnes: number; value: number }[] {
+    const cargoCount = this.content.cargo.length;
+    const total = new Int32Array(cargoCount);
+    for (let s = 0; s < this.sites.count; s++) {
+      if (this.sites.owner[s] !== this.player) continue;
+      for (let c = 0; c < cargoCount; c++) total[c] += this.sites.stockOf(s, c);
+    }
+    const out: { cargo: number; tonnes: number; value: number }[] = [];
+    for (let c = 0; c < cargoCount; c++) {
+      if (total[c] > 0) out.push({ cargo: c, tonnes: total[c], value: this.valueOf(c) });
+    }
+    out.sort((a, b) => b.tonnes * b.value - a.tonnes * a.value);
+    return out;
+  }
+
+  /**
+   * Sell from stock. The goods go now; the money comes when it comes.
+   *
+   * Taken from the fullest shed first, which is both the obvious reading of "sell
+   * forty tonnes of milk" and the useful one: it clears the place most likely to
+   * be blocking its own production for want of room.
+   */
+  sellOnMarket(cargo: number, tonnes: number, term: number): boolean {
+    if (term < 0 || term >= MARKET_TERMS.length) return false;
+    if (tonnes <= 0) return false;
+    if (this.pending.length >= MAX_PENDING_SALES) return false;
+
+    const holders: { site: number; have: number }[] = [];
+    for (let s = 0; s < this.sites.count; s++) {
+      if (this.sites.owner[s] !== this.player) continue;
+      const have = this.sites.stockOf(s, cargo);
+      if (have > 0) holders.push({ site: s, have });
+    }
+    holders.sort((a, b) => b.have - a.have);
+    const held = holders.reduce((n, h) => n + h.have, 0);
+    let left = Math.min(tonnes, held);
+    if (left <= 0) return false;
+    const sold = left;
+    for (const h of holders) {
+      if (left <= 0) break;
+      const take = Math.min(left, h.have);
+      this.sites.takeStock(h.site, cargo, take);
+      left -= take;
+    }
+
+    const offer = this.marketOffers(cargo)[term];
+    this.pending.push({
+      cargo,
+      tonnes: sold,
+      pence: offer.pence * sold,
+      dueTick: this.tick + offer.days * TICKS_PER_DAY,
+    });
+    return true;
+  }
+
+  /** Sales agreed and not yet paid, soonest first. */
+  pendingSales(): { cargo: number; tonnes: number; pence: number; dueTick: number }[] {
+    return [...this.pending].sort((a, b) => a.dueTick - b.dueTick);
+  }
+
+  private readonly pending: {
+    cargo: number; tonnes: number; pence: number; dueTick: number;
+  }[] = [];
+
+  /**
+   * Pay out whatever has come due, and empty the shop tills.
+   *
+   * Both are money that arrives without a lorry, which is why they settle
+   * together: a till and a buyer's cheque are the two incomes in this game that
+   * do not depend on where a vehicle is.
+   */
+  private settleSales(): void {
+    for (let i = this.pending.length - 1; i >= 0; i--) {
+      const sale = this.pending[i];
+      if (sale.dueTick > this.tick) continue;
+      this.companies.post(this.player, Line.Trading, sale.pence);
+      this.note(NONE, MoneyKind.Market, sale.pence, sale.cargo, sale.tonnes);
+      this.pending.splice(i, 1);
+    }
+    this.sellOverTheCounter();
+  }
+
+  /**
+   * A shop's till, emptied.
+   *
+   * The one place that needs no sale arranged: whatever reaches its shelves goes
+   * out of the door on its own, because it faces the public and the public turns
+   * up. That is what makes a shop the cheapest thing worth owning and the natural
+   * first business — everything else in the district needs a customer found for
+   * it.
+   *
+   * Priced at the goods own value rather than at a fare, because this is a sale
+   * and not a journey. Retail beats the market's best term, which is the whole
+   * reason to own the shop rather than to sell the same crate wholesale.
+   */
+  private sellOverTheCounter(): void {
+    const cargoCount = this.content.cargo.length;
+    for (let s = 0; s < this.sites.count; s++) {
+      if (this.sites.owner[s] !== this.player) continue;
+      /*
+       * Only a place that actually faces the public.
+       *
+       * The first version took "makes nothing" to mean "is a shop", which a
+       * concrete plant also satisfies — so it sold aggregate over a counter to
+       * passers-by. There is no rule of thumb here that works; a shop is a shop
+       * because the content says it is.
+       */
+      if (!this.content.industries[this.sites.def[s]]?.retail) continue;
+      for (let c = 0; c < cargoCount; c++) {
+        const i = s * cargoCount + c;
+        const sold = this.sites.counter[i];
+        if (sold <= 0) continue;
+        this.sites.counter[i] = 0;
+        const pence = Math.round((this.valueOf(c) * sold * RETAIL_PCT) / 100);
+        this.companies.post(this.player, Line.Trading, pence);
+        this.note(s, MoneyKind.Counter, pence, c, sold);
+      }
+    }
+  }
+
   private stepDay(): void {
     // The farming year, once a day. The season step is usually a no-op; the
     // catch-up brings on whatever no tractor has got round to.
@@ -919,6 +1099,8 @@ export class World {
 
     // Standing orders, on the day the week turns.
     if (this.day % DAYS_PER_WEEK === 0) this.settleStandingOrders();
+    // And the money that needs no lorry: the tills and the market.
+    this.settleSales();
 
     /*
      * Approval drifts back toward indifference.
@@ -1617,41 +1799,49 @@ export class World {
     const dist = Math.max(direct, Math.min(this.vehicles.haulDistance[vehicle], direct * HAUL_ALLOWANCE));
     const rate = haulageRate(this.cargoPrice[cargo], dist, this.cargoRateWeight[cargo]);
     /*
-     * A tonne into a business of your own is worth half again.
+     * You are paid when goods *leave* you, and not when they arrive.
      *
-     * This is the only income owning a business has, and until now there was
-     * none at all: the ledger had twelve lines and not one of them was goods
-     * sold, so owning a creamery earned exactly nothing beyond the right to haul
-     * its output like anybody else's. The ladder's top half had no payoff in it.
+     * This was the wrong way round and it took two reports to see how wrong.
+     * Delivering into a place of your own paid half again the fare, on the
+     * reasoning that owning a business should beat hauling for hire. It does — but
+     * not like this: "I brought in two tons of milk and I made two point five
+     * grand", and "I shouldn't get paid to take my own stuff, I should get paid
+     * for the stuff itself." Both are the same objection and both are right.
+     * Bringing milk into your own creamery is *buying stock*. Nothing has been
+     * sold, nobody has been served, and no money has been made.
      *
-     * Paid per tonne actually delivered, and that is the important part — "it
-     * obviously feeds so you don't just get 100k out of nowhere". There is no
-     * lump sum for owning anything and no revenue that arrives while you sleep.
-     * A business earns when goods physically reach it, at the rate your lorries
-     * can bring them, and it stops earning the moment its sheds are full because
-     * a full shed accepts nothing. So the ceiling on what a business can make
-     * you is what it actually gets through, which is the property that makes
-     * this safe to hand out at better-than-market rates.
+     * So arriving somewhere you own pays nothing at all — whether the load came
+     * off your own farm (a shunt) or somebody else's (a purchase). Which leaves
+     * three ways to be paid, and every one of them is a sale:
      *
-     * Against the haulage rate rather than a price of its own, deliberately.
-     * `basePrice` looks like it should be the goods price and is not — it enters
-     * the rate at eighteen per cent, so a tonne of produce contributes ninety
-     * pence against seven hundred pounds of distance money, and charging it
-     * would be charging nothing. Expressing the trade as a multiple of the fare
-     * needs no second price scale, no wholesale-and-retail bookkeeping, and no
-     * new number the content has to keep consistent with the old one: one
-     * constant, and every load in the game is now a live question of whether it
-     * is worth more on somebody else's contract or on your own shelves.
+     *   **The full fare**, for a load into somebody else's place. You carried it
+     *   and they took it: that is the haulage business.
+     *   **The gate price**, when somebody collects from a place of yours. A sale
+     *   with the carriage deducted — see `settleStandingOrders`.
+     *   **The counter**, when a shop of yours sells what is on its shelves. See
+     *   `sellOverTheCounter`, which is what makes owning a consumer worth
+     *   anything at all.
+     *
+     * And that finally makes vertical integration mean the right thing. Owning
+     * the farm *and* the shop is not free freight; it is keeping the margin at
+     * every step instead of paying it away — the farm's output does not have to be
+     * sold at the gate, and the shop's shelves do not have to be bought in.
      */
     const own = !isTown && target >= 0 && target < this.sites.count
       && this.sites.owner[target] === company;
-    const pence = Math.round(
-      rate * tonnes * (own ? this.content.balance.ownTradePct / 100 : 1),
-    );
-    this.companies.post(company, own ? Line.Trading : Line.Haulage, pence);
+    const pence = own ? 0 : Math.round(rate * tonnes);
+    if (!own) this.companies.post(company, Line.Haulage, pence);
     if (company === this.player && !isTown && target >= 0) {
-      this.note(target, own ? MoneyKind.Traded : MoneyKind.Delivered,
-                pence, cargo, tonnes);
+      /*
+       * Arrivals are journalled even at nothing.
+       *
+       * A shop whose shelves fill from your own farm and whose accounts stay
+       * blank reads as a bug; a row saying two tonnes arrived and cost nothing
+       * answers the question the blank would raise.
+       */
+      this.note(
+        target, own ? MoneyKind.Moved : MoneyKind.Delivered, pence, cargo, tonnes,
+      );
     }
     /*
      * And say so, if it was the player's.

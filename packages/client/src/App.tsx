@@ -37,6 +37,7 @@ import { Planning } from './Planning.tsx';
 import { Dock } from './Dock.tsx';
 import { Icon } from './Icons.tsx';
 import { Owned, Contracts } from './Owned.tsx';
+import { Market } from './Market.tsx';
 import { Status } from './Status.tsx';
 import { Driver } from './Driver.tsx';
 import { Place, type PlaceActions } from './Place.tsx';
@@ -255,7 +256,8 @@ type Panel =
   /** One vehicle, and what can be fitted to it. */
   | { k: 'upgrades'; vehicle: number }
   | { k: 'owned' }
-  | { k: 'contracts' };
+  | { k: 'contracts' }
+  | { k: 'market' };
 
 /**
  * Map the content's way classes onto the three the renderer draws.
@@ -2936,6 +2938,13 @@ export function App(): JSX.Element {
         </div>
       )}
       {!building && note !== '' && <div className="build-hint"><b>{note}</b></div>}
+      {live && showPanel && shownPanel.k === 'market' && (
+        <Market
+          world={live.world}
+          onClose={() => setPanel({ k: 'none' })}
+          onSold={bump}
+        />
+      )}
       {live && showPanel && shownPanel.k === 'yard' && (
         <Yard
           world={live.world}
@@ -2995,6 +3004,24 @@ export function App(): JSX.Element {
               on: panel.k === 'contracts',
               onClick: () => setPanel(
                 panel.k === 'contracts' ? { k: 'none' } : { k: 'contracts' },
+              ),
+            },
+            /*
+             * The market, which is the one screen that is not about vehicles.
+             *
+             * It earns a permanent slot because it answers a question the player
+             * has continuously once they own anything that produces: what is all
+             * this stock worth, and when do I want the money. Everything else in
+             * the dock is a place or a vehicle; this is the ledger of things you
+             * are holding.
+             */
+            {
+              key: 'market',
+              label: 'Market',
+              icon: 'builders-merchant',
+              on: panel.k === 'market',
+              onClick: () => setPanel(
+                panel.k === 'market' ? { k: 'none' } : { k: 'market' },
               ),
             },
             /*

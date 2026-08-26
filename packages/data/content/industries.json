@@ -342,6 +342,7 @@
     "id": "village-shop",
     "name": "Village shop",
     "kind": "terminal",
+    "retail": true,
     "deposit": 0,
     "recipe": {
       "inputs": {

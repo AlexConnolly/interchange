@@ -124,6 +124,15 @@ export const IndustryDef = z.object({
    * containing the word depot anywhere.
    */
   passThrough: z.boolean().optional().default(false),
+  /**
+   * Sells what it takes in, over a counter, to nobody in particular.
+   *
+   * The one place that needs no buyer arranged. It cannot be inferred from
+   * "makes nothing", which was the first attempt: a concrete plant makes
+   * nothing either, and a concrete plant is not a shop — it was cheerfully
+   * retailing aggregate to the public.
+   */
+  retail: z.boolean().optional().default(false),
   /** Three-network requirement, design.md §2.2. Zero means not required yet. */
   powerNeed: z.number().int().min(0).default(0),
   waterNeed: z.number().int().min(0).default(0),

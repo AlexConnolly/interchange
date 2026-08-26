@@ -672,6 +672,17 @@ export const MoneyKind = {
    * exactly why it pays less than hauling it yourself — see `gateSalePct`.
    */
   Gate: 4,
+  /**
+   * Moved between two places you both own: a shunt, at no charge.
+   *
+   * Recorded rather than skipped so a shop filling from your own farm does not
+   * have blank accounts, which reads as a bug rather than as a transfer.
+   */
+  Moved: 5,
+  /** Sold on the market, when the term came due. */
+  Market: 6,
+  /** Sold over a shop's counter, which needs nobody's agreement. */
+  Counter: 7,
 } as const;
 export type MoneyKind = (typeof MoneyKind)[keyof typeof MoneyKind];
 
@@ -706,3 +717,86 @@ export const GATE_WEEKLY_TONNES = 24;
  * on the first business anybody buys, and turns a purchase into a penance.
  */
 export const GATE_REFERENCE_TILES = 20;
+
+/**
+ * The market: how a haulier turns a shed full of goods into money.
+ *
+ * The problem it solves is one the player found before the design did. Owning a
+ * producer left you with stock and no way to realise it: hauling it into another
+ * place of your own is a shunt and pays nothing, and hauling it to somebody
+ * else's works pays a *fare* rather than a price — so a farm's output piled up
+ * and the only question the game could answer about it was "which lorry".
+ *
+ * A market answers "what is this worth, and when do you want the money". You
+ * sell from stock wherever it sits, no lorry involved, and the offers differ in
+ * one axis only: **patience**. Sell today and take a poor price; wait a month and
+ * take a good one. That is the whole mechanic, and it is deliberately the one
+ * thing a haulage game can offer that is not a lorry.
+ *
+ * The rates are set against each other rather than against anything real. What
+ * matters is the order: dumping stock is worse than delivering it yourself, which
+ * is worse than owning the shop that sells it. If that order ever inverts, the
+ * game starts advising the player not to buy lorries.
+ */
+export interface MarketOffer {
+  /** How many days until it settles. Zero is cash today. */
+  days: number;
+  /** Per tonne, in pence. */
+  pence: number;
+}
+
+/**
+ * The three ways to sell, as multiples of a cargo's own value.
+ *
+ * Wide apart on purpose: a factor of three between the worst and the best is
+ * enough that waiting is a real decision rather than an obviously correct one,
+ * because thirty days is a long time to be owed money when a lorry costs six
+ * thousand pounds.
+ *
+ * The best term is *exactly* the value and not a penny more. The panel prints
+ * what a tonne is worth beside what each term pays, and a thirty-day price above
+ * the stated worth makes that line a lie — full value for full patience is both
+ * the tidier rule and the one a reader can check.
+ */
+export const MARKET_TERMS: { days: number; multiple: number }[] = [
+  { days: 0, multiple: 34 },
+  { days: 10, multiple: 62 },
+  { days: 30, multiple: 100 },
+];
+
+/** How many sales can be outstanding at once. A queue, not a portfolio. */
+export const MAX_PENDING_SALES = 24;
+
+/**
+ * What a shop keeps on what it sells, against the goods' own value.
+ *
+ * Above the market's best term on purpose. Owning the shop that sells a crate
+ * has to beat selling the same crate wholesale, or there is no reason to own a
+ * shop — and the difference is the retailer's margin, which is exactly what it
+ * is.
+ */
+export const RETAIL_PCT = 260;
+
+/**
+ * What a tonne of goods is worth, against the `basePrice` the content quotes.
+ *
+ * The content's prices are not on the same scale as anything else in the game and
+ * never were. `basePrice` enters the haulage rate at eighteen per cent, so it was
+ * only ever a small kicker on a fare: a tonne of produce contributes ninety pence
+ * to a seven-hundred-pound fare. Read as a *price* it is off by roughly fifty,
+ * which is invisible for as long as nothing sells goods — and the moment
+ * something does, milk is worth three pounds forty a tonne against a fare of
+ * seven hundred and thirty-five, so the market is a rounding error and nobody
+ * would ever use it.
+ *
+ * Fifty-one, chosen against the one figure in the game everybody already knows:
+ * it puts a tonne of milk sold on the best terms at about a quarter of what
+ * carrying that same tonne pays. So raw goods are worth *hauling* and processed
+ * goods are worth *selling*, which is the shape a haulage game wants — a farm's
+ * milk goes on a lorry, and a creamery's dairy is worth six times as much because
+ * six milk went into four dairy.
+ *
+ * Here rather than in the content because it is a relationship between two of the
+ * game's systems, not a property of milk.
+ */
+export const GOODS_SCALE = 51;
