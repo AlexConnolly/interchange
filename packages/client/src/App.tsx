@@ -517,24 +517,19 @@ export function App(): JSX.Element {
       : 0.46;
 
     /*
-     * The district seed, and it is 1986 rather than 1985 for a dull reason.
+     * The district seed. 1985, the year, and it stays that way.
      *
-     * The number is arbitrary — it was the year, which was a nice touch and
-     * nothing more. What it picks is a *district*, and 1985's turned out to be
-     * one of the two in twenty that generate no creamery. With no buyer for
-     * milk the opening job falls through to timber, which a cheap flatbed can
-     * carry rather than a refrigerated van, and the whole ladder shifts: a
-     * second vehicle within reach in four minutes against the twelve the economy
-     * is built on.
+     * I moved it twice while chasing other things — once because 1985's district
+     * generates no creamery, so with no buyer for milk the opening job falls
+     * through to timber and the ladder reads four minutes instead of twelve, and
+     * once more to find a map with visible water. Both were defensible and both
+     * were wrong: this is the district that has been played, and "the initial
+     * world seed is great, let's keep that for the first game" settles it.
      *
-     * The economy is tuned for the typical district, correctly — measured across
-     * milk districts it lands at twelve, twelve, twelve and eight minutes. So the
-     * fix is to open on a typical one rather than to re-tune the game around an
-     * unusual map, which is the same mistake as a threshold written against a
-     * single seed.
+     * So the balance argument has to be won somewhere other than here.
      */
     const world = createWorld({
-      seed: 1986, size: DISTRICT, townCount: 3, companyCount: 1,
+      seed: 1985, size: DISTRICT, townCount: 3, companyCount: 1,
     });
     world.dayOffset = dayOffset;
     /*

@@ -21,7 +21,7 @@ import { loadContent } from '../../data/src/index.ts';
 loadContent();
 
 const D = 128;
-const w = createWorld({ seed: Number(process.env.SEED ?? 1986), size: D, townCount: 3, companyCount: 1 });
+const w = createWorld({ seed: Number(process.env.SEED ?? 1985), size: D, townCount: 3, companyCount: 1 });
 w.tick = 60 * TICKS_PER_DAY;
 
 const opening = w.planOpening();

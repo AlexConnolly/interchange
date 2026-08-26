@@ -88,13 +88,26 @@ export const LAND = {
    *
    * Inland water takes its colour from what is under it and what is over it — a
    * bed of silt and gravel, and a bank of trees — where the sea takes its colour
-   * from the sky. So it is browner, greener, darker and much less saturated, and
-   * that difference is what stops a beck across a field looking like an inlet.
+   * from the sky. So it is greener and darker than the sea, and that is what
+   * stops a beck across a field looking like an inlet.
+   *
+   * The first attempt took that reasoning much too far: a desaturated slate,
+   * which is a fair description of river water under an overcast sky and was
+   * completely wrong on screen. Every tile in this game is faded *toward the
+   * mist* by distance and by influence, so a colour that starts out grey arrives
+   * as grey ground — the streams were being drawn, correctly, in a shade
+   * indistinguishable from a shaded field, and the verdict was "there are no
+   * streams".
+   *
+   * A colour here is not a paint sample. It has to survive being mixed halfway
+   * into fog and still say what it is, which means the part that identifies it —
+   * blue, for water — must be strong enough to lose half of itself and still be
+   * the loudest thing in the tile.
    */
-  stream: hex('#5d7d84'),
+  stream: hex('#4a86a0'),
   /** Wet gravel at the edge of it, a tile wide. Nothing in England has a hard
    *  edge between water and grass. */
-  shallow: hex('#6f8a7f'),
+  shallow: hex('#6e9ba6'),
   waterDeep: hex('#3f6f92'),
   river: hex('#6fa3c4'),
 };

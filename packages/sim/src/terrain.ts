@@ -272,14 +272,22 @@ export function generateTerrain(cfg: WorldConfig): Terrain {
 
   // ---- 2. rivers ---------------------------------------------------------
   /*
-   * Rather more of them, now that they are streams instead of rivers.
+   * Sixty sources, which sounds absurd and is not.
    *
-   * Five wide rivers is a map with a barrier on it; sixteen narrow ones is a map
-   * with drainage, which is what lowland England looks like from the air — every
-   * few fields there is a ditch or a beck, and half of them you only notice
-   * because of the line of willows along them.
+   * Most of them never become anything: a source that runs into an existing
+   * course within eight tiles is discarded rather than carved, so what this
+   * number really sets is how *finely* the district is sampled for places a
+   * watercourse could start. At twenty-four the answer was 1.2% of the land under
+   * water and the nearest beck to the opening twenty-eight tiles away — real
+   * drainage that no player would ever see. At sixty it is 2.9% and nine tiles,
+   * which is a stream in view from the start.
+   *
+   * Five wide rivers was a map with a barrier on it. This is a map with
+   * drainage, which is what lowland England looks like from the air: every few
+   * fields a ditch or a beck, half of them noticeable only by the line of
+   * willows along them.
    */
-  carveRivers(t, rng, Math.max(8, Math.round(size / 128) * 8));
+  carveRivers(t, rng, Math.max(60, Math.round(size / 128) * 60));
 
   // ---- 3. biomes and buildability ---------------------------------------
   classify(t, cfg.seed);
@@ -395,10 +403,23 @@ function carveRivers(t: Terrain, rng: Rng, count: number): void {
      * up what the argmax was for — a river still starts on the local ridge, it
      * just has to be the local one. Which is also true of rivers.
      */
-    const grid = 4;
-    const cell = Math.floor(size / grid);
-    const gx = (n % grid) * cell;
-    const gy = (Math.floor(n / grid) % grid) * cell;
+    /*
+     * The sector grid follows the count, rather than being fixed at four.
+     *
+     * A 4x4 grid on a 128-tile map is sectors thirty-two tiles across, and one
+     * source per sector means the nearest watercourse to any given point can
+     * easily be twenty or thirty tiles away — which is to say, off screen. That
+     * is how the shipping district ended up with real streams that the player
+     * could never see: 174 of them, none within thirty-five tiles of where the
+     * game opens.
+     *
+     * Matching the grid to the count keeps the spread even as the count rises,
+     * instead of stacking more and more sources into the same sixteen cells.
+     */
+    const grid = Math.max(2, Math.round(Math.sqrt(count)));
+    const cell = Math.max(8, Math.floor(size / grid));
+    const gx = Math.min(size - cell - 1, (n % grid) * cell);
+    const gy = Math.min(size - cell - 1, (Math.floor(n / grid) % grid) * cell);
     for (let k = 0; k < 24; k++) {
       const x = Math.min(size - 5, Math.max(4, gx + rng.int(cell)));
       const y = Math.min(size - 5, Math.max(4, gy + rng.int(cell)));
@@ -422,11 +443,43 @@ function carveRivers(t: Terrain, rng: Rng, count: number): void {
     let x = sx;
     let y = sy;
     const visited = new Set<number>();
+    /*
+     * The path is collected first and cut afterwards.
+     *
+     * Carving as it walks meant a source that ran two tiles and then met an
+     * existing river left those two tiles behind as water — a pond in the middle
+     * of a field, with no channel leading in or out. With a source in every
+     * sector and most of them draining into the same few valleys, the district
+     * filled up with them, and they are unmistakable from above: little blue
+     * rectangles sitting in the grass.
+     *
+     * Collecting first also means the walk follows the terrain as it *found* it
+     * rather than as it has just altered it, which is the more honest model
+     * anyway: a river follows the valley, and the valley is the thing the river
+     * cut over rather longer than one pass.
+     */
+    const course: number[] = [];
+    let digs = 0;
     for (let step = 0; step < size * 3; step++) {
       const i = y * size + x;
       if (visited.has(i)) break;
       visited.add(i);
       if (t.height[i] <= SEA_LEVEL) break;
+      /*
+       * Stop once it is down on the flat, rather than wandering about on it.
+       *
+       * When the walk finds no lower neighbour it lowers the basin and carries
+       * on from the rim, which is what stops a river stalling in a pit — and on
+       * the wide flat ground near the coast it turns into a machine for filling
+       * that ground in. The walk meanders, every tile it touches is flagged, and
+       * the result is not a channel at all but a lake: measured, a median width
+       * of six tiles and a worst of thirteen, on a generator whose channel is one
+       * tile wide by construction.
+       *
+       * A river reaching the levels is at its mouth. Ending it there is both what
+       * happens and what keeps it a river.
+       */
+      if (t.height[i] < SEA_LEVEL + 60) break;
       /*
        * Met another watercourse: join it and stop.
        *
@@ -441,6 +494,13 @@ function carveRivers(t: Terrain, rng: Rng, count: number): void {
        * the river has already been carved by whichever walk got there first.
        * Not before `step > 2`, or two sources that start beside each other kill
        * one another immediately.
+       *
+       * On the tile itself, not alongside it. Stopping when merely *adjacent* to
+       * an existing course was an attempt to fix the width and fixed nothing —
+       * measured either way, the median channel stayed six tiles — because the
+       * width was never coming from tributaries running in parallel. It was
+       * coming from the basin escape below. All that rule achieved was to kill
+       * most of the tributaries, which is where the district's water went.
        */
       if (step > 2 && (t.flags[i] & TileFlag.River) !== 0) break;
 
@@ -455,7 +515,7 @@ function carveRivers(t: Terrain, rng: Rng, count: number): void {
        * twice.
        */
       const width = Math.min(1, Math.trunc(step / Math.max(1, size >> 1)));
-      carveAt(t, x, y, width);
+      course.push(i, width);
 
       // Steepest descent among eight neighbours, with a positional jitter so a
       // flat run does not produce a ruler-straight line.
@@ -476,6 +536,24 @@ function carveRivers(t: Terrain, rng: Rng, count: number): void {
         }
       }
       if (bx < 0) {
+        /*
+         * Stalled in a pit. Dig out of it — but only so many times.
+         *
+         * Lowering the rim and carrying on is what stops a walk dying four tiles
+         * from its source on a noisy heightfield, and it is also a machine for
+         * filling flat ground in: every tile the walk touches is flagged, and on
+         * the levels it does not descend so much as wander, stall, dig, wander.
+         * Measured, that produced a median channel width of six tiles and a worst
+         * of twenty, from a generator whose channel is one tile wide by
+         * construction. It was not a river; it was a lake with a river's
+         * paperwork.
+         *
+         * Six escapes is enough to cross the pitted upland the erosion pass
+         * leaves behind, and far too few to excavate a floodplain. A watercourse
+         * that has had to dig its way out of six basins has reached the levels,
+         * and the levels are where rivers end.
+         */
+        if (++digs > 6) break;
         let lx = -1;
         let ly = -1;
         let lh = 1 << 30;
@@ -496,8 +574,34 @@ function carveRivers(t: Terrain, rng: Rng, count: number): void {
         bx = lx;
         by = ly;
       }
+      /*
+       * Step the corner as well, so the channel is joined up.
+       *
+       * The descent walks eight neighbours, so most steps are diagonal — and two
+       * tiles that meet only at a corner are not a channel, they are two tiles.
+       * Drawn, that is a dotted line of separate blue squares lying across a
+       * field, which is exactly what it looked like: the water was there, in the
+       * right places, and read as scattered ponds because nothing joined them.
+       *
+       * Carrying the corner tile makes the course four-connected, which is also
+       * the connectivity the road router uses — so a beck the eye sees as
+       * continuous is continuous to everything else that asks.
+       */
+      if (bx !== x && by !== y) course.push(by * size + x, width);
+
       x = bx;
       y = by;
+    }
+
+    /*
+     * And only if it got somewhere. Eight tiles is the shortest thing that reads
+     * as a watercourse rather than as a puddle; anything shorter is a source
+     * that met a river almost at once, and the river it met is already drawn.
+     */
+    if (course.length < 8 * 2) continue;
+    for (let k = 0; k < course.length; k += 2) {
+      const tile = course[k];
+      carveAt(t, tile % size, (tile / size) | 0, course[k + 1]);
     }
   }
 }
@@ -558,6 +662,19 @@ function carveAt(t: Terrain, x: number, y: number, width: number): void {
       }
     }
   }
+}
+
+/** Is this tile, or anything touching it, already a watercourse? */
+function nearRiver(t: Terrain, x: number, y: number): boolean {
+  const size = t.size;
+  if ((t.flags[y * size + x] & TileFlag.River) !== 0) return true;
+  for (let d = 0; d < 8; d++) {
+    const nx = x + NEIGH8X[d];
+    const ny = y + NEIGH8Y[d];
+    if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+    if ((t.flags[ny * size + nx] & TileFlag.River) !== 0) return true;
+  }
+  return false;
 }
 
 const NEIGH8X = [1, 1, 0, -1, -1, -1, 0, 1];

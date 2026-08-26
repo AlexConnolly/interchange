@@ -181,6 +181,67 @@ export function generateWorld(w: World): void {
   }
 
   /*
+   * ---- the first job always exists ----------------------------------------
+   *
+   * `balance.json` names the cargo the game opens on, and the whole economy is
+   * tuned around that one run: how much it pays, how long the second vehicle
+   * takes, which lorry can carry it. It is the tutorial, and it is measured in
+   * real minutes of play.
+   *
+   * But whether the district *has* that chain was luck. Processing sites are
+   * dealt from a rotation over whatever the region can supply, so roughly one
+   * district in ten came out with no creamery, no buyer for milk, and an opening
+   * that fell through to something else entirely — timber, say, which rides on a
+   * cheap flatbed instead of a refrigerated van and puts a second vehicle four
+   * minutes away against the twelve the ladder is built on. Nothing about that
+   * was visible: the game simply opened easier than it was designed to.
+   *
+   * Chasing it by re-rolling the map was the wrong answer twice over — I moved
+   * the district seed twice before admitting that "the map happens to contain the
+   * tutorial" is not a property to leave to chance. If the chain is missing, the
+   * buyer is placed.
+   */
+  {
+    const openingId = c.balance.openingCargo;
+    const opening = c.cargoIndex.get(openingId) ?? -1;
+    const takes = (def: number): boolean =>
+      Object.keys(c.industries[def].recipe.inputs).some(
+        (k) => c.cargoIndex.get(k) === opening,
+      );
+    const makes = (def: number): boolean =>
+      Object.keys(c.industries[def].recipe.outputs).some(
+        (k) => c.cargoIndex.get(k) === opening,
+      );
+    let haveBuyer = false;
+    let seller = -1;
+    for (let s = 0; s < w.sites.count; s++) {
+      if (takes(w.sites.def[s])) haveBuyer = true;
+      if (seller < 0 && makes(w.sites.def[s])) seller = s;
+    }
+    if (opening >= 0 && seller >= 0 && !haveBuyer) {
+      const def = c.industries.findIndex((ind, i) => ind.fromEra <= 1 && takes(i));
+      if (def >= 0) {
+        /*
+         * By the town nearest whoever produces it, so the opening job is a drive
+         * through the district rather than across it — `planOpening` scores on
+         * distance and a buyer parked at the far end would be a worse first job
+         * than no buyer at all.
+         */
+        let best = 0;
+        let bestD = Infinity;
+        for (let tn = 0; tn < w.towns.count; tn++) {
+          const dx = w.towns.x[tn] - w.sites.x[seller];
+          const dy = w.towns.y[tn] - w.sites.y[seller];
+          const d = dx * dx + dy * dy;
+          if (d < bestD) { bestD = d; best = tn; }
+        }
+        const spot = findSiteSpot(t, w.towns.x[best], w.towns.y[best], 4, 13, w);
+        if (spot) w.sites.alloc(def, spot[0], spot[1], t.idx(spot[0], spot[1]), AUTHORITY);
+      }
+    }
+  }
+
+  /*
    * ---- what is actually growing in the fields -----------------------------
    *
    * The field generator divides the whole district into parcels and then picks

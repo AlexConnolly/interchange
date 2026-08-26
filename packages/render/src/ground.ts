@@ -162,19 +162,26 @@ export function buildGround(
         colour = LAND.water;
       } else if (src.isStream(tile)) {
         /*
-         * The water, and a wet edge where it meets the field.
+         * The water, with shallows only where the channel actually ends.
          *
-         * A tile with dry land on any side of it is the bank, and gets the
-         * paler gravel colour. Nothing in England has a hard edge between water
-         * and grass, and at this scale a stream two tiles wide with a hard edge
-         * reads as a painted stripe — the one tile of shallows is most of what
-         * makes it read as water lying in a channel instead.
+         * The first version called any tile with dry land beside it a bank — and
+         * a stream one tile wide has dry land on *both* sides of every tile it
+         * has, so the entire watercourse came out in the pale gravel colour and
+         * the water colour was never drawn at all. It read as a blotchy pale
+         * ribbon rather than as a beck, which is a good part of why the answer to
+         * "where are the streams" was "there are none".
+         *
+         * Counting instead of testing fixes it. A tile in a run has water on two
+         * sides — behind it and ahead of it — however narrow the channel is, so
+         * three dry sides means a head, a tail, or a stub, and that is the only
+         * place shallows belong.
          */
-        const bank = (x > 0 && !src.isStream(tile - 1))
-          || (x + 1 < s && !src.isStream(tile + 1))
-          || (y > 0 && !src.isStream(tile - s))
-          || (y + 1 < s && !src.isStream(tile + s));
-        colour = bank ? LAND.shallow : LAND.stream;
+        let dry = 0;
+        if (x === 0 || !src.isStream(tile - 1)) dry++;
+        if (x + 1 >= s || !src.isStream(tile + 1)) dry++;
+        if (y === 0 || !src.isStream(tile - s)) dry++;
+        if (y + 1 >= s || !src.isStream(tile + s)) dry++;
+        colour = dry >= 3 ? LAND.shallow : LAND.stream;
       } else {
         const p = src.parcel[tile];
         colour = p === NO_PARCEL ? CROP[6] : (CROP[src.crop[tile]] ?? CROP[6]);
