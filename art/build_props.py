@@ -55,6 +55,12 @@ HURDLE = (0.600, 0.510, 0.384, 1)
 # animal.
 BIRD = (0.278, 0.290, 0.318, 1)
 
+# Spring. Two of the three or four things in an English hedge bank that are
+# visible from four hundred feet, which is the only test that matters here.
+DAFFODIL = (0.949, 0.808, 0.235, 1)
+DAFFODIL_LEAF = (0.353, 0.510, 0.259, 1)
+BLOSSOM = (0.973, 0.925, 0.933, 1)
+
 
 def _paint(obj, rgba, name, rough=0.85):
     obj.data.materials.append(lib.material(name, rgba, rough=rough))
@@ -419,6 +425,64 @@ def bird_down():
     return _bird('dn', -0.45)
 
 
+def daffodils():
+    """A clump of daffodils on a bank.
+
+    Yellow is the whole model. At this scale a daffodil is one pixel and the
+    only thing that survives is *that there is yellow there in March* — so it is
+    six little boxes on stalks rather than anything shaped like a flower, and the
+    stalks are there because a clump of yellow with no green under it reads as
+    litter.
+
+    Six, and no chamfer, because the first version was eleven chamfered ones and
+    came out at 616 triangles against a 180 budget — on a model that will be
+    drawn a hundred times over a verge. The budget is the whole reason it exists:
+    at this size the chamfer was rounding a corner nobody can see, three hundred
+    times.
+
+    Clumped rather than spread, because that is how they actually grow: a verge
+    with daffodils on it has patches of fifty and then nothing for twenty yards,
+    and a hedge bank evenly dotted with yellow reads as planting rather than as
+    spring.
+    """
+    made = []
+    spots = [(0.000, 0.000), (0.028, 0.016), (-0.024, 0.022),
+             (0.016, -0.028), (-0.032, -0.014), (0.038, -0.010)]
+    for i, (x, y) in enumerate(spots):
+        stem = lib.box('daffstem%d' % i, (0.004, 0.004, 0.030),
+                       loc=(x, y, 0.015))
+        _paint(stem, DAFFODIL_LEAF, 'daffleaf')
+        made.append(stem)
+        head = lib.box('daffhead%d' % i, (0.012, 0.012, 0.011),
+                       loc=(x, y, 0.035))
+        _paint(head, DAFFODIL, 'daffodil', rough=0.6)
+        made.append(head)
+    return made
+
+
+def blossom():
+    """A blackthorn in flower: white where every other bush is green.
+
+    March and April, before the leaves are out, which is exactly why it is worth
+    having — it is the one thing in the district that can be *pale* while the
+    trees are still bare, and it puts something in the hedgerows in the six
+    weeks when they are otherwise sticks.
+    """
+    made = []
+    trunk = lib.box('blossomstem', (0.012, 0.012, 0.055), loc=(0, 0, 0.028))
+    _paint(trunk, TIMBER, 'timber')
+    made.append(trunk)
+    for i, (x, y, z, r) in enumerate([
+        (0.000, 0.000, 0.082, 0.054), (0.030, 0.018, 0.066, 0.036),
+        (-0.026, 0.022, 0.068, 0.032),
+    ]):
+        o = lib.box('blossom%d' % i, (r, r, r * 0.78), loc=(x, y, z),
+                    chamfer=r * 0.34)
+        _paint(o, BLOSSOM, 'blossom', rough=0.7)
+        made.append(o)
+    return made
+
+
 BUILDS = [
     ('prop_lamp_post', lamp_post),
     ('prop_bale_round', bale_round),
@@ -437,6 +501,8 @@ BUILDS = [
     ('prop_tank', tank),
     ('prop_pallets', pallets),
     ('prop_pen', pen),
+    ('prop_daffodils', daffodils),
+    ('prop_blossom', blossom),
     ('prop_bird_up', bird_up),
     ('prop_bird_down', bird_down),
 ]

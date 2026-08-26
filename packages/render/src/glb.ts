@@ -39,6 +39,21 @@ export const MODEL_PATH = 'models/';
 export const LIVERY_MATERIAL = 'livery';
 export const LAMP_MATERIAL = 'lamp';
 
+/**
+ * Foliage. Any material whose name says canopy is leaves.
+ *
+ * A third reserved slot, and it earns its place the same way the other two do:
+ * it lets the *material* say what a surface is, once, in the pipeline, and lets
+ * the renderer decide what that means at draw time. Here it means the season —
+ * leaves go yellow-green in April, gold in October and shrink to nothing in
+ * December, and none of that wants a second model or a second draw call.
+ *
+ * Matched by substring rather than prefix, because the tree builder names them
+ * after the tree: `oak_canopy`, `oak_canopy_lit`. The slot is a *claim about the
+ * surface*, and where in the name it appears is the pipeline's business.
+ */
+export const LEAF_MATERIAL = 'canopy';
+
 /** Does this material name claim a reserved slot? Prefix rather than equality
  *  because Blender suffixes duplicates (`livery.001`) and the pipeline names
  *  variants (`lamp_red`), and both are still the slot they say they are. */
@@ -82,7 +97,12 @@ export interface Kit {
  * finishes the job across material boundaries, which it cannot.
  */
 function bake(root: ThreeMesh | { traverse: (f: (o: unknown) => void) => void }): Model | null {
-  type Part = { geom: BufferGeometry; colour: Color; emit: number; livery: number; lamp: boolean };
+  type Part = {
+    geom: BufferGeometry; colour: Color; emit: number; livery: number;
+    lamp: boolean;
+    /** 1 on foliage, so the season can find it. See `LEAF_MATERIAL`. */
+    leaf: number;
+  };
   const parts: Part[] = [];
 
   root.traverse((node: unknown) => {
@@ -106,6 +126,7 @@ function bake(root: ThreeMesh | { traverse: (f: (o: unknown) => void) => void })
       emit: m?.emissiveIntensity ? Math.min(1, m.emissiveIntensity) : 0,
       livery: isSlot(name, LIVERY_MATERIAL) ? 1 : 0,
       lamp: isSlot(name, LAMP_MATERIAL),
+      leaf: name.includes(LEAF_MATERIAL) ? 1 : 0,
     });
   });
 
@@ -129,7 +150,9 @@ function bake(root: ThreeMesh | { traverse: (f: (o: unknown) => void) => void })
 }
 
 /** Fold a set of primitives into one flat-shaded, attributed geometry. */
-function weld(parts: { geom: BufferGeometry; colour: Color; emit: number; livery: number }[]):
+function weld(parts: {
+  geom: BufferGeometry; colour: Color; emit: number; livery: number; leaf: number;
+}[]):
 BufferGeometry | null {
   let total = 0;
   for (const p of parts) total += p.geom.getAttribute('position').count;
@@ -139,6 +162,7 @@ BufferGeometry | null {
   const col = new Float32Array(total * 3);
   const emit = new Float32Array(total);
   const livery = new Float32Array(total);
+  const leaf = new Float32Array(total);
   let w = 0;
   for (const p of parts) {
     const src = p.geom.getAttribute('position');
@@ -151,6 +175,7 @@ BufferGeometry | null {
       col[(w + i) * 3 + 2] = p.colour.b;
       emit[w + i] = p.emit;
       livery[w + i] = p.livery;
+      leaf[w + i] = p.leaf;
     }
     w += src.count;
   }
@@ -160,6 +185,7 @@ BufferGeometry | null {
   g.setAttribute('color', new BufferAttribute(col, 3));
   g.setAttribute('emit', new BufferAttribute(emit, 1));
   g.setAttribute('livery', new BufferAttribute(livery, 1));
+  g.setAttribute('leaf', new BufferAttribute(leaf, 1));
   /*
    * Snow response, one for everything in a pipeline model.
    *

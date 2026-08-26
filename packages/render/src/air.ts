@@ -261,6 +261,8 @@ export interface AirFrame {
   snow: number;
   /** 0..1, the global VFX dial. Zero switches the whole thing off. */
   level: number;
+  /** How far through the turn, so the leaves know whether to be falling. */
+  autumn: number;
   /** Which day it is, so which chimneys are lit changes from one to the next. */
   day: number;
 }
@@ -430,7 +432,47 @@ export function makeAir(scene: Scene): Air {
   });
   let exhaustAcc = 0;
 
-  const fields = [mist, smoke, exhaust];
+  /*
+   * Leaves, coming off the trees.
+   *
+   * The one part of the year that is *motion* rather than colour. A canopy that
+   * turns gold and then simply is not there any more has skipped the bit
+   * everybody actually pictures when they think of autumn, and it is the same
+   * pooled field as the smoke — a few hundred specks, one draw call.
+   *
+   * Emitted in a ring around the camera rather than from the trees. That sounds
+   * like a cheat and is the right model: what you see on a windy October
+   * afternoon is not leaves leaving a *particular* branch, it is leaves in the
+   * air, and tying each one to a tree would cost a lookup per spawn to place
+   * them somewhere the eye cannot check anyway.
+   */
+  const leaves = new Field(scene, {
+    count: 300,
+    tiles: 0.13,
+    colour: '#c98a3e',
+    opacity: 0.95,
+    spread: 0,
+    behave: (f, i, k, dt, time) => {
+      const j = i * 3;
+      /*
+       * A leaf does not fall, it *slips*. The side-to-side is most of what makes
+       * one read as a leaf rather than as a raindrop or a spark, and it has to be
+       * bigger than gravity feels like it should allow — a dry leaf is nearly all
+       * drag.
+       */
+      f.pos[j] += Math.sin(time * 2.3 + f.seed[i] * 4) * dt * 1.5;
+      f.pos[j + 2] += Math.cos(time * 1.9 + f.seed[i] * 4) * dt * 1.5;
+      // And downwind, on the district's own wind, like everything else.
+      f.vel[j] += WIND_X * dt * 0.55;
+      f.vel[j + 2] += WIND_Z * dt * 0.55;
+      // In quickly, and holding: a leaf does not fade, it lands. What ends it is
+      // its life running out near the ground.
+      return Math.min(1, k * 6) * Math.min(1, (1 - k) * 5 + 0.2);
+    },
+  });
+  let leafAcc = 0;
+
+  const fields = [mist, smoke, exhaust, leaves];
 
   return {
     step(src, frame, dt, time): void {
@@ -591,6 +633,34 @@ export function makeAir(scene: Scene): Air {
             (Math.random() - 0.5) * 0.06, 0.16 + Math.random() * 0.10,
             (Math.random() - 0.5) * 0.06,
             0.9 + Math.random() * 0.7,
+          );
+        }
+      }
+
+      /*
+       * How many leaves are in the air. Peaks with the turn and stops when the
+       * trees are bare, because a leaf falling off a bare tree in January is a
+       * leaf from nowhere.
+       */
+      const falling = frame.autumn * frame.level;
+      leaves.aim(0.95 * frame.level, frame.pixelsPerTile);
+      if (falling > 0.02) {
+        leafAcc += dt * 34 * falling;
+        while (leafAcc >= 1) {
+          leafAcc -= 1;
+          const a = Math.random() * 6.283;
+          const r = Math.sqrt(Math.random()) * reach;
+          const x = frame.camX + Math.cos(a) * r;
+          const z = frame.camZ + Math.sin(a) * r;
+          /*
+           * Starting at canopy height and given a life that runs out around the
+           * ground, so they arrive from above and stop at the bottom rather than
+           * sinking through the field.
+           */
+          leaves.spawn(
+            x, groundHeightAt(src, x, z) + 1.1 + Math.random() * 1.5, z,
+            0, -(0.36 + Math.random() * 0.22), 0,
+            2.6 + Math.random() * 1.8,
           );
         }
       }

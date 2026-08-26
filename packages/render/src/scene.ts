@@ -214,6 +214,17 @@ export interface RenderSource extends GroundSource, RoadSource {
   /** 0..1 depth of snow. One number, and the same one the traffic obeys. */
   snow: number;
   /**
+   * The year, for anything with leaves on it — see `foliage` in the sim.
+   *
+   * Passed in rather than computed here for the same reason `snow` is: this
+   * package does not depend on the simulation, and the source is the whole of
+   * how the simulation's state reaches it. Three numbers because they blend, and
+   * a named season would be a switch.
+   */
+  leaf: number;
+  spring: number;
+  autumn: number;
+  /**
    * Scatter: trees, and anything else there are hundreds of.
    *
    * A separate layer from the buildings because the counts are two orders apart.
@@ -819,8 +830,13 @@ export class Renderer {
    * shaded side of everything is brighter in winter and bluer, and getting that
    * wrong is what makes a white landscape look like a white filter.
    */
-  private setSeason(snow: number): void {
+  private setSeason(snow: number, src: RenderSource): void {
     SNOW_UNIFORM.value = snow;
+    // The year, for the leaves. Three uniforms, every tree in the district.
+    LEAF_UNIFORM.value = src.leaf;
+    SPRING_UNIFORM.value = src.spring;
+    AUTUMN_UNIFORM.value = src.autumn;
+    this.leafiness = { leaf: src.leaf, spring: src.spring, autumn: src.autumn };
     this.snowDepth = snow;
     // A gentle lift, not a wash. Snow is a big reflector so the shaded side of
     // everything is brighter and bluer in winter — but overdoing it flattens the
@@ -895,6 +911,10 @@ export class Renderer {
   night = 0;
   /** 1 while the street lights are burning, 0 after midnight. */
   streetOn = 0;
+
+  /** Where the year is, for anything outside this class that needs to agree
+   *  with the trees — the falling leaves, mainly. */
+  leafiness = { leaf: 1, spring: 0, autumn: 0 };
   private readonly clear = new Color();
   private readonly sunRGB: [number, number, number] = [0, 0, 0];
 
@@ -1888,7 +1908,7 @@ export class Renderer {
     this.updateScatter(src);
     this.updateFleet(src, dt);
     this.placeSun(src.dayFraction);
-    this.setSeason(src.snow);
+    this.setSeason(src.snow, src);
     this.setWeather(src.dayFraction, src.dayNumber, dt);
     // After the sun and the weather, because it reads `this.night`.
     this.placeLights(src, dt);
@@ -1965,6 +1985,7 @@ export class Renderer {
       night: this.night,
       snow: this.snowDepth,
       day: src.dayNumber,
+      autumn: src.autumn,
       level: this.vfx === 'high' ? 1 : this.vfx === 'low' ? 0.5 : 0,
     }, dt, this.elapsed);
 
@@ -2285,14 +2306,25 @@ function litMaterial(
   const snowColour = new Color(...to);
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uSnow = SNOW_UNIFORM;
+    shader.uniforms.uLeaf = LEAF_UNIFORM;
+    shader.uniforms.uSpring = SPRING_UNIFORM;
+    shader.uniforms.uAutumn = AUTUMN_UNIFORM;
+    shader.uniforms.uSpringLeaf = { value: new Color(...SPRING_LEAF) };
+    shader.uniforms.uAutumnLeaf = { value: new Color(...AUTUMN_LEAF) };
     shader.uniforms.uSnowTake = { value: takes };
     shader.uniforms.uSnowColour = { value: snowColour };
     shader.uniforms.uCloud = CLOUD_AMOUNT;
     shader.uniforms.uDrift = CLOUD_DRIFT;
     let vs = `attribute float snowTake;
+attribute float leaf;
 uniform float uSnow;
 uniform float uSnowTake;
 uniform vec3 uSnowColour;
+uniform float uLeaf;
+uniform float uSpring;
+uniform float uAutumn;
+uniform vec3 uSpringLeaf;
+uniform vec3 uAutumnLeaf;
 varying vec3 vSkyPos;
 ${shader.vertexShader}`;
     if (tint) {
@@ -2313,9 +2345,26 @@ ${vs}`.replace(
      * world position — and therefore the same cloud shadow, which is the one
      * mistake here that would be invisible in a still and glaring in motion.
      */
+    /*
+     * Leaves shrink towards the trunk out of season, before anything else.
+     *
+     * "Come winter there should be no leaves at all." A colour cannot do that —
+     * a bare tree is a *shape* — so the canopy vertices are pulled in towards the
+     * trunk line as the leaf falls away. Towards the axis rather than to a point,
+     * so what is left is a thin crown of twigs the right height rather than a
+     * pea sitting on a stick.
+     *
+     * Only the X and Z, so a bare oak keeps its height and its silhouette
+     * against the sky, which is the whole reason a winter tree reads as a tree.
+     * Broadleaf models are swapped for `tree_bare` in deep winter anyway; this is
+     * what carries the fortnight either side of the swap, so nothing snaps.
+     */
     vs = vs.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
+	float leafShrink = mix( 0.34, 1.0, clamp( uLeaf, 0.0, 1.0 ) );
+	transformed.xz *= mix( 1.0, leafShrink, leaf );
+	transformed.y *= mix( 1.0, mix( 0.86, 1.0, clamp( uLeaf, 0.0, 1.0 ) ), leaf );
 #ifdef USE_INSTANCING
 	vSkyPos = ( modelMatrix * instanceMatrix * vec4( transformed, 1.0 ) ).xyz;
 #else
@@ -2367,6 +2416,20 @@ ${shader.fragmentShader}`.replace(
 	// magnitude makes it agnostic to winding, which is the same compromise
 	// the double-sided material already makes.
 	float upness = smoothstep( 0.30, 0.82, abs( objectNormal.y ) );
+	/*
+	 * The turn, on foliage only.
+	 *
+	 * Before the snow, so a canopy that has gone gold can then take frost on it
+	 * rather than the other way round — and there *is* an order: in November the
+	 * two overlap for a fortnight and gold under frost is the picture, where
+	 * frost under gold is a mistake.
+	 *
+	 * The leaf attribute is set by the pipeline from the material name, so this
+	 * reaches every tree in the district and nothing else: a green roof and a
+	 * green field stay exactly as they were.
+	 */
+	vColor = mix( vColor, uSpringLeaf, clamp( uSpring * leaf * 0.85, 0.0, 1.0 ) );
+	vColor = mix( vColor, uAutumnLeaf, clamp( uAutumn * leaf * 0.92, 0.0, 1.0 ) );
 	// Capped at 0.9, and the cap matters more than the colour. Mixing all the
 	// way to one flat white erased every fold in the ground and every crop row
 	// with it: a field in January became a blank sheet, and a district of blank
@@ -2398,6 +2461,30 @@ ${shader.fragmentShader}`.replace(
  * cannot get out of step between the ground and the road running over it.
  */
 const SNOW_UNIFORM = { value: 0 };
+
+/**
+ * The year, for anything with leaves on it.
+ *
+ * Three numbers rather than a season, because the whole point is that they
+ * blend — see `foliage` in the sim. Shared uniforms rather than per-material
+ * values, so every tree in the district turns together, which is the one thing
+ * about autumn that would look wrong if it were per-instance.
+ */
+const LEAF_UNIFORM = { value: 0 };
+const SPRING_UNIFORM = { value: 0 };
+const AUTUMN_UNIFORM = { value: 0 };
+
+/**
+ * What leaves do over a year, as two colours and a scale.
+ *
+ * Spring is *yellower and lighter* than summer, not just paler: new beech and
+ * oak leaves are almost lime, and it is the yellow that says April rather than
+ * the brightness. Autumn goes the other way past summer — orange-red, and darker,
+ * because a turned leaf is translucent and a canopy of them is deeper than a
+ * green one.
+ */
+const SPRING_LEAF: RGB = [0.62, 0.78, 0.30];
+const AUTUMN_LEAF: RGB = [0.80, 0.44, 0.16];
 
 /**
  * Weather, which is three numbers and the best value for money in the file.

@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   createWorld, Crop, Mode, NO_WAY, TICKS_PER_DAY, TileFlag, facilitiesFor,
-  isWood, type World,
+  foliage, isWood, type World,
 } from '@interchange/sim';
 import { loadContent } from '@interchange/data';
 import {
@@ -108,6 +108,9 @@ const TREE_MODELS = [
  */
 const BROADLEAF_MODELS = 3;
 const PINE = TREE_MODELS.indexOf('tree_pine');
+/** The two the seasons swap in. They were in the set from the start, unused. */
+const TREE_AUTUMN = TREE_MODELS.indexOf('tree_autumn');
+const TREE_BARE = TREE_MODELS.indexOf('tree_bare');
 
 /**
  * What stands in a field, and which crop wants which.
@@ -129,10 +132,17 @@ const PROP_MODELS = [
   // stands *at a business*, and exists to answer what the place is.
   'prop_log_stack', 'prop_timber_stack', 'prop_stone_heap', 'prop_sacks',
   'prop_churns', 'prop_tank', 'prop_pallets', 'prop_pen',
+  // Spring, and only spring. These two are the reason a scattered thing can have
+  // a season at all: there is no colour that means "gone", so they have to leave.
+  'prop_daffodils', 'prop_blossom',
 ];
 
 /** Index of the lamp post within `PROP_MODELS`. It is placed by its own rule. */
 const PROP_LAMP = 8;
+
+/** The spring pair, placed by their own rule and gone for nine months. */
+const PROP_DAFFODILS = PROP_MODELS.indexOf('prop_daffodils');
+const PROP_BLOSSOM = PROP_MODELS.indexOf('prop_blossom');
 
 /**
  * What stands in each trade's yard, by industry id.
@@ -634,6 +644,9 @@ export function App(): JSX.Element {
       lz: new Float32Array(400),
       dayFraction: 0.62,
       snow: 0,
+      leaf: 1,
+      spring: 0,
+      autumn: 0,
       dayNumber: 0,
     };
 
@@ -936,7 +949,11 @@ export function App(): JSX.Element {
      * and pepper reads as noise; a stand of pines on one hillside reads as a
      * plantation, and the district gets somewhere to look.
      */
-    interface Scattered { x: number; z: number; model: number; rot: number; scale: number }
+    interface Scattered {
+      x: number; z: number; model: number; rot: number; scale: number;
+      /** When it is there at all. Absent means always. */
+      season?: (f: { leaf: number; spring: number; autumn: number }) => boolean;
+    }
     /*
      * Where the street lamps are, kept separately as well as scattered.
      *
@@ -1097,6 +1114,63 @@ export function App(): JSX.Element {
                 : 0.78 + hash(x + 11, z + 13) * 0.55,
             });
           }
+        }
+      }
+
+      /*
+       * Spring, on the banks.
+       *
+       * On field boundaries and verges, which is exactly where they grow: a
+       * daffodil is a hedge-bank flower and a blackthorn *is* the hedge. Placed
+       * in their own pass rather than folded into the tree loop, because the
+       * rule is different in kind — a tree wants to be anywhere along a
+       * boundary, and these want to be on the *road* side of one, where the
+       * mower and the plough have never been.
+       *
+       * Thin. Twelve daffodil clumps and a handful of blackthorn in a district
+       * is enough that the eye finds them; thirty would be municipal planting.
+       */
+      for (let z = 1; z < DISTRICT - 1 && trees.length < SCATTER_MAX; z++) {
+        for (let x = 1; x < DISTRICT - 1 && trees.length < SCATTER_MAX; x++) {
+          const t = z * DISTRICT + x;
+          if (height[t] <= 0 || roadClass[t] >= 0) continue;
+          if (!boundary(t, x, z)) continue;
+          // Beside a lane, which is where a verge is.
+          let byRoad = false;
+          for (const d of [1, -1, DISTRICT, -DISTRICT]) {
+            if (roadClass[t + d] >= 0) byRoad = true;
+          }
+          if (!byRoad) continue;
+          const r = hash(x + 811, z + 977);
+          if (r > 0.16) continue;
+          const blossoms = r < 0.045;
+          trees.push({
+            x: x + 0.24 + hash(x + 5, z + 9) * 0.52,
+            z: z + 0.24 + hash(x + 9, z + 5) * 0.52,
+            model: TREE_MODELS.length + (blossoms ? PROP_BLOSSOM : PROP_DAFFODILS),
+            rot: hash(x + 19, z + 23),
+            /*
+             * Much bigger than a daffodil, and that is the honest answer.
+             *
+             * The model is authored at flower scale, and at flower scale it is
+             * four pixels across from this camera — which is correct and useless:
+             * a real daffodil is invisible from four hundred feet. A clump has to
+             * be about a third of a tile before the eye finds the yellow, and
+             * finding the yellow is the entire purpose of it. The same trade the
+             * sheep make, which are boxes the size of a small car.
+             */
+            scale: (blossoms ? 3.4 : 4.6) + hash(x + 29, z + 31) * 1.1,
+            /*
+             * Out with the leaves, and *before* them.
+             *
+             * Daffodils and blackthorn both flower on bare wood — that is the
+             * whole point of them, and the reason March is worth looking at. So
+             * the window is the arrival of spring rather than the presence of
+             * leaf: strongest while the canopy is still coming, gone by the time
+             * it is full.
+             */
+            season: (f) => f.spring > 0.18,
+          });
         }
       }
 
@@ -2098,14 +2172,55 @@ export function App(): JSX.Element {
       // Trees, the same influence test. A wood beyond your reach is part of the
       // country you cannot touch, and leaving it out is what makes the boundary
       // read as a boundary rather than as a colour wash.
+      /*
+       * The year, for the trees. From the sim, like the snow, so the leaves and
+       * the calendar cannot disagree.
+       */
+      const leafy = foliage(world.day);
+      src.leaf = leafy.leaf;
+      src.spring = leafy.spring;
+      src.autumn = leafy.autumn;
+      /*
+       * Which tree model each broadleaf is drawn as, this week.
+       *
+       * The set has had `tree_autumn` and `tree_bare` in it from the beginning
+       * and nothing ever asked for them: the species was chosen once at startup
+       * and drawn in July green in January. Swapping here rather than at layout
+       * costs nothing — the list is walked every frame anyway to filter it by
+       * influence — and it means the district turns and comes back without any
+       * bookkeeping at all.
+       *
+       * The shader tints and shrinks the canopy either side of these swaps (see
+       * `litMaterial`), so what the swap has to do is only the *shape*: a bare
+       * oak is not a green oak in brown, it is a different silhouette. The
+       * crossfade is the shrink; this is the frame it hands over on.
+       *
+       * Conifers are exempt, obviously, and are the reason a winter district
+       * still has something green in it.
+       */
+      const dressed = (model: number): number => {
+        if (model >= BROADLEAF_MODELS) return model;
+        if (leafy.leaf < 0.22) return TREE_BARE;
+        if (leafy.autumn > 0.45) return TREE_AUTUMN;
+        return model;
+      };
       let sn = 0;
       for (const q of trees) {
         if (sn >= src.sx.length) break;
         const tile = Math.round(q.z) * DISTRICT + Math.round(q.x);
         if (!world.influence.usable(tile)) continue;
+        /*
+         * Out of season, out of the district.
+         *
+         * Daffodils are the reason this exists: a spring flower has to be *gone*
+         * for the other nine months, and there is no colour that means gone. The
+         * window is a property of the scattered thing, so the rule lives with
+         * whatever put it there rather than in a list of special cases here.
+         */
+        if (q.season !== undefined && !q.season(leafy)) continue;
         src.sx[sn] = q.x;
         src.sz[sn] = q.z;
-        src.sModel[sn] = q.model;
+        src.sModel[sn] = dressed(q.model);
         src.sRot[sn] = q.rot;
         src.sScale[sn] = q.scale;
         sn++;

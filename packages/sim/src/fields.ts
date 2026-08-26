@@ -34,6 +34,7 @@
  * difference between a hedgerow and a wall.
  */
 
+import { DAYS_PER_YEAR } from './constants.ts';
 import type { Rng } from './rng.ts';
 
 /** What is growing. The renderer maps these to colours; the sim uses them for
@@ -147,6 +148,58 @@ const SPRING_SOWN: { from: number; crop: Crop }[] = [
  * function of the parcel. A random draw per call would have a field changing its
  * mind about what it is growing every time anything asked.
  */
+/**
+ * The year, as three numbers about leaves.
+ *
+ * The district has had four seasons since the beginning and the vegetation has
+ * never known about any of them: the same tree, in the same green, in January
+ * and July. Snow was wired up because snow is *ground*, and the ground had a
+ * uniform waiting for it — foliage had nothing.
+ *
+ * Three scalars rather than a season name, because everything that reads this
+ * wants to *blend*. A named season is a switch, and a switch means the whole
+ * district changes its trees between one frame and the next, which is the same
+ * mistake the sun made before it was made continuous. So:
+ *
+ *   `leaf`   — how much foliage there is. Bare in January, full by June.
+ *   `spring` — the fresh, yellow-green, blossom-and-daffodils part of it.
+ *   `autumn` — how far the turn has gone, gold at its peak.
+ *
+ * English rather than generic. Leaf comes late here and goes late: nothing much
+ * before the end of March, full canopy by the start of June, the turn through
+ * October, and bare by the end of November. That asymmetry — six weeks to come
+ * into leaf, ten to go over — is most of what makes a year feel like a year
+ * rather than a sine wave.
+ */
+export function foliage(day: number): { leaf: number; spring: number; autumn: number } {
+  const t = (((day % DAYS_PER_YEAR) + DAYS_PER_YEAR) % DAYS_PER_YEAR) / DAYS_PER_YEAR;
+  // Fractions of the year: the calendar is twelve thirty-day months.
+  const march = 3 / 12;
+  const june = 5 / 12;
+  const october = 8.6 / 12;
+  const december = 11 / 12;
+  const ramp = (a: number, b: number): number =>
+    Math.max(0, Math.min(1, (t - a) / (b - a)));
+  // Up through spring, held through summer, down through autumn.
+  const coming = ramp(march, june);
+  const going = 1 - ramp(october, december);
+  const leaf = Math.min(coming, going);
+  /*
+   * Spring is the *arrival*, not a date range: it is at its strongest while the
+   * leaf is still coming and gone once the canopy is full. Squared so the
+   * yellow-green is a fortnight of the year rather than a season of it.
+   */
+  const rising = coming * (1 - coming);
+  const spring = Math.min(1, rising * 4) * (1 - going * 0 + 0);
+  /*
+   * And autumn is the *going*, which is why it is derived from the same ramp
+   * rather than from another pair of dates. Peaks when half the leaf has gone.
+   */
+  const falling = (1 - going) * going;
+  const autumn = Math.min(1, falling * 4);
+  return { leaf, spring, autumn };
+}
+
 export function springSown(parcel: number): boolean {
   return ((parcel * 2246822519) >>> 0) % 5 < 2;
 }
