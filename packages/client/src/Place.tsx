@@ -37,7 +37,7 @@ import { useEffect, useState, type JSX } from 'react';
 import { type World, ContractState, MoneyKind } from '@interchange/sim';
 import { content } from '@interchange/data';
 import type { Renderer } from '@interchange/render';
-import { money, Carriers, carriersFor, useAnchor } from './Markers.tsx';
+import { money, Carriers, thumb, useAnchor } from './Markers.tsx';
 import { anchorAt } from './anchor.ts';
 import { BodyIcon, Icon } from './Icons.tsx';
 
@@ -830,22 +830,63 @@ function Arrange({
         )}
       </div>
 
-      <div className="head">Put a lorry on it</div>
-      {spare.length === 0 && (
-        <div className="why">
-          {drivers.length === 0
-            ? 'Every lorry is out. You need another one, or take one off a job.'
-            : `Nothing free can carry ${C.cargo[cargo].name.toLowerCase()}`
-              + ` — that wants ${carriersFor(C.cargo[cargo].handling)
-                .map((v) => v.name.toLowerCase()).join(' or ')}.`}
+      {/*
+        * "Assign Vehicle", and under it the vehicles that would do.
+        *
+        * The heading was "Put a lorry on it", which is chatty where the rest of
+        * the interface is plain, and the refusal underneath was a sentence listing
+        * vehicle names in prose. Both were saying in words what the game can show:
+        * the pipeline renders every vehicle, so what a load takes is a row of the
+        * actual lorries, and hovering names them. Same component the contract
+        * cards use — "similarly to how we do with the other thing of showing the
+        * renderings of them" — so the constraint looks the same everywhere it
+        * appears, which is the point of having one.
+        */}
+      <div className="head head-row">
+        <span className="grow">Assign Vehicle</span>
+        {/* Only when there is a list to qualify. With nothing to show, the empty
+            state below says the same thing at a readable size, and two copies of
+            one constraint on one panel is one too many. */}
+        {spare.length > 0 && <Carriers handling={C.cargo[cargo].handling} size={18} />}
+      </div>
+      {spare.length === 0 ? (
+        /*
+         * An empty state rather than a line of small red text.
+         *
+         * "If it's empty, a nice empty state UI." The distinction worth drawing is
+         * between the two ways it can be empty, because they have different
+         * answers: every lorry is busy, which you fix by freeing one or buying
+         * one, or nothing you own can carry this at all, which you fix by buying
+         * a *particular* one. So the second case shows which, in pictures.
+         */
+        <div className="nowt">
+          <span className="nowt-head">You don&rsquo;t have any available vehicles</span>
+          <span className="nowt-sub">
+            {drivers.length === 0
+              ? 'Every lorry is out on a job. Take one off a run, or buy another.'
+              : `Nothing free can carry ${C.cargo[cargo].name.toLowerCase()}.`}
+          </span>
+          {/* And what would do it, in both cases: the answer to "so what do I
+              buy" is the same whether you own none or own the wrong ones. */}
+          <span className="nowt-needs">
+            <span className="nowt-label">This load takes</span>
+            <Carriers handling={C.cargo[cargo].handling} size={30} />
+          </span>
         </div>
-      )}
-      {spare.map((d) => (
+      ) : spare.map((d) => (
         <button
           key={d.vehicle}
           className="driver"
           onClick={() => onAssign(d.vehicle)}
         >
+          {/* The lorry itself, at the size the fleet list draws it. A name and a
+              tonnage is a poor description of a vehicle when a picture of it is
+              already sitting on disk. */}
+          <img
+            className="veh-thumb"
+            src={thumb(C.vehicles[world.vehicles.type[d.vehicle]].id)}
+            alt=""
+          />
           <span className="grow">
             <span className="driver-name">
               {C.vehicles[world.vehicles.type[d.vehicle]].name}

@@ -467,10 +467,21 @@ export function Carriers(
 ): JSX.Element {
   const list = carriersFor(handling);
   const names = list.map((v) => v.name).join(', ');
+  /* The renders are 1.3 to 1, so a width and a height rather than a width and a
+     guess: `size` was a prop the stylesheet quietly ignored, which meant every
+     use of this came out at the one size the CSS happened to set. */
+  const box = { width: `${Math.round(size * 1.3)}px`, height: `${size}px` };
   return (
     <span className="carriers" title={names}>
       {list.map((v) => (
-        <img key={v.id} className="carrier" src={thumb(v.id)} alt={v.name} title={v.name} />
+        <img
+          key={v.id}
+          className="carrier"
+          style={box}
+          src={thumb(v.id)}
+          alt={v.name}
+          title={v.name}
+        />
       ))}
     </span>
   );

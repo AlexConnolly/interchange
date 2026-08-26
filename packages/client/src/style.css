@@ -127,11 +127,20 @@ html, body, #root, .app {
   color: #5b5344;
   border: 2px solid rgba(255, 255, 255, 0.9);
 }
-/* Yours is gold, and it is the only colour coding on the map. */
+/* Yours is blue, and it is the only colour coding on the map.
+ *
+ * Gold before, and blue now because ownership had gone and acquired a second
+ * colour without anyone deciding it should: land you have bought is drawn blue on
+ * the ground — `ownWash` in the palette — so a gold marker standing in a blue
+ * field was two colours for one fact. One colour for "this is yours", whether it
+ * is a field or a creamery.
+ *
+ * Gold stays where it belongs: the dock, which is the interface rather than the
+ * map, and the ✓ on a chosen row. */
 .mark.mine .mark-face {
-  background: #f4c95d;
-  color: #4a3c14;
-  border-color: #fff3d2;
+  background: #2e86f0;
+  color: #fff;
+  border-color: #cfe4ff;
 }
 /* Work going: a dot on the shoulder. Not a number and not a label — the panel
    has the detail, and a marker that tried to carry it would be a spreadsheet
@@ -143,7 +152,7 @@ html, body, #root, .app {
   width: 11px;
   height: 11px;
   border-radius: 50%;
-  background: #4ab0d0;
+  background: #f0a63c;
   border: 2px solid #fff;
 }
 .mark-tail {
@@ -679,6 +688,10 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
      without a border, which at this size would read as a box round a lorry. */
   filter: drop-shadow(0 1px 2px rgba(30, 40, 30, 0.22));
 }
+/* Smaller in a chooser row than in the fleet list. There it is a card about one
+   vehicle; here it is a line in a list of options, and a 46px render turns a
+   compact row into a stack of tiles. */
+.driver .veh-thumb { width: 34px; height: 34px; flex-basis: 34px; }
 .veh-warn { display: block; font-size: 11px; color: #c04040; font-weight: 600; }
 .veh-row .price { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 12px; }
 
@@ -1511,11 +1524,14 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   border-color: rgba(255, 255, 255, 0.30);
   color: #fffdf6;
 }
-/* Yours reads gold in both — dimmed when idle, and never inverted. It is the
+/* Yours reads blue in both — dimmed when idle, and never inverted. It is the
    only colour coding on the map and losing it would cost the one thing it is
    for. */
-.mark.mine .mark-face { background: rgba(126, 95, 20, 0.46); color: #f7e3ac; }
-.mark.mine:hover .mark-face { background: rgba(163, 124, 27, 0.86); color: #ffeec0; }
+.mark.mine .mark-face { background: rgba(24, 76, 146, 0.52); color: #d6e7ff; }
+.mark.mine:hover .mark-face { background: rgba(35, 110, 205, 0.88); color: #f2f8ff; }
+/* The work-going dot was the same blue as ownership is now, which on your own
+   marker would have been a blue pip on a blue disc. Amber: it means "something is
+   happening here", which is a different fact and now looks like one. */
 .mark-dot { border-color: rgba(255, 255, 255, 0.5); }
 .mine-mark { opacity: 0.55; }
 .mine-mark:hover { opacity: 1; }
@@ -1868,6 +1884,64 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   filter: saturate(0.25);
 }
 .carriers:hover .carrier { opacity: 1; filter: none; }
+
+/* A heading with something on the right of it: the section title, and the
+   constraint that applies to the whole section. */
+.head-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* An empty state, where there was a line of small red text.
+ *
+ * Centred and given room on purpose. A list that has come back with nothing is
+ * not an error — it is a legitimate answer to the question, and it deserves the
+ * same space the answer would have taken rather than being apologised for in a
+ * footnote. The heading says what is true, the line under it says what to do,
+ * and the pictures say what to look for. */
+.nowt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 16px 12px 14px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.035);
+  text-align: center;
+}
+/* Wraps, and is sized to. The sentence is longer than the panel is wide, and a
+   heading that cannot wrap simply runs out over the edge of the card. */
+.nowt-head {
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--ink);
+  max-width: 200px;
+}
+.nowt-sub {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-dim);
+  max-width: 210px;
+}
+.nowt-needs {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+}
+.nowt-label {
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+/* Full colour here, unlike the inline constraint elsewhere: this row is not a
+   footnote on something else, it is the only thing on the panel worth looking
+   at. */
+.nowt-needs .carrier { opacity: 1; filter: none; }
 
 /* "No buyers" on a stock line, which is a state and not a button. */
 .stock-none { font-size: 10.5px; color: var(--ink-dim); white-space: nowrap; }
