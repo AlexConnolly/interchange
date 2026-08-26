@@ -284,6 +284,18 @@ export interface AirSource extends GroundSource {
   vz: Float32Array;
   vHeading: Float32Array;
   vStopped: Uint8Array;
+  /**
+   * The scatter, because the falling leaves come off the trees in it.
+   *
+   * This list is already packed and filtered by influence every frame, so a
+   * random index into it is a tree that is definitely on screen — which is both
+   * the cheapest way to find one and the reason no trees in view means no leaves.
+   */
+  scatterCount: number;
+  sx: Float32Array;
+  sz: Float32Array;
+  sScale: Float32Array;
+  sSheds: Uint8Array;
 }
 
 export interface Air {
@@ -449,30 +461,35 @@ export function makeAir(scene: Scene): Air {
   const leaves = new Field(scene, {
     count: 380,
     /*
-     * Bigger than a leaf, for the reason the daffodils are bigger than a
-     * daffodil. Measured at the zoom the game is played at, 0.13 of a tile is
-     * seven pixels — there, countable, and not something you would call a leaf.
+     * A leaf, measured in pixels rather than in metres.
+     *
+     * 0.13 of a tile was seven pixels at the zoom the game is played at, which
+     * is a speck; 0.2 read as a blob once they were spread evenly over the
+     * field like rain. Coming off the trees they cluster, so they can be smaller
+     * again and still be found — a leaf is legible because of *where* it is far
+     * more than because of how big it is.
      */
-    tiles: 0.2,
-    colour: '#c98a3e',
+    tiles: 0.16,
+    colour: '#c07a2c',
     opacity: 0.95,
     spread: 0,
     behave: (f, i, k, dt, time) => {
       const j = i * 3;
       /*
-       * A leaf does not fall, it *slips*. The side-to-side is most of what makes
-       * one read as a leaf rather than as a raindrop or a spark, and it has to be
-       * bigger than gravity feels like it should allow — a dry leaf is nearly all
-       * drag.
+       * A leaf does not fall, it *slips* — and it slips about a point, which is
+       * the bit the first version missed. Sine on the position rather than the
+       * velocity, so it swings back and forth across its own line of descent
+       * instead of being blown steadily off it. That difference is the whole
+       * reason one reads as a leaf and not as a drop of rain.
        */
-      f.pos[j] += Math.sin(time * 2.3 + f.seed[i] * 4) * dt * 1.5;
-      f.pos[j + 2] += Math.cos(time * 1.9 + f.seed[i] * 4) * dt * 1.5;
-      // And downwind, on the district's own wind, like everything else.
-      f.vel[j] += WIND_X * dt * 0.55;
-      f.vel[j + 2] += WIND_Z * dt * 0.55;
-      // In quickly, and holding: a leaf does not fade, it lands. What ends it is
-      // its life running out near the ground.
-      return Math.min(1, k * 6) * Math.min(1, (1 - k) * 5 + 0.2);
+      f.pos[j] += Math.sin(time * 2.6 + f.seed[i] * 5) * dt * 0.9;
+      f.pos[j + 2] += Math.cos(time * 2.1 + f.seed[i] * 5) * dt * 0.9;
+      // Terminal velocity, quickly: a leaf is nearly all drag, so it does not
+      // accelerate the way a stone does. Then downwind, gently.
+      f.vel[j + 1] *= 1 - dt * 1.6;
+      f.vel[j] += WIND_X * dt * 0.30;
+      f.vel[j + 2] += WIND_Z * dt * 0.30;
+      return Math.min(1, k * 8) * Math.min(1, (1 - k) * 6 + 0.15);
     },
   });
   let leafAcc = 0;
@@ -649,23 +666,49 @@ export function makeAir(scene: Scene): Air {
        */
       const falling = frame.autumn * frame.level;
       leaves.aim(0.95 * frame.level, frame.pixelsPerTile);
-      if (falling > 0.02) {
-        leafAcc += dt * 46 * falling;
+      if (falling > 0.02 && src.scatterCount > 0) {
+        leafAcc += dt * 40 * falling;
         while (leafAcc >= 1) {
           leafAcc -= 1;
-          const a = Math.random() * 6.283;
-          const r = Math.sqrt(Math.random()) * reach;
-          const x = frame.camX + Math.cos(a) * r;
-          const z = frame.camZ + Math.sin(a) * r;
           /*
-           * Starting at canopy height and given a life that runs out around the
-           * ground, so they arrive from above and stop at the bottom rather than
-           * sinking through the field.
+           * Off a tree, not out of the sky.
+           *
+           * "They're supposed to come from the trees themselves, not randomly
+           * floating around like rain." Quite right, and the ring of specks I had
+           * before was defended in a comment as the correct model on the grounds
+           * that you cannot tell which branch a leaf left. That misses what you
+           * *can* tell: whether there is a tree above them. Evenly spread, they
+           * fall in the middle of empty fields, and a leaf in the middle of a
+           * field with nothing near it is rain.
+           *
+           * Sampling the scatter list is what makes this cheap. It is already the
+           * list of every tree on screen, packed and filtered by influence, so
+           * one random index gets a tree that is definitely in view — and no
+           * trees in view now means no leaves, which is the whole point.
            */
+          const i = (Math.random() * src.scatterCount) | 0;
+          if (src.sSheds[i] === 0) continue;
+          const x = src.sx[i];
+          const z = src.sz[i];
+          if (Math.abs(x - frame.camX) > reach || Math.abs(z - frame.camZ) > reach) continue;
+          /*
+           * Somewhere in the canopy, and out of the outer half of it.
+           *
+           * A leaf leaves the edge of a crown rather than the middle — the middle
+           * is where the trunk is — so the offset is biased outward, which also
+           * happens to make the fall visibly *around* the tree rather than
+           * through it. The height is the tree's own scale, because a big oak
+           * drops from higher up than a hawthorn and the fall time should say so.
+           */
+          const sc = src.sScale[i];
+          const a = Math.random() * 6.283;
+          const rad = (0.20 + Math.random() * 0.24) * sc;
+          const bx = x + Math.cos(a) * rad;
+          const bz = z + Math.sin(a) * rad;
           leaves.spawn(
-            x, groundHeightAt(src, x, z) + 1.1 + Math.random() * 1.5, z,
-            0, -(0.36 + Math.random() * 0.22), 0,
-            2.6 + Math.random() * 1.8,
+            bx, groundHeightAt(src, bx, bz) + (0.42 + Math.random() * 0.30) * sc + 0.22, bz,
+            0, -(0.30 + Math.random() * 0.14), 0,
+            2.4 + Math.random() * 2.0,
           );
         }
       }

@@ -639,6 +639,7 @@ export function App(): JSX.Element {
       sModel: new Uint8Array(SCATTER_MAX),
       sRot: new Float32Array(SCATTER_MAX),
       sScale: new Float32Array(SCATTER_MAX),
+      sSheds: new Uint8Array(SCATTER_MAX),
       lampCount: 0,
       lx: new Float32Array(400),
       lz: new Float32Array(400),
@@ -2232,6 +2233,13 @@ export function App(): JSX.Element {
         src.sx[sn] = q.x;
         src.sz[sn] = q.z;
         src.sModel[sn] = dressed(q.model);
+        /*
+         * Whether this one drops leaves, which is a fact about the *species* and
+         * not about the mesh it is currently drawn as — see `sSheds`. A conifer
+         * never does; a bare oak in December still is one, and is why the answer
+         * cannot be read off the swapped model.
+         */
+        src.sSheds[sn] = q.model < BROADLEAF_MODELS ? 1 : 0;
         src.sRot[sn] = q.rot;
         src.sScale[sn] = q.scale;
         sn++;

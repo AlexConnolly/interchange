@@ -239,6 +239,20 @@ export interface RenderSource extends GroundSource, RoadSource {
   sRot: Float32Array;
   sScale: Float32Array;
   /**
+   * 1 where this scattered thing is a broadleaf that sheds.
+   *
+   * Set by the client rather than derived from the model index, because the model
+   * index is not stable: a broadleaf is swapped for the autumn model at the turn
+   * and the bare one in winter, so "is it a tree" cannot be answered by looking
+   * at which mesh it is being drawn as. The client knows what it *meant*.
+   *
+   * This exists so the falling leaves can come off actual trees. They used to be
+   * emitted in a ring around the camera, which I defended in a comment as the
+   * right model and which was simply wrong: evenly spread specks with no
+   * relationship to the canopy read as orange rain.
+   */
+  sSheds: Uint8Array;
+  /**
    * Street lamps, for the pool of real lights.
    *
    * Separate from the scatter that draws them because these are the strongest
