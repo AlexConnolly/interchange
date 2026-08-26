@@ -24,6 +24,7 @@ import {
 } from '@interchange/render';
 import { Alerts, Earnings, Markers, Mine, money } from './Markers.tsx';
 import { Ambient, areaDemand } from './ambient.ts';
+import { Grazing } from './grazing.ts';
 import { eveningFor, litness, type Evening } from './evening.ts';
 import { Sound, type Heard } from './sound.ts';
 import { Farmwork, type FarmField } from './farmwork.ts';
@@ -213,9 +214,16 @@ const CROP_PLOUGH = 5;
  * because a meadow is what hay comes from.
  */
 const PROPS_BY_CROP: Record<number, number[]> = {
-  [CROP_PASTURE]: [4, 4, 5, 7],
-  [CROP_PASTURE_RICH]: [5, 5, 4, 7],
-  [CROP_MEADOW]: [0, 1, 2, 4],
+  /*
+   * No sheep or cattle in here any more — see `grazing.ts`.
+   *
+   * They were props, which is to say nailed down, and a field of livestock that
+   * never moves reads as a field of ornaments. The troughs stay: a trough is
+   * supposed to be nailed down.
+   */
+  [CROP_PASTURE]: [7],
+  [CROP_PASTURE_RICH]: [7],
+  [CROP_MEADOW]: [0, 1, 2],
   [CROP_WHEAT]: [0, 2],
   [CROP_WHEAT_RIPE]: [3, 3, 0, 1, 2],
   [CROP_PLOUGH]: [6],
@@ -1573,6 +1581,23 @@ export function App(): JSX.Element {
     const CAR_SALOON = modelNames.length - 6;
     const CAR_ESTATE = modelNames.length - 5;
 
+    /*
+     * And the livestock, appended *after* the constants above are worked out.
+     *
+     * Those count back from the end of the list, so anything added to the end
+     * before they are computed moves a combine to where a car should be. Adding
+     * here rather than in the literal is the whole of why this is three lines
+     * further down than it looks like it should be.
+     *
+     * They are the same two models the scatter has always used for sheep and
+     * cattle — a prop and a vehicle are the same thing to a draw call, and the
+     * only reason these are in the fleet list is that the fleet list is what gets
+     * per-frame positions.
+     */
+    const SHEEP_MODEL = modelNames.length;
+    const CATTLE_MODEL = modelNames.length + 1;
+    modelNames.push('prop_sheep', 'prop_cattle');
+
     /** Every model that is a farm machine, for the engine note. */
     const FARM_MODELS = new Set<number>([
       MACHINES.plough, MACHINES.drill, MACHINES.sprayer, MACHINES.combine,
@@ -1603,6 +1628,34 @@ export function App(): JSX.Element {
       BULK[MACHINES.sprayer] = 0.4;
       BULK[MACHINES.combine] = 0.9;
     }
+    /*
+     * Livestock, which needs to know where the grass is and nothing else.
+     *
+     * `grazeable` is the whole interface: grass, no road, not water. The road
+     * test is the one that matters — a cow standing in the lane is funny once and
+     * then it is a bug — and it reads the same live `roadClass` the rest of the
+     * client does, so laying a track through a field moves the animals off it.
+     *
+     * Built here rather than beside the other ambient systems because it needs
+     * the two model indices above, which cannot exist until the fleet list is
+     * settled.
+     */
+    const grazing = new Grazing({
+      size: DISTRICT,
+      grazeable: (t) => {
+        if (t < 0 || t >= DISTRICT * DISTRICT) return false;
+        if (roadClass[t] >= 0) return false;
+        const h = world.terrain.height[t];
+        if (h <= 0) return false;
+        if ((world.terrain.flags[t] & TileFlag.River) !== 0) return false;
+        const c = world.terrain.fields.crop[t];
+        return c === CROP_PASTURE || c === CROP_PASTURE_RICH || c === CROP_MEADOW;
+      },
+      usable: (t) => world.influence.usable(t),
+      sheepModel: SHEEP_MODEL,
+      cattleModel: CATTLE_MODEL,
+    });
+
     /*
      * What the traffic is made of, and it is not all cars.
      *
@@ -2197,6 +2250,12 @@ export function App(): JSX.Element {
       farmwork.hour = (src.dayFraction * 24 + 6) % 24;
       n = farmwork.step(
         wdt, MACHINES, n,
+        src.vx, src.vz, src.vHeading, src.vLivery, src.vModel, src.vId,
+      );
+      // And the livestock, which is the slowest thing in the district by a long
+      // way and the only one that is not going anywhere.
+      n = grazing.step(
+        wdt, renderer.camX, renderer.camZ, n,
         src.vx, src.vz, src.vHeading, src.vLivery, src.vModel, src.vId,
       );
       // Traffic and tractors manage their own standing about, so the renderer

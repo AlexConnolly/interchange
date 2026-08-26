@@ -92,6 +92,17 @@ export function Place({
   const [tab, setTab] = useState<Tab>('about');
   const [assigning, setAssigning] = useState(-1);
   /*
+   * The supply sub-view: which input we are arranging, and where from.
+   *
+   * A page of its own rather than a third level of unfolding inside a card.
+   * Everything about arranging a run — which producer, which lorry — lives here,
+   * the bubble's own header turns into a back chevron while it is open, and the
+   * tab strip goes away because there is nothing to switch to from inside a
+   * decision. That is the "sliding UI with a back button" this wanted: one thing
+   * on screen, one way back.
+   */
+  const [arranging, setArranging] = useState<{ cargo: number; from: number } | null>(null);
+  /*
    * Follow the place.
    *
    * The camera glides when a place is opened, and the bubble has to stay on it
@@ -102,7 +113,7 @@ export function Place({
 
   // A new place resets to its first tab: the question "what is this" comes
   // before "what is it offering", always.
-  useEffect(() => { setTab('about'); setAssigning(-1); }, [site]);
+  useEffect(() => { setTab('about'); setAssigning(-1); setArranging(null); }, [site]);
 
   if (site < 0 || site >= world.sites.count) return null;
   const def = C.industries[world.sites.def[site]];
@@ -161,12 +172,25 @@ export function Place({
       }))}
     >
       <div className="sheet-head">
-        <span className="sheet-icon" style={{ color: def.colour }}>
-          <Icon id={def.id} size={24} />
-        </span>
+        {arranging ? (
+          <button
+            className="x"
+            data-quiet
+            onClick={() => setArranging(null)}
+            aria-label="Back"
+          >‹</button>
+        ) : (
+          <span className="sheet-icon" style={{ color: def.colour }}>
+            <Icon id={def.id} size={24} />
+          </span>
+        )}
         <div className="grow">
-          <div className="sheet-title">{def.name}</div>
-          <div className="sheet-sub">{mine ? 'Yours' : 'For sale'}</div>
+          <div className="sheet-title">
+            {arranging ? `Bring in ${C.cargo[arranging.cargo].name.toLowerCase()}` : def.name}
+          </div>
+          <div className="sheet-sub">
+            {arranging ? def.name : mine ? 'Yours' : 'For sale'}
+          </div>
         </div>
         <button className="x" onClick={actions.close} aria-label="Close">×</button>
       </div>
@@ -177,7 +201,25 @@ export function Place({
         * opened anything, which is what the old single scroll was trying to do
         * by showing all three at once.
         */}
-      <div className="tabs" role="tablist">
+      {arranging && (
+        <div className="bubble-body">
+          <Arrange
+            world={world}
+            site={site}
+            cargo={arranging.cargo}
+            from={arranging.from}
+            onFrom={(f) => setArranging({ cargo: arranging.cargo, from: f })}
+            onHover={(to) => actions.preview(to, site)}
+            onAssign={(vehicle) => {
+              actions.supply(arranging.from, site, arranging.cargo, vehicle);
+              actions.preview(-1, -1);
+              setArranging(null);
+            }}
+          />
+        </div>
+      )}
+
+      <div className="tabs" role="tablist" hidden={arranging !== null}>
         <button
           className={`tab ${tab === 'about' ? 'on' : ''}`}
           onClick={() => setTab('about')}
@@ -205,7 +247,7 @@ export function Place({
         )}
       </div>
 
-      <div className="bubble-body">
+      <div className="bubble-body" hidden={arranging !== null}>
         {tab === 'about' && (
           <About world={world} site={site} mine={mine} verdict={verdict} actions={actions} />
         )}
@@ -340,7 +382,7 @@ export function Place({
             group={g}
             onGo={actions.goTo}
             onHover={(to) => actions.preview(to, site)}
-            onRun={actions.supply}
+            onArrange={(cargo, from) => setArranging({ cargo, from })}
             onEnd={actions.endRun}
           />
         ))}
@@ -496,7 +538,7 @@ function Drivers({
  * hands you the map for free.
  */
 function Supply({
-  world, site, mine, group, onGo, onHover, onRun, onEnd,
+  world, site, mine, group, onGo, onHover, onArrange, onEnd,
 }: {
   world: World;
   site: number;
@@ -508,137 +550,213 @@ function Supply({
   };
   onGo: (site: number) => void;
   onHover: (site: number) => void;
-  onRun: (from: number, to: number, cargo: number, vehicle: number) => void;
+  onArrange: (cargo: number, from: number) => void;
   onEnd: (service: number) => void;
 }): JSX.Element {
-  const [picking, setPicking] = useState(-1);
+  /*
+   * One row per input, and a row is a single sentence: what it wants, how much
+   * is on the shelf, and what is bringing more.
+   *
+   * The version before this put the whole decision on the card at once — a badge
+   * saying which body the load needs, a list of every producer in reach, and a
+   * driver picker unfolding underneath one of them. Three levels of choice
+   * stacked in a space the width of a bubble, with a chip reading "you have
+   * none" in the middle of it. "It looks dreadful", and it was, because it was
+   * answering questions nobody had asked yet.
+   *
+   * So the row itself is a statement, and choosing happens on its own page —
+   * see `SupplyPick`, which is where the drilling in and the going back live.
+   */
   const cargo = C.cargo[group.cargo];
   const stock = world.sites.stockOf(site, group.cargo);
-  /*
-   * Is this line already covered? That one question decides what the whole card
-   * offers, which is the shape that was asked for: "click row, select vehicle,
-   * assign — and if it's already assigned, switch the UI to click row, remove
-   * assignment." A line either has a lorry on it or it wants one, and showing
-   * both possibilities at once is what made the old version confusing.
-   */
   const run = mine ? world.runInto(site, group.cargo) : null;
-  return (
-    <div className={`card supply ${group.owned ? 'met' : ''}`}>
-      <div className="card-line">
-        <span className="swatch" style={{ background: cargo.colour }} />
-        <strong>{cargo.name}</strong>
-        {/*
-          * For a place of yours, what matters is not whether you own a supplier
-          * — that used to be the rule and is not any more — but whether there is
-          * anything on the shelf. An empty line is the thing you have to fix.
-          */}
-        {mine
-          ? <span className={stock > 0 ? 'have' : 'to'}>{stock > 0 ? `${stock} in hand` : 'none left'}</span>
-          : group.owned ? <span className="have">✓ yours</span> : <span className="to">needed</span>}
-      </div>
-      {/*
-        * What it has to be carried in.
-        *
-        * The tab listed places and no bodies at all, so the one hard constraint
-        * on fetching a load — milk needs a chiller, grain needs a tipper — was
-        * invisible until the picker greyed a lorry out for a reason it did not
-        * give either. Said once at the top of the line, where it belongs: it is a
-        * property of the cargo, not of any particular supplier.
-        */}
-      <span className="needs">
-        <BodyIcon handling={cargo.handling} />
-        {bodyFor(cargo.handling)}
-        {!world.fleetCanCarry(group.cargo) && <b>you have none</b>}
-      </span>
-      {/*
-        * A run in hand: what is doing it, and the one thing you might want to do
-        * about it. No candidate list underneath, because offering to arrange a
-        * second lorry onto a line that already has one is offering to make a
-        * mistake.
-        */}
-      {run && (
-        <div className="running-row">
-          <span className="grow">
-            <span className="running-name">
-              {run.vehicle >= 0
-                ? C.vehicles[world.vehicles.type[run.vehicle]].name
-                : 'No lorry on it'}
-            </span>
-            <span className="running-sub">
-              {run.vehicle >= 0 ? 'running this in' : 'the run is set up but idle'}
-            </span>
-          </span>
-          <button className="running-off" onClick={() => onEnd(run.service)}>
-            Take off
-          </button>
-        </div>
-      )}
 
-      {!run && group.candidates.map((c) => {
-        const yours = world.sites.owner[c.site] === world.player;
-        const def = C.industries[world.sites.def[c.site]];
-        /*
-         * For a place of yours this opens the lorry picker; for anyone else's it
-         * takes you there to look, as it always did.
-         *
-         * Picking rather than firing, because the run is a commitment of a
-         * vehicle for as long as it lasts and "which lorry" is the entire
-         * decision. The first version put one on immediately, chose the first
-         * free one, and told you neither which it had taken nor that the load
-         * needed a particular body — so the two things you actually needed to
-         * know were the two it did not say.
-         */
-        if (picking === c.site) {
-          return (
-            <Drivers
-              key={c.site}
-              world={world}
-              from={c.site}
-              cargo={group.cargo}
-              onPick={(v) => { onRun(c.site, site, group.cargo, v); setPicking(-1); }}
-              /*
-               * The run, not the driver's whole day. The loaded leg is the same
-               * whichever lorry does it and only the empty run out to the pickup
-               * differs, so this draws the part that is actually being chosen and
-               * does not pretend to know more than it does.
-               */
-              onHover={() => onHover(c.site)}
-              onCancel={() => { setPicking(-1); onHover(-1); }}
-            />
-          );
-        }
-        return (
+  if (!mine) {
+    // Somebody else's place: this is a reference list, not a control panel.
+    return (
+      <div className={`card supply ${group.owned ? 'met' : ''}`}>
+        <div className="card-line">
+          <span className="swatch" style={{ background: cargo.colour }} />
+          <strong>{cargo.name}</strong>
+          {group.owned
+            ? <span className="have">✓ yours</span>
+            : <span className="to">needed</span>}
+        </div>
+        {group.candidates.map((c) => (
           <button
             key={c.site}
-            className={`driver ${yours ? 'mine' : ''}`}
-            onClick={() => (mine ? setPicking(c.site) : onGo(c.site))}
+            className="driver"
+            onClick={() => onGo(c.site)}
             onMouseEnter={() => onHover(c.site)}
             onMouseLeave={() => onHover(-1)}
-            title={mine ? `Put a lorry on ${def.name} → here` : undefined}
           >
-            <span className="supply-icon" style={{ color: def.colour }}>
-              <Icon id={def.id} size={17} />
+            <span className="supply-icon" style={{ color: C.industries[world.sites.def[c.site]].colour }}>
+              <Icon id={C.industries[world.sites.def[c.site]].id} size={17} />
             </span>
             <span className="grow">
-              <span className="driver-name">{def.name}</span>
+              <span className="driver-name">{C.industries[world.sites.def[c.site]].name}</span>
               <span className="driver-where">{c.distance} tiles away</span>
             </span>
-            <span className="driver-no">{mine ? 'collect' : yours ? '✓' : 'go'}</span>
+            <span className="driver-no">go</span>
           </button>
-        );
-      })}
-      {group.hidden > 0 && (
-        <div className="unknown">
-          <span className="qm">???</span>
-          {group.hidden === 1
-            ? 'somewhere out of reach'
-            : `${group.hidden}, somewhere out of reach`}
+        ))}
+        {group.candidates.length === 0 && group.hidden === 0 && (
+          <div className="why">Nothing in the district makes it.</div>
+        )}
+      </div>
+    );
+  }
+
+  if (run) {
+    return (
+      <div className="running-row">
+        <span className="swatch" style={{ background: cargo.colour }} />
+        <span className="grow">
+          <span className="running-name">
+            {cargo.name}
+            <em>{stock} in hand</em>
+          </span>
+          <span className="running-sub">
+            {run.vehicle >= 0
+              ? C.vehicles[world.vehicles.type[run.vehicle]].name
+              : 'no lorry on it'}
+          </span>
+        </span>
+        <button className="running-off" onClick={() => onEnd(run.service)}>Take off</button>
+      </div>
+    );
+  }
+
+  const nearest = group.candidates[0];
+  return (
+    <button
+      className="supply-row"
+      onClick={() => nearest && onArrange(group.cargo, nearest.site)}
+      disabled={!nearest}
+      onMouseEnter={() => nearest && onHover(nearest.site)}
+      onMouseLeave={() => onHover(-1)}
+    >
+      <span className="swatch" style={{ background: cargo.colour }} />
+      <span className="grow">
+        <span className="running-name">
+          {cargo.name}
+          <em>{stock} in hand</em>
+        </span>
+        <span className="running-sub">
+          {nearest
+            ? `from ${C.industries[world.sites.def[nearest.site]].name}, ${nearest.distance} tiles`
+            : group.hidden > 0 ? 'the supplier is out of reach' : 'nothing makes it'}
+        </span>
+      </span>
+      {nearest && <span className="supply-go">›</span>}
+    </button>
+  );
+}
+
+/**
+ * Arranging one run: where from, and which lorry.
+ *
+ * Its own page, with the bubble's header turned into a back chevron, because a
+ * decision with two parts does not fit in a card. And the parts are in the order
+ * they matter: the supplier is *defaulted to the nearest* and stated as a line
+ * you may change, while the lorry — the thing that is actually being committed
+ * for the next hour — is the list you are looking at.
+ *
+ * The old version had this the other way round, which is what made it unusable:
+ * every producer in reach was a button, each of which unfolded a driver list
+ * underneath it, so the panel grew a level every time you touched it and the
+ * question "which lorry" was three taps deep.
+ */
+function Arrange({
+  world, site, cargo, from, onFrom, onHover, onAssign,
+}: {
+  world: World;
+  site: number;
+  cargo: number;
+  from: number;
+  onFrom: (from: number) => void;
+  onHover: (site: number) => void;
+  onAssign: (vehicle: number) => void;
+}): JSX.Element {
+  const [changing, setChanging] = useState(false);
+  const suppliers = world.suppliersFor(site).find((g) => g.cargo === cargo);
+  const drivers = world.driversForRun(from, cargo);
+  const def = C.industries[world.sites.def[from]];
+  const spare = drivers.filter((d) => d.suitable);
+
+  if (changing) {
+    return (
+      <>
+        <div className="head">Collect from</div>
+        {(suppliers?.candidates ?? []).map((c) => (
+          <button
+            key={c.site}
+            className={`driver ${c.site === from ? 'on' : ''}`}
+            onClick={() => { onFrom(c.site); setChanging(false); }}
+            onMouseEnter={() => onHover(c.site)}
+            onMouseLeave={() => onHover(-1)}
+          >
+            <span className="supply-icon" style={{ color: C.industries[world.sites.def[c.site]].colour }}>
+              <Icon id={C.industries[world.sites.def[c.site]].id} size={17} />
+            </span>
+            <span className="grow">
+              <span className="driver-name">{C.industries[world.sites.def[c.site]].name}</span>
+              <span className="driver-where">{c.distance} tiles away</span>
+            </span>
+            {c.site === from && <span className="driver-no">✓</span>}
+          </button>
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {/* Where from, as a line rather than a list. Changing it is a link because
+          it is the rarer of the two decisions: the nearest supplier is the right
+          one nearly always, and the exceptions are worth a tap. */}
+      <div className="from-line">
+        <span className="supply-icon" style={{ color: def.colour }}>
+          <Icon id={def.id} size={17} />
+        </span>
+        <span className="grow">
+          <span className="running-name">{def.name}</span>
+          <span className="running-sub">
+            {suppliers?.candidates.find((c) => c.site === from)?.distance ?? 0} tiles away
+          </span>
+        </span>
+        {(suppliers?.candidates.length ?? 0) > 1 && (
+          <button className="from-change" onClick={() => setChanging(true)}>change</button>
+        )}
+      </div>
+
+      <div className="head">Put a lorry on it</div>
+      {spare.length === 0 && (
+        <div className="why">
+          {drivers.length === 0
+            ? 'Every lorry is out. You need another one, or take one off a job.'
+            : `Nothing free can carry ${C.cargo[cargo].name.toLowerCase()} — that wants a ${bodyFor(C.cargo[cargo].handling).toLowerCase()}.`}
         </div>
       )}
-      {group.candidates.length === 0 && group.hidden === 0 && (
-        <div className="why">Nothing in the district makes it.</div>
-      )}
-    </div>
+      {spare.map((d) => (
+        <button
+          key={d.vehicle}
+          className="driver"
+          onClick={() => onAssign(d.vehicle)}
+        >
+          <span className="grow">
+            <span className="driver-name">
+              {C.vehicles[world.vehicles.type[d.vehicle]].name}
+            </span>
+            <span className="driver-where">
+              {d.yard >= 0 ? world.yards.names[d.yard] : 'no yard'}
+              {d.yard >= 0 && ` · ${d.deadTiles} empty to the pickup`}
+            </span>
+          </span>
+          <span className="driver-no">assign</span>
+        </button>
+      ))}
+    </>
   );
 }
 

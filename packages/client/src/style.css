@@ -1499,87 +1499,17 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .mine-mark { opacity: 0.55; transition: opacity 260ms ease; }
 .mine-mark:hover { opacity: 1; transition-duration: 120ms; }
 
-/* ------------------------------------------------- the panels, dark as well
 
-   "Let's convert those white UIs into the same darker ones we use elsewhere,
-   but these ones, since active, should obviously be slightly more in your face."
+/* ------------------------------------------------- the money tab
 
-   Which is the right instinct and worth stating as a rule: everything in this
-   interface is the same dark glass, and *opacity is the only thing that says how
-   much it wants your attention*. Idle furniture sits at a quarter and comes up
-   when you reach for it; a panel you have deliberately opened starts where that
-   furniture ends. One material, one variable, no second visual language for
-   "this one matters" — which is what a white panel among dark ones was.
+   Panels stay cream. They were made dark to match the furniture and it was the
+   wrong call: the furniture is *ambient* — it sits over the countryside all the
+   time, so it has to get out of the way — and a panel is a page you opened to
+   read. Cream is what reading wants, and the two being different materials is
+   not an inconsistency, it is the difference between a thing you look through and
+   a thing you look at.
 
-   The ink flips with it: near-white text, and the accent colours picked so they
-   still read on a dark ground rather than being left over from a light one. */
-
-.panel,
-.bubble,
-.drivers,
-.sheet {
-  background: rgba(13, 16, 14, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  box-shadow: 0 10px 34px rgba(6, 12, 8, 0.42);
-  color: #eeece3;
-}
-/* The bubble's little pointer is part of the bubble and has to match it. */
-.bubble-arrow { border-top-color: rgba(13, 16, 14, 0.88) !important; }
-
-/* Anything that was a quiet grey on cream is now a quiet light on dark. The
-   variables do most of it, so this is the list of things that had a literal. */
-.panel dt,
-.sub,
-.price,
-.num,
-.card-line .to,
-.driver-where,
-.sheet-sub,
-.stock-row.need,
-.dim,
-.dim-row .title { color: #a9a79c; }
-.head { color: #cfccc0; }
-
-/* Rows, which were white cards on cream. Same rule again: a row is a surface on
-   a surface, so it is a lift in opacity rather than a change of colour. */
-.job,
-.driver,
-.card,
-.stock-row,
-.tx,
-.fit-row,
-.card-line {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.09);
-  color: inherit;
-}
-.job:hover,
-.driver:not(:disabled):hover,
-.fit-row:hover { background: rgba(255, 255, 255, 0.12); }
-.driver:disabled { opacity: 0.4; }
-
-/* Buttons inside a panel. Gold stays gold: it is the one accent the whole game
-   uses for "this is the action", and it reads on dark as well as on cream. */
-.btn {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: rgba(255, 255, 255, 0.14);
-  color: #eeece3;
-}
-.btn:hover { background: rgba(255, 255, 255, 0.16); }
-.btn.go, .btn.primary { background: #f4c95d; color: #4a3c14; border-color: #d9a72e; }
-.btn:disabled { opacity: 0.38; }
-
-/* The tab strip. The chosen tab is the brightest thing in the panel, because it
-   is the one piece of state the panel has. */
-.tab { color: #a9a79c; }
-.tab.on { color: #f7f5ec; border-bottom-color: #f4c95d; }
-.tab:disabled { opacity: 0.34; }
-
-/* And the panel's own close button, which was drawn for a light ground. */
-.x { color: #a9a79c; }
-.x:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
-
-/* ---- the money tab ---------------------------------------------------- */
+   So this is only the money tab's own furniture, drawn for a light ground. */
 
 /* Three figures across the top: in, out, and what that leaves. The net is the
    only one anybody really reads, so it is the only one with a colour. */
@@ -1595,7 +1525,7 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   gap: 1px;
   padding: 6px 8px;
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.045);
   font-variant-numeric: tabular-nums;
   font-size: 12.5px;
   font-weight: 700;
@@ -1606,10 +1536,10 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #8f8d84;
+  color: var(--ink-dim);
 }
-.tally-cell.net.good { color: #8fd39a; }
-.tally-cell.net.bad { color: #e59a92; }
+.tally-cell.net.good { color: #2f6b45; }
+.tally-cell.net.bad { color: #a83c3c; }
 
 /* One transaction. The reason on the left because that is what you are scanning
    for; the figure right-aligned and tabular so a column of them lines up. */
@@ -1620,6 +1550,7 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   padding: 6px 8px;
   border-radius: 9px;
   margin-bottom: 3px;
+  background: rgba(0, 0, 0, 0.035);
 }
 .tx .grow { display: flex; flex-direction: column; min-width: 0; }
 .tx-why {
@@ -1628,23 +1559,15 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.tx-when { font-size: 10.5px; color: #8f8d84; }
+.tx-when { font-size: 10.5px; color: var(--ink-dim); }
 .tx-sum {
   font-variant-numeric: tabular-nums;
   font-size: 12.5px;
   font-weight: 700;
   white-space: nowrap;
 }
-.tx-sum.in { color: #8fd39a; }
-.tx-sum.out { color: #e59a92; }
-
-/* The body-type chip, which kept the ink it was given for a cream panel: a mid
-   teal on pale teal, which on black is a dark word on a dark badge. Same three
-   states, lifted so they read on the dark ground. */
-.needs { background: rgba(96, 190, 220, 0.16); color: #8fd6ee; }
-.needs.can { background: rgba(96, 200, 130, 0.16); color: #93dcab; }
-.needs.cannot { background: rgba(226, 110, 110, 0.16); color: #efa3a0; }
-.needs b { color: #f3bdba; }
+.tx-sum.in { color: #2f6b45; }
+.tx-sum.out { color: #a83c3c; }
 
 /* A run already in hand, which is a statement rather than a button until you
    decide to end it. Gold-edged because it is *yours* — the same signal a lit
@@ -1655,18 +1578,18 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   gap: 8px;
   padding: 7px 9px;
   border-radius: 10px;
-  background: rgba(244, 201, 93, 0.12);
-  border: 1px solid rgba(244, 201, 93, 0.34);
+  background: rgba(244, 201, 93, 0.18);
+  border: 1px solid rgba(217, 167, 46, 0.45);
   margin-bottom: 4px;
 }
 .running-row .grow { display: flex; flex-direction: column; min-width: 0; }
 .running-name { font-size: 12px; font-weight: 600; }
-.running-sub { font-size: 10.5px; color: #a9a79c; }
+.running-sub { font-size: 10.5px; color: var(--ink-dim); }
 .running-off {
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(0, 0, 0, 0.14);
   border-radius: 8px;
-  background: none;
-  color: #efa3a0;
+  background: rgba(255, 255, 255, 0.6);
+  color: #a83c3c;
   font: inherit;
   font-size: 11px;
   font-weight: 700;
@@ -1674,4 +1597,67 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   cursor: pointer;
   white-space: nowrap;
 }
-.running-off:hover { background: rgba(226, 110, 110, 0.18); color: #ffd7d4; }
+.running-off:hover { background: #fff; color: #8d2f2f; }
+
+/* ---- arranging a run ---------------------------------------------------
+
+   A supply line is a sentence you read, not a form you fill in. So the row
+   states what the place wants and what is bringing it, and the whole of the
+   choosing happens on a page of its own with a chevron back — which is why there
+   is so little here: two row styles and a link. */
+
+.supply-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid rgba(0, 0, 0, 0.10);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.035);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+.supply-row:hover { background: #fff; }
+.supply-row:disabled { opacity: 0.5; cursor: default; }
+.supply-row .grow { display: flex; flex-direction: column; min-width: 0; }
+.supply-go { color: var(--ink-dim); font-size: 17px; line-height: 1; }
+
+/* How much is on the shelf, beside the name rather than under it: it is the same
+   kind of fact as the name and reads as one line with the eye. */
+.running-name em {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--ink-dim);
+  margin-left: 6px;
+}
+
+/* Where the load comes from, on the arranging page. A statement with a link in
+   it, because the nearest supplier is right nearly always. */
+.from-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.035);
+  margin-bottom: 9px;
+}
+.from-line .grow { display: flex; flex-direction: column; min-width: 0; }
+.from-change {
+  border: 0;
+  background: none;
+  color: #7a6a2e;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.from-change:hover { color: #4a3c14; }
+.driver.on { border-color: #d9a72e; background: rgba(244, 201, 93, 0.16); }
