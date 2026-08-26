@@ -78,6 +78,30 @@ const REVERSE_LIMIT = 3.5;
  * here once already drew every vehicle in the game broadside to its own
  * direction of travel.
  */
+/**
+ * Which rows of the vehicle arrays throw a real light at night.
+ *
+ * Two conditions, and the second one is why the animals kept their headlamps
+ * after the drawn lamps were taken off them. There are two lighting systems: the
+ * emissive quads on the model, which `vMotor` has gated since the sheep-with-
+ * headlamps fix, and the pool of eight actual point lights, which had its own
+ * test — `vId >= 0`, meaning "one of the player's". That was a sound rule right
+ * up until livestock joined the arrays and numbered itself from 900000, which is
+ * a positive id. So a cow qualified as one of the player's vehicles and was
+ * handed a real light: not lamps *on* the animal this time, but a pool of white
+ * light following it round a dark field, which looks exactly the same from the
+ * camera.
+ *
+ * The lesson is that the sign of an id is a namespace, not a fact about the
+ * thing. `vMotor` is the fact, so both systems ask it, and it is stated here once
+ * rather than spelled out at each site — the two have now disagreed twice.
+ */
+export function throwsLight(vId: number, vMotor: number): boolean {
+  // Only yours: ambient traffic and tractors carry a drawn beam, and a real light
+  // on every passing car is the disco.
+  return vMotor === 1 && vId >= 0;
+}
+
 export function facingFromHeading(turns: number): number {
   return Math.PI / 2 - turns * Math.PI * 2;
 }
@@ -1006,9 +1030,7 @@ export class Renderer {
       cand.push({ x: src.lx[i], z: src.lz[i], d: d * 0.45, warm: true, sodium: true });
     }
     for (let i = 0; i < src.vehicleCount; i++) {
-      // Only yours. Ambient traffic already carries a drawn beam, and a real
-      // light on every passing car is the disco.
-      if (src.vId[i] < 0) continue;
+      if (!throwsLight(src.vId[i], src.vMotor[i])) continue;
       const dx = src.vx[i] - this.camX;
       const dz = src.vz[i] - this.camZ;
       const d = dx * dx + dz * dz;
