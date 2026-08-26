@@ -933,8 +933,8 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 8px 14px;
-  border-radius: 14px;
+  padding: 7px 13px;
+  border-radius: 15px;
   background: rgba(247, 243, 234, 0.9);
   backdrop-filter: blur(10px);
   box-shadow: 0 4px 18px rgba(30, 40, 30, 0.18);
@@ -947,7 +947,12 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
-.clock-text { display: flex; flex-direction: column; align-items: flex-end; }
+.clock-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
 /* The hour leads, and it leads by size: it is the figure the clock is read for.
    Tabular figures so the panel does not twitch a pixel wider at 11:00 — a HUD
    element that changes width every minute is a HUD element you stop trusting. */
@@ -958,16 +963,22 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
-.clock-date { font-size: 11px; color: #6f6a5e; }
-.clock-sub { font-size: 11px; color: #8b8577; }
+/* A caption, and drawn as one: small, spaced, and no wider than the hour above
+   it. The date was the same size and weight as the time, which made the pill two
+   competing lines instead of a figure with a note under it. */
+.clock-date {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
 
 /* The day, as a ring. A cycle drawn as a circle, because a bar that jumps from
    its right-hand end back to the left is the same discontinuity the sun had. */
-.ring { flex: 0 0 32px; }
-.ring-track { fill: none; stroke: rgba(0, 0, 0, 0.10); stroke-width: 4; }
-.ring-lit { fill: none; stroke: #f0c04a; stroke-width: 4; stroke-linecap: round; }
-.ring-now { fill: #2f2a22; stroke: #fff; stroke-width: 1.6; }
-.ring-moon { fill: rgba(120, 140, 190, 0.85); }
+.ring { flex: 0 0 34px; }
+.ring-track { fill: none; }
+.ring-lit { fill: none; stroke-linecap: round; }
 
 .row-icon { width: 26px; flex: 0 0 26px; display: grid; place-items: center; }
 
@@ -1343,152 +1354,148 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .tool-x:hover { background: rgba(0, 0, 0, 0.06); color: #3a352c; }
 
 
-/* ------------------------------------------------- the furniture, quieter
+/* ------------------------------------------------- the furniture
 
-   "Those WHITE horrible items. Can we make the UI kind of transparent a little
-   bit, almost like it blends in, then it slowly moves towards [solid] when you
-   hover?"
+   Two goes at this. The first made the cream panels half-transparent and hung a
+   white halo on the text to keep it legible, and the halo was the problem: "the
+   text shadow just looks dog shit". It was — a glow round every figure, on a
+   panel that was still recognisably a white box, so the effect was a washed-out
+   white box rather than something that blended in.
 
-   Read as: quiet when ignored, solid when reached for. A control you are not
-   using has no business being the brightest thing on a screen full of
-   countryside — and the map markers are the worst of it, because there are a
-   dozen of them, they sit *on* the picture rather than at its edge, and every
-   one was a near-white tile at 96% opacity.
+   The second version is the one that was asked for and it is better for a
+   reason worth writing down. Dark, at very low opacity: "a black with a very,
+   very, very low transparency, so you can almost see straight through. It's just
+   a slight black shadow on the UI." A dark veil sits *under* a pastel daylight
+   picture the way a shadow does, so it reads as part of the scene; a pale panel
+   at the same opacity competes with the sky, because the sky is the brightest
+   thing in the frame and there is nothing above white to go to. And it needs no
+   halo, because light text on a dark veil has its contrast from the veil.
 
-   Only the *static* furniture. Panels and bubbles stay solid: they carry text
-   you are reading and numbers you are acting on, and a translucent page over a
-   moving field is a page you cannot read. The rule is that anything permanent
-   fades and anything you opened does not.
+   Hovering brings the cream back — the panel you are reaching for is the one
+   that should be solid and readable — so the ink inverts with it. Both
+   transition together, slow in and quick out.
 
-   Slow in and quick out — 260ms arriving, 120ms leaving — because the arrival is
-   a response to you and wants to feel like one, where the departure is just
-   tidying up. */
+   Only the *permanent* furniture: the purse, the clock, the cog, the dock, the
+   tool tray, the map markers. Panels and bubbles you opened stay as they are;
+   they carry text you are reading, and a translucent page over a moving field is
+   a page you cannot read. */
 
 .purse,
 .clock,
-.dock {
-  background: rgba(247, 243, 234, 0.52);
-  box-shadow: 0 3px 14px rgba(30, 40, 30, 0.12);
-  transition: background 260ms ease, box-shadow 260ms ease;
+.dock,
+.tools,
+.cog {
+  background: rgba(14, 17, 15, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 3px 16px rgba(10, 16, 12, 0.20);
+  color: #f2efe6;
+  text-shadow: none;
+  transition:
+    background 260ms ease,
+    border-color 260ms ease,
+    box-shadow 260ms ease,
+    color 260ms ease;
 }
 .purse:hover,
 .clock:hover,
 .dock:hover,
+.tools:hover,
 .cog:hover {
-  background: rgba(247, 243, 234, 0.96);
+  background: rgba(247, 243, 234, 0.97);
+  border-color: rgba(255, 255, 255, 0.5);
   box-shadow: 0 6px 24px rgba(30, 40, 30, 0.24);
+  color: var(--ink);
   transition-duration: 120ms;
 }
-/* The dock while a tool is in hand is not idle furniture — it is the thing you
-   are using, so it stays up whether the pointer is over it or not. */
-.dock:has(.dock-btn.on) { background: rgba(247, 243, 234, 0.96); }
 
-/* The money and the clock lose their text contrast if the ink fades with the
-   glass, so it does not: the panel gets quieter, the figures do not. */
+/* Everything written on them inherits, so the ink turns over with the panel
+   rather than each label needing its own rule. */
 .purse-sum,
-.clock-time { color: var(--ink); }
+.clock-time,
+.clock-date,
+.dock-btn,
+.tool-btn,
+.tool-x,
+.speed {
+  color: inherit;
+  text-shadow: none;
+  transition: color 260ms ease;
+}
+/* The date and the speed are quieter than the hour in both states, which is
+   what `currentColor` at reduced opacity buys that a second colour does not. */
+.clock-date,
+.speed { opacity: 0.72; }
 
-/* The markers, which matter most. A dozen white tiles over a field was the
-   loudest thing in the frame; at just over half they read as *pins on a map*
-   and the map is still visible under them. */
+/* How fast the day runs. Outlined in the panel's own ink and filled with
+   nothing, so it turns over with the panel instead of needing a colour of its
+   own — the previous version kept a white fill from when the furniture was
+   white, which on a dark panel is a solid tile with invisible text on it. */
+.speed {
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 6px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+.speed:hover { background: rgba(255, 255, 255, 0.16); opacity: 1; }
+.clock:hover .speed:hover { background: rgba(0, 0, 0, 0.07); }
+.purse-icon { color: #e8cf82; transition: color 260ms ease; }
+.purse:hover .purse-icon { color: #8a7a46; }
+
+/* Rules and dividers, drawn in whatever the panel's ink currently is. */
+.clock-rule,
+.tool-rule {
+  width: 1px;
+  align-self: stretch;
+  margin: 5px 2px;
+  background: currentColor;
+  opacity: 0.18;
+}
+
+/* Hover states inside a dark panel have to go lighter, not darker. */
+.dock-btn:hover,
+.tool-btn:hover,
+.tool-x:hover { background: rgba(255, 255, 255, 0.14); color: inherit; }
+.dock:hover .dock-btn:hover,
+.tools:hover .tool-btn:hover,
+.tools:hover .tool-x:hover { background: rgba(0, 0, 0, 0.06); }
+/* Gold stays gold in both states: it is the only colour coding in the dock and
+   it has to survive the panel turning over underneath it. */
+.dock-btn.on,
+.dock:hover .dock-btn.on,
+.tool-btn.on,
+.tools:hover .tool-btn.on { background: #f4c95d; color: #4a3c14; }
+
+/* The day ring, which has to work on both grounds. */
+.ring-track { stroke: currentColor; opacity: 0.20; stroke-width: 3.4; }
+.ring-lit { stroke: #f0c04a; stroke-width: 3.4; }
+.ring-now { fill: currentColor; stroke: none; }
+.ring-sun { fill: #f5cd60; }
+.ring-moon { fill: #b9c6e4; }
+
+/* The markers, same treatment and the most important of it: there are a dozen
+   of them and they sit *on* the picture rather than at its edge. */
 .mark-face {
-  background: rgba(250, 247, 238, 0.58);
-  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(14, 17, 15, 0.30);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #f2efe6;
+  text-shadow: none;
   transition: background 260ms ease, border-color 260ms ease, color 260ms ease;
 }
 .mark:hover .mark-face {
   background: rgba(250, 247, 238, 0.98);
   border-color: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
   transition-duration: 120ms;
 }
-/* Yours stays gold and stays legible — it is the only colour coding on the map
-   and fading it to nothing would cost the one thing the colour is for. */
-.mark.mine .mark-face { background: rgba(244, 201, 93, 0.72); }
-.mark.mine:hover .mark-face { background: #f4c95d; }
-/* The work dot keeps its punch. It is four pixels of information and the whole
-   reason to look at a marker twice. */
-.mark-dot { border-color: rgba(255, 255, 255, 0.78); }
-
-/* And the lorry pips, same treatment. There may be twenty of them and they are
-   an annotation on something you already own. */
-.mine-mark {
-  opacity: 0.66;
-  transition: opacity 260ms ease;
-}
+/* Yours reads gold in both, dimmed rather than recoloured when idle. */
+.mark.mine .mark-face { background: rgba(126, 95, 20, 0.44); color: #f7e3ac; }
+.mark.mine:hover .mark-face { background: #f4c95d; color: #4a3c14; }
+.mark-dot { border-color: rgba(255, 255, 255, 0.5); }
+.mine-mark { opacity: 0.55; transition: opacity 260ms ease; }
 .mine-mark:hover { opacity: 1; transition-duration: 120ms; }
-
-
-/* How fast the day runs. Beside the clock, because it is about the clock.
-   Tabular so 1x and 4x are the same width and the panel does not twitch. */
-.speed {
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.5);
-  color: var(--ink-dim);
-  font: inherit;
-  font-size: 11.5px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  padding: 3px 7px;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
-}
-.speed:hover { background: #fff; color: var(--ink); }
-
-
-/* ------------------------------------------------- quieter still
-
-   "Let's drop the whiteness BG even more when its not hovered so they fade
-   better? At the moment its just too white. Needs to be almost transparent to
-   the bg and only on hover is it easy to see."
-
-   A half-opaque cream panel is still a cream panel — it reads as *dimmed white*
-   rather than as glass. A quarter reads as glass, and the difference is the blur
-   doing the work instead of the fill.
-
-   Which leaves one real problem: dark ink on near-nothing, over a field that
-   might be a dark hedge or a bright road, has no guaranteed contrast at all. The
-   fill can no longer be relied on to be the background, so the *text* carries
-   its own — a white halo, tight enough to be invisible against the panel and
-   just enough to hold a figure together over grass. That is why the numbers stay
-   readable at a quarter opacity when they would not at a half without it. */
-
-.purse,
-.clock,
-.dock,
-.cog {
-  background: rgba(247, 243, 234, 0.24);
-  box-shadow: 0 2px 10px rgba(30, 40, 30, 0.09);
-}
-.purse:hover,
-.clock:hover,
-.dock:hover,
-.cog:hover {
-  background: rgba(247, 243, 234, 0.97);
-}
-.purse-sum,
-.clock-time,
-.clock-date,
-.dock-btn,
-.cog {
-  text-shadow:
-    0 1px 2px rgba(255, 255, 255, 0.75),
-    0 0 6px rgba(255, 255, 255, 0.6);
-}
-/* And the halo goes once the panel is solid behind the text, where it would
-   only make the figures look soft. */
-.purse:hover .purse-sum,
-.clock:hover .clock-time,
-.clock:hover .clock-date,
-.dock:hover .dock-btn { text-shadow: none; }
-
-/* The markers, quieter to match. A third, which over a field is a pane of glass
-   with a word on it. */
-.mark-face {
-  background: rgba(250, 247, 238, 0.34);
-  border-color: rgba(255, 255, 255, 0.30);
-  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.7);
-}
-.mark:hover .mark-face { text-shadow: none; }
-.mark.mine .mark-face { background: rgba(244, 201, 93, 0.5); }
-.mine-mark { opacity: 0.5; }

@@ -271,19 +271,40 @@ export function buildRoads(
         const cap = faded(WALL.shadow, inf);
         const h = 0.115;
         const th = 0.038;
-        // Along whichever way the road runs, and both at a crossing — which is
-        // rare and looks right when it happens.
-        if (openX) {
-          for (const side of [sz0 - v - th, sz1 + v + th]) {
-            m.box(x + 0.5, deck + h / 2, z + side, 0.5, h / 2, th, 0.012,
-                  wall, cap, wall);
-          }
+        /*
+         * A parapet goes on the sides the road does *not* leave by.
+         *
+         * The first version put a full-length wall down both sides of whichever
+         * axis the road ran along, and both axes at a junction — with a note
+         * saying that case was rare and looked right. It was not rare and it did
+         * not: a bridge on a *bend* has both axes open, so it got four walls
+         * meeting in the middle of the tile, two of them straight across the
+         * carriageway. "You end up with this horrible kind of crossover of
+         * multiple bridge edges that doesn't know what to do."
+         *
+         * Asking the question the other way round is both simpler and general. A
+         * parapet exists to stop you going over the edge, so it belongs wherever
+         * the deck has an edge — which is exactly the sides with no road on the
+         * far side of them. A straight gets two walls as before; a bend gets an L
+         * round the outside of the turn, with the two ways out left open; a
+         * crossroads over water gets none, because there is no edge to fall off.
+         * No case needs naming and nothing can cross the road.
+         */
+        if (!north) {
+          m.box(x + 0.5, deck + h / 2, z + (sz0 - v - th), 0.5, h / 2, th, 0.012,
+                wall, cap, wall);
         }
-        if (openZ) {
-          for (const side of [sx0 - v - th, sx1 + v + th]) {
-            m.box(x + side, deck + h / 2, z + 0.5, th, h / 2, 0.5, 0.012,
-                  wall, cap, wall);
-          }
+        if (!south) {
+          m.box(x + 0.5, deck + h / 2, z + (sz1 + v + th), 0.5, h / 2, th, 0.012,
+                wall, cap, wall);
+        }
+        if (!west) {
+          m.box(x + (sx0 - v - th), deck + h / 2, z + 0.5, th, h / 2, 0.5, 0.012,
+                wall, cap, wall);
+        }
+        if (!east) {
+          m.box(x + (sx1 + v + th), deck + h / 2, z + 0.5, th, h / 2, 0.5, 0.012,
+                wall, cap, wall);
         }
       }
 

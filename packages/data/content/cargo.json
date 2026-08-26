@@ -11,6 +11,17 @@
     "colour": "#e8e4dc"
   },
   {
+    "id": "produce",
+    "name": "Produce",
+    "tier": "extraction",
+    "handling": "general",
+    "density": 54,
+    "perishability": 46,
+    "basePrice": 520,
+    "fromEra": 1,
+    "colour": "#8fae57"
+  },
+  {
     "id": "dairy",
     "name": "Dairy",
     "tier": "processing",

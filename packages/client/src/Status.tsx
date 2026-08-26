@@ -39,7 +39,7 @@ function DayRing({ fraction, night }: { fraction: number; night: number }): JSX.
   const lit = 0.62;
   const angle = fraction * 360 - 90;
   return (
-    <svg className="ring" width="32" height="32" viewBox="0 0 32 32">
+    <svg className="ring" width="34" height="34" viewBox="0 0 32 32">
       <circle cx="16" cy="16" r={r} className="ring-track" />
       <circle
         cx="16"
@@ -49,12 +49,23 @@ function DayRing({ fraction, night }: { fraction: number; night: number }): JSX.
         strokeDasharray={`${c * lit} ${c}`}
         transform="rotate(-90 16 16)"
       />
+      {/*
+        * Sun or moon at the middle, whichever it is.
+        *
+        * There used to be a moon at night and nothing at all by day, which left
+        * the ring reading as an empty gauge for two thirds of it — and an empty
+        * circle with a dot going round the outside is not obviously a day. One
+        * or the other, always, so the ring says what it is at a glance.
+        */}
+      {night > 0.45
+        ? <circle cx="16" cy="16" r="4.6" className="ring-moon" />
+        : <circle cx="16" cy="16" r="4.6" className="ring-sun" />}
+      {/* And the marker outside the track rather than on it: a dot sitting on
+          the arc reads as part of the arc, which is what made the old one look
+          like a chip out of it. */}
       <g transform={`rotate(${angle} 16 16)`}>
-        <circle cx={16 + r} cy="16" r="3.4" className="ring-now" />
+        <circle cx={16 + r} cy="16" r="2.6" className="ring-now" />
       </g>
-      {/* A moon inside once it is properly dark. Cheaper than a legend and it
-          says the same thing. */}
-      {night > 0.5 && <circle cx="16" cy="16" r="3.2" className="ring-moon" />}
     </svg>
   );
 }
@@ -110,11 +121,24 @@ export function Status({
         */}
       <div className="dials">
       <div className="clock">
+        {/*
+          * The ring leads, then the figures, then the speed.
+          *
+          * It read badly the other way round — "the top right section of the
+          * time and the day is just really not good" — and the reason is that
+          * the ring was last in a right-aligned stack, so the pill was a block
+          * of text with a circle stuck on the end of it and nothing lined up
+          * with anything. Reading order for a clock is the face first. The date
+          * underneath is deliberately a caption rather than a second line of
+          * equal weight: it changes every four minutes and matters a handful of
+          * times a year, where the hour matters now.
+          */}
+        <DayRing fraction={dayFraction} night={night} />
         <div className="clock-text">
           <span className="clock-time">{clockTime(dayFraction)}</span>
           <span className="clock-date">{date}</span>
         </div>
-        <DayRing fraction={dayFraction} night={night} />
+        <span className="clock-rule" />
         {/*
           * How fast the day runs, next to the day.
           *

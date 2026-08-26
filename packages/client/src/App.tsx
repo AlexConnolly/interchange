@@ -991,6 +991,19 @@ export function App(): JSX.Element {
         h = (h ^ (h >>> 13)) * 1274126177;
         return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
       };
+      /*
+       * Is this tile under water?
+       *
+       * Both kinds, which is the point. Every scatter pass tested `height <= 0`,
+       * which is the *sea* — and a river is carved down into land that is still
+       * well above sea level, so it passed the test and grew oaks in the middle
+       * of the water. Standing in a stream is the sort of thing that reads as
+       * broken from any distance, and the flag saying so was already there.
+       */
+      const wet = (t: number): boolean =>
+        height[t] <= 0
+        || ((world.terrain.flags[t] & TileFlag.River) !== 0 && height[t] > 0);
+
       const boundary = (t: number, x: number, z: number): boolean => {
         const p = parcel[t];
         if (p < 0) return false;
@@ -1070,7 +1083,7 @@ export function App(): JSX.Element {
       for (let z = 1; z < DISTRICT - 1 && trees.length < SCATTER_MAX; z++) {
         for (let x = 1; x < DISTRICT - 1 && trees.length < SCATTER_MAX; x++) {
           const t = z * DISTRICT + x;
-          if (height[t] <= 0) continue;
+          if (wet(t)) continue;
           if (roadClass[t] >= 0) continue;
           const wood = isWood(crop[t]);
           /*
@@ -1151,7 +1164,7 @@ export function App(): JSX.Element {
       for (let z = 1; z < DISTRICT - 1 && trees.length < SCATTER_MAX; z++) {
         for (let x = 1; x < DISTRICT - 1 && trees.length < SCATTER_MAX; x++) {
           const t = z * DISTRICT + x;
-          if (height[t] <= 0 || roadClass[t] >= 0) continue;
+          if (wet(t) || roadClass[t] >= 0) continue;
           if (!boundary(t, x, z)) continue;
           // Beside a lane, which is where a verge is.
           let byRoad = false;
@@ -1210,7 +1223,7 @@ export function App(): JSX.Element {
         for (let x = 1; x < DISTRICT - 1 && trees.length < SCATTER_MAX; x++) {
           const t = z * DISTRICT + x;
           if (parcel[t] < 0) continue;
-          if (roadClass[t] >= 0 || height[t] <= 0) continue;
+          if (roadClass[t] >= 0 || wet(t)) continue;
           if (boundary(t, x, z)) continue;
           const list = PROPS_BY_CROP[crop[t]];
           if (list === undefined || list.length === 0) continue;

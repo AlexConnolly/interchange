@@ -30,7 +30,8 @@
     "recipe": {
       "inputs": {},
       "outputs": {
-        "grain": 5
+        "grain": 5,
+        "produce": 2
       },
       "period": 44
     },
@@ -344,9 +345,8 @@
     "deposit": 0,
     "recipe": {
       "inputs": {
-        "milk": 3,
-        "dairy": 2,
-        "beer": 1
+        "produce": 3,
+        "parcels": 1
       },
       "outputs": {},
       "period": 30
@@ -373,7 +373,9 @@
         "meat": 8,
         "sawn": 8,
         "feed": 8,
-        "parcels": 8
+        "parcels": 8,
+        "beer": 8,
+        "produce": 8
       },
       "outputs": {},
       "period": 30

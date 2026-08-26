@@ -60,12 +60,30 @@ describe('the village shop', () => {
      */
     const w = make(1985);
     const shop = shopOf(w);
-    const milk = w.content.cargo.findIndex((c) => c.id === 'milk');
-    w.sites.addStock(shop, milk, 12);
-    const before = w.sites.stockOf(shop, milk);
+    const produce = w.content.cargo.findIndex((c) => c.id === 'produce');
+    w.sites.addStock(shop, produce, 12);
+    const before = w.sites.stockOf(shop, produce);
     expect(before).toBeGreaterThan(0);
     for (let i = 0; i < TICKS_PER_DAY * 3; i++) w.step();
-    expect(w.sites.stockOf(shop, milk)).toBeLessThan(before);
+    expect(w.sites.stockOf(shop, produce)).toBeLessThan(before);
+  });
+
+  it('wants nothing that needs a fridge', () => {
+    /*
+     * The point of the shop is that it is the cheapest possible first customer,
+     * and a cargo's handling class is what decides the price of the van that can
+     * carry it. It listed milk, dairy and beer — a refrigerated van for two of
+     * them and a tanker for the third, so the "easy earner from the start" could
+     * not be served by the six-thousand-pound Transit at all.
+     */
+    const w = make(1985);
+    const ins = w.recipes.inputs[w.sites.def[shopOf(w)]];
+    const handling = new Set<string>();
+    for (let i = 0; i < ins.length; i += 2) handling.add(w.content.cargo[ins[i]].handling);
+    expect([...handling]).toEqual(['general']);
+
+    const van = w.content.vehicles.find((v) => v.id === 'van-transit');
+    expect(van?.handling).toContain('general');
   });
 
   it('is bought on trade, not on owning its suppliers', () => {
@@ -91,10 +109,10 @@ describe('the village shop', () => {
     w.sites.servedDay[shop] = w.day;
     expect(w.buySite(shop).ok).toBe(true);
 
-    const milk = w.content.cargo.findIndex((c) => c.id === 'milk');
+    const produce = w.content.cargo.findIndex((c) => c.id === 'produce');
     const start = w.approval;
     for (let d = 0; d < 20; d++) {
-      w.sites.addStock(shop, milk, 99);
+      w.sites.addStock(shop, produce, 99);
       for (let t = 0; t < TICKS_PER_DAY; t++) w.step();
     }
     const stocked = w.approval;
