@@ -2958,7 +2958,25 @@ export class World {
     }
     // Doubles at the town gate, falls away to nothing by about thirty tiles.
     const premium = 1 + Math.max(0, 1 - nearest / 30);
-    return Math.round(def.foundCost * premium * SITE_PRICE_SCALE);
+    /*
+     * And what it is currently worth as a going concern.
+     *
+     * A works nobody supplies is not worth what a works with lorries queuing
+     * outside is worth, and pricing them the same made the whole of ownership a
+     * question of how much cash you had. Half price when it is completely
+     * starved, full price when it is fed.
+     *
+     * This is the lever that replaces the rule it used to have. You no longer
+     * need to own a producer of every input before you may buy a place — that
+     * demanded millions of pounds of chain to climb one rung, and it was
+     * pretending to be a brake it was not, because an owned works you do not
+     * haul to makes nothing anyway. Instead the market prices the risk: the
+     * cheap businesses are the ones that need what you are good at, and buying
+     * the biggest thing you cannot feed is a bad deal you can see the shape of
+     * before you make it.
+     */
+    const going = 0.5 + (this.sites.fed[site] / 100) * 0.5;
+    return Math.round(def.foundCost * premium * going * SITE_PRICE_SCALE);
   }
 
   /**
@@ -3025,22 +3043,39 @@ export class World {
   /**
    * Can this place be bought?
    *
-   * **You must already own a supplier for every input.** A creamery takes milk,
-   * so you cannot buy the creamery until you own something that makes milk.
+   * Anything inside your influence that you can afford. That is the whole rule
+   * now, and it used to be much more than that.
    *
-   * This is the rule that turns the ladder from a suggestion into the shape of
-   * the game. Before it, "buy production" was one move you could make anywhere
-   * you could afford, and the sensible play was to save up and buy the most
-   * valuable thing in sight — which skips the middle of the game entirely. With
-   * it, the chain has to be built from the bottom: a farm first, because a farm
-   * has no inputs, then the creamery it feeds, then the shop the creamery
-   * feeds. You cannot buy the top of a chain you do not own the bottom of.
+   * The old rule was **you must already own a supplier for every input**: no
+   * creamery until you owned something making milk, no shop until you owned the
+   * creamery. It was written to stop the player saving up and buying the most
+   * valuable thing in sight, which skips the middle of the game — a real
+   * concern, and it turned out to be the wrong instrument for two reasons.
    *
-   * It also makes the refusal say something useful. "You need a supplier of
-   * milk" is a goal; "not enough money" is only a wait. And the places with no
-   * inputs at all — the farms, the quarry, the forestry — are exactly the ones
-   * you can always buy, which is the right first rung and needed no special
-   * case to become one.
+   * It did not work. Follow the chain up and the entry price becomes millions,
+   * so the middle of the game is a long grind at the end of which you can afford
+   * the top of the chain and swallow the rest of it in an afternoon. The shape it
+   * produced was exactly the shape it was meant to prevent, arriving later.
+   *
+   * And it was guarding something that guards itself. Nobody in this district
+   * hauls but the player — measured: in a four-company world there is not one
+   * vehicle that is not yours — so a works you own and do not supply produces
+   * *nothing at all*. The economics already force you to build the chain from
+   * the bottom. The rule was not adding a constraint, it was adding a queue in
+   * front of one.
+   *
+   * So the constraint is now the fleet, which is honest about itself: every place
+   * you own needs a lorry, or a share of one, for as long as you own it. You may
+   * buy the distribution centre the day you can afford it and find it wants
+   * seven vehicles you have not got — a wall you can see coming and work toward,
+   * rather than a locked door. `priceOf` does the other half: a starved works is
+   * half price, so the cheap businesses are the ones that need what you are good
+   * at.
+   *
+   * One thing survives from the old rule, for shops only — see below. A shop is
+   * bought on trade, because "are you the one whose van pulls up outside" is a
+   * question about hauling rather than about owning, and hauling is the thing
+   * this game is about.
    */
   canBuySite(site: number): { ok: boolean; reason: string; needs: number[] } {
     const needs: number[] = [];
@@ -3084,18 +3119,14 @@ export class World {
         };
       }
     }
+    /*
+     * `needs` is still filled in, and still means the same thing — which inputs
+     * you have no supplier of. It is no longer a refusal; the interface reads it
+     * to say what you will have to arrange, which is the useful half of what the
+     * old rule was doing.
+     */
     for (const group of makesNothing ? [] : this.suppliersFor(site)) {
       if (!group.owned) needs.push(group.cargo);
-    }
-    if (needs.length > 0) {
-      const names = needs.map((c) => this.content.cargo[c].name.toLowerCase());
-      const list = names.length === 1 ? names[0]
-        : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-      return {
-        ok: false,
-        reason: `You supply none of its ${list}. Own that first.`,
-        needs,
-      };
     }
     if (this.companies.cash[this.player] < this.priceOf(site)) {
       return { ok: false, reason: 'Not enough in the bank.', needs };
@@ -4148,16 +4179,27 @@ export class World {
   }
 
   /**
-   * Set up a run from a place you own to a buyer.
+   * Set up a standing run between two places, one of which is yours.
    *
    * Deliberately the same two-stop service a contract makes, so owning
    * production adds a *reason* rather than a mechanism. The player has learned
    * one interaction by now and this is it again, pointing the other way.
+   *
+   * Either end may be the one you own, and that is new. It used to insist you
+   * owned the *origin*, which only covered selling what you make — and left the
+   * more pressing half with no mechanism at all. Nobody in this district
+   * delivers: buy a shop and the goods on its shelves are your problem, so the
+   * run you most need to set up is the one *into* a place you own. Same service,
+   * same two stops, pointing inward.
    */
   supply(from: number, to: number, cargo: number): boolean {
-    if (this.sites.owner[from] !== this.player) return false;
+    const outbound = this.sites.owner[from] === this.player;
+    const inbound = this.sites.owner[to] === this.player;
+    if (!outbound && !inbound) return false;
+    // Named for the place it serves, which for an inbound run is the far end.
     const svc = this.services.alloc(
-      this.player, this.content.industries[this.sites.def[from]].name,
+      this.player,
+      this.content.industries[this.sites.def[outbound ? from : to]].name,
     );
     if (svc === NONE) return false;
     this.services.addStop(svc, from, 0, StopAction.LoadFull, cargo);

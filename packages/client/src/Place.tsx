@@ -320,9 +320,12 @@ export function Place({
           <Supply
             key={g.cargo}
             world={world}
+            site={site}
+            mine={mine}
             group={g}
             onGo={actions.goTo}
             onHover={(to) => actions.preview(to, site)}
+            onRun={actions.supply}
           />
         ))}
       </div>
@@ -471,9 +474,11 @@ function Drivers({
  * hands you the map for free.
  */
 function Supply({
-  world, group, onGo, onHover,
+  world, site, mine, group, onGo, onHover, onRun,
 }: {
   world: World;
+  site: number;
+  mine: boolean;
   group: {
     cargo: number; owned: boolean;
     candidates: { site: number; distance: number; visible: boolean }[];
@@ -481,35 +486,54 @@ function Supply({
   };
   onGo: (site: number) => void;
   onHover: (site: number) => void;
+  onRun: (from: number, to: number, cargo: number) => void;
 }): JSX.Element {
   const cargo = C.cargo[group.cargo];
+  const stock = world.sites.stockOf(site, group.cargo);
   return (
     <div className={`card supply ${group.owned ? 'met' : ''}`}>
       <div className="card-line">
         <span className="swatch" style={{ background: cargo.colour }} />
         <strong>{cargo.name}</strong>
-        {group.owned
-          ? <span className="have">✓ yours</span>
-          : <span className="to">needed</span>}
+        {/*
+          * For a place of yours, what matters is not whether you own a supplier
+          * — that used to be the rule and is not any more — but whether there is
+          * anything on the shelf. An empty line is the thing you have to fix.
+          */}
+        {mine
+          ? <span className={stock > 0 ? 'have' : 'to'}>{stock > 0 ? `${stock} in hand` : 'none left'}</span>
+          : group.owned ? <span className="have">✓ yours</span> : <span className="to">needed</span>}
       </div>
       {group.candidates.map((c) => {
         const yours = world.sites.owner[c.site] === world.player;
         const def = C.industries[world.sites.def[c.site]];
+        /*
+         * For a place of yours, this button sets up the run. For anyone else's it
+         * takes you there to look, as it always did.
+         *
+         * The same click that already exists on the other side of the panel — the
+         * "who takes it" list of a business you own — pointing inward. Nobody in
+         * this district delivers, so arranging the collection is the whole of
+         * what owning a business asks of you, and it should be one press on the
+         * place that needs it rather than a trip to a routing screen.
+         */
         return (
           <button
             key={c.site}
             className={`driver ${yours ? 'mine' : ''}`}
-            onClick={() => onGo(c.site)}
+            onClick={() => (mine ? onRun(c.site, site, group.cargo) : onGo(c.site))}
             onMouseEnter={() => onHover(c.site)}
             onMouseLeave={() => onHover(-1)}
+            title={mine ? `Put a lorry on ${def.name} → here` : undefined}
           >
             <span className="supply-icon" style={{ color: def.colour }}>
               <Icon id={def.id} size={17} />
             </span>
             <span className="grow">
               <span className="driver-name">{def.name}</span>
+              <span className="driver-where">{c.distance} tiles away</span>
             </span>
-            <span className="driver-no">{yours ? '✓' : 'go'}</span>
+            <span className="driver-no">{mine ? 'collect' : yours ? '✓' : 'go'}</span>
           </button>
         );
       })}

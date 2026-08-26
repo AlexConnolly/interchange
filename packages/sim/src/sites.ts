@@ -49,6 +49,20 @@ export class SiteTable {
   readonly cycle = new Int32Array(MAX_SITES);
   /** 0..100, rolling. How much of what this site made got taken away. */
   readonly satisfaction = new Uint8Array(MAX_SITES);
+  /**
+   * 0..100, rolling. How often this site had what it needed to run.
+   *
+   * The input-side counterpart of `satisfaction`, and its absence was a real
+   * hole. Satisfaction is only recomputed *when a cycle completes*, so a works
+   * with nothing in its sheds never touched it: measured, a creamery cut off
+   * from milk sat at a hundred per cent, state Thriving, having made nothing for
+   * ninety days. Every decay rule in the game reads satisfaction, so a place
+   * starved of supply was in perfect health by every number the simulation had.
+   *
+   * A place with no inputs — a farm, a quarry — is always fed, which is what the
+   * initial value means. Nothing else has to special-case them.
+   */
+  readonly fed = new Uint8Array(MAX_SITES).fill(100);
   /** Consecutive days below the decline threshold. */
   readonly starvedDays = new Int32Array(MAX_SITES);
   /**
@@ -126,6 +140,7 @@ export class SiteTable {
     this.tile[id] = tile;
     this.owner[id] = owner;
     this.servedDay[id] = -1;
+    this.fed[id] = 100;
     this.state[id] = SiteState.Thriving;
     this.satisfaction[id] = 100;
     this.richness[id] = 70;
@@ -385,6 +400,11 @@ export function stepSites(
           break;
         }
       }
+      // Every cycle it wanted to run counts, whether it ran or not. This is the
+      // one line that lets the rest of the game know a place is starving.
+      if (ins.length > 0) {
+        sites.fed[s] = Math.round((sites.fed[s] * 7 + (feasible ? 100 : 0)) / 8);
+      }
       if (!feasible) continue;
       for (let i = 0; i < ins.length; i += 2) {
         sites.takeStock(s, ins[i], Math.max(1, Math.round(ins[i + 1] * scale)));
@@ -409,6 +429,7 @@ export function stepSites(
       if (sold > 0) {
         sites.satisfaction[s] = Math.round((sites.satisfaction[s] * 7 + 100) / 8);
       }
+      sites.fed[s] = Math.round((sites.fed[s] * 7 + (sold > 0 ? 100 : 0)) / 8);
       continue;
     }
 
@@ -465,6 +486,28 @@ export function stepSiteDecay(
     }
 
     const sat = sites.satisfaction[s];
+
+    /*
+     * Starving shows, and it does not kill.
+     *
+     * The distinction is deliberate and it is the whole of how `fed` is used.
+     * *Nobody takes what you make* is a business with no customers, and that is
+     * fatal — it mothballs, which is what the rules below do. *Nobody brings what
+     * you need* is a business with no supplier, and that must not be fatal here:
+     * one haulier cannot keep fifteen works supplied, so a district that closed
+     * every unsupplied place would shut down around a player who was doing
+     * nothing wrong. The works keeps its skeleton staff and waits.
+     *
+     * What it does instead is *show* — the place reads as struggling, which puts
+     * it in front of the player as somewhere in trouble, and makes it cheap
+     * (see `priceOf`). Buying a starved works and feeding it is meant to be the
+     * profitable move, and it cannot be if the game hides which ones are starved.
+     */
+    if (sites.fed[s] < balance.declineBelowPct && sites.state[s] !== SiteState.Struggling) {
+      sites.state[s] = SiteState.Struggling;
+      continue;
+    }
+
     if (!sites.everServed[s]) {
       // Never served: production has already stopped because the yard is full,
       // which is punishment enough. It stays available for someone to pick up.
