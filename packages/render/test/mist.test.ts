@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mistAt } from '../src/air.ts';
+import { mistAt, mistOnDay } from '../src/air.ts';
 
 /**
  * When there is fog, and — more importantly — when there is not.
@@ -46,5 +46,54 @@ describe('morning mist', () => {
     // And it comes up rather than appearing.
     expect(mistAt(3.5)).toBeGreaterThan(0);
     expect(mistAt(3.5)).toBeLessThan(1);
+  });
+});
+
+describe('which mornings are foggy', () => {
+  it('is not every morning', () => {
+    /*
+     * It was every morning, which is both wrong and self-defeating: a thing that
+     * happens daily stops being weather. The first foggy dawn is the district
+     * showing you something; the fortieth is a filter you have stopped seeing.
+     */
+    let foggy = 0;
+    for (let day = 0; day < 288; day++) if (mistOnDay(day) > 0) foggy++;
+    expect(foggy).toBeGreaterThan(288 * 0.1);
+    expect(foggy).toBeLessThan(288 * 0.4);
+  });
+
+  it('favours the back end of the year, the way radiation fog does', () => {
+    const month = (m: number): number => {
+      let n = 0;
+      for (let d = m * 24; d < (m + 1) * 24; d++) if (mistOnDay(d) > 0) n++;
+      return n;
+    };
+    // October and November against May and June. The offset that puts the peak
+    // in autumn was wrong on the first attempt and landed it in July, so this is
+    // the assertion that caught it.
+    const autumn = month(9) + month(10);
+    const summer = month(4) + month(5);
+    expect(autumn).toBeGreaterThan(summer * 2);
+  });
+
+  it('is the same for a given date however often you ask', () => {
+    // Hashed off the day rather than rolled, so it costs no state and a date
+    // cannot change its weather when you look away and back.
+    for (const day of [3, 40, 191, 250]) {
+      expect(mistOnDay(day)).toBe(mistOnDay(day));
+      expect(mistOnDay(day + 288)).toBe(mistOnDay(day + 288));
+    }
+  });
+
+  it('is mostly thin when it happens at all', () => {
+    // How far under the line the roll fell decides the thickness, so a real
+    // blanket is rare and a thin morning in the hollows is the common case.
+    const thick: number[] = [];
+    for (let day = 0; day < 288; day++) {
+      const m = mistOnDay(day);
+      if (m > 0) thick.push(m);
+    }
+    const full = thick.filter((m) => m > 0.9).length;
+    expect(full).toBeLessThan(thick.length / 2);
   });
 });

@@ -140,39 +140,51 @@ float cloudAt( vec2 p ) {
  * shapes — the ones the shadows are cast from — are untouched, and only their
  * outlines break up.
  *
- * The frequencies are the whole of whether this reads as cloud. At a period of
- * forty tiles the first attempt put one detail lobe across the entire view, so
- * the deck arrived as a smear of fog with no shapes in it at all — recognisably
- * *something*, but not clouds. These have periods of about ten tiles down to
- * four and a half, so a screen at the far zoom holds a few dozen cloudlets
- * rather than a gradient.
+ * The frequencies are the whole of whether this reads as cloud, and they have
+ * been wrong in both directions. At a period of forty tiles the first attempt put
+ * one detail lobe across the entire view, so the deck arrived as a smear of fog
+ * with no shapes in it — recognisably *something*, but not clouds. Cutting them
+ * to four tiles gave shapes and made them all the same small size, which is a
+ * field of popcorn. These sit at about thirty tiles down to nine, weighted
+ * heavily toward the slow end, so a screen holds a handful of big masses with
+ * ragged edges rather than dozens of matching puffs.
  */
 float detail( vec2 p ) {
-	float a = sin( p.x * 0.62 - p.y * 0.51 + 0.7 );
-	float b = sin( p.x * 0.35 + p.y * 0.71 + 2.4 );
-	float c = sin( ( p.x - p.y ) * 0.89 + 5.2 );
-	float d = sin( p.x * 1.41 + p.y * 1.13 + 4.0 );
-	return a * 0.36 + b * 0.28 + c * 0.20 + d * 0.16;
+	float a = sin( p.x * 0.21 - p.y * 0.17 + 0.7 );
+	float b = sin( p.x * 0.13 + p.y * 0.26 + 2.4 );
+	float c = sin( ( p.x - p.y ) * 0.37 + 5.2 );
+	float d = sin( p.x * 0.71 + p.y * 0.58 + 4.0 );
+	// Weighted hard toward the two slowest, so the big shapes decide where cloud
+	// is and the fast ones only ravel the edges. An even weighting gave every
+	// octave an equal say, which is how you get a field of same-sized puffs.
+	return a * 0.44 + b * 0.34 + c * 0.14 + d * 0.08;
 }
 
 void main() {
 	vec2 p = vWorld + uDrift;
 	/*
 	 * The big field decides *how much* cloud there is here; the detail decides
-	 * where the individual clouds are. Weighting matters more than it looks.
+	 * where the individual clouds are, and the balance between them is the whole
+	 * character of the sky.
 	 *
-	 * Adding the detail to the base at full strength meant that wherever the base
-	 * went properly negative — which is a third of it, the field being a sum of
-	 * sines — no amount of detail could reach the threshold, so a third of the
-	 * screen was bare sky and the boundary between the two was a smear the width
-	 * of the district. Damping the base and lifting the detail keeps the same
-	 * large-scale agreement with the shadows underneath while letting cloudlets
-	 * form across the whole deck: thick where the shadow field is high, broken and
-	 * sparse where it is low, and never a hard edge between the two.
+	 * Three goes at this. Detail at full strength meant that wherever the base
+	 * went properly negative — a third of it, the field being a sum of sines — no
+	 * amount of detail could reach the threshold, so a third of the screen was
+	 * bare sky with a smear the width of the district between the two. Damping the
+	 * base to a half fixed that and went too far the other way: with the base
+	 * barely mattering, the detail decided everything and the sky became an even
+	 * scatter of identical small puffs — "not bunched proper, far too spread out".
+	 *
+	 * At 0.78 against 0.54 the base is back in charge of *where*, so the cloud
+	 * gathers into a few large masses with real gaps between them, and the detail
+	 * is only breaking up their edges. The threshold moved up with it, because a
+	 * higher bar keeps the tops of the big shapes and drops the small stuff that
+	 * was filling the gaps in — favouring big over small is a threshold decision
+	 * as much as a frequency one.
 	 */
 	float base = cloudAt( p );
-	float d = base * 0.52 + detail( p ) * 0.62;
-	float body = smoothstep( -0.06, 0.40, d );
+	float d = base * 0.78 + detail( p ) * 0.54;
+	float body = smoothstep( 0.06, 0.52, d );
 	if ( body <= 0.001 ) discard;
 
 	/*
@@ -184,7 +196,7 @@ void main() {
 	 * difference between a cloud and a grey stain.
 	 */
 	vec2 step = vec2( 1.4, 0.9 );
-	float ahead = cloudAt( p + step ) * 0.52 + detail( p + step ) * 0.62;
+	float ahead = cloudAt( p + step ) * 0.78 + detail( p + step ) * 0.54;
 	float slope = clamp( ( d - ahead ) * 3.4 + 0.5, 0.0, 1.0 );
 	vec3 tint = mix( uShade, uLit, slope );
 

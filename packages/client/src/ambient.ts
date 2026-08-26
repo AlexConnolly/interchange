@@ -38,7 +38,7 @@
  * read as a city ring road rather than as countryside. Twenty-two puts one or
  * two in shot at any moment, which is what a quiet English valley looks like.
  */
-export const AMBIENT_COUNT = 22;
+export const AMBIENT_COUNT = 34;
 
 /**
  * How much traffic the *area* justifies, 0..1.
@@ -65,8 +65,17 @@ export function areaDemand(
     // one sixty tiles away does not.
     people += t.population / (1 + (d / Math.max(1, reach)) ** 2);
   }
-  // A hamlet is a few hundred; the market town is a couple of thousand.
-  return Math.max(0.12, Math.min(1, people / 2600));
+  /*
+   * A hamlet is a few hundred; the market town is a couple of thousand.
+   *
+   * The floor was 0.12, which against a fleet of twenty-two came out at *three
+   * cars* — spread over every lane in view, which is close enough to nothing that
+   * the honest report was "I see no ambient traffic at all". A back lane in 1985
+   * is quiet, but quiet is not empty: at a third of thirty-four there are eleven
+   * on the move out in the fields, which reads as a countryside that people live
+   * in, and the town still gets three times that.
+   */
+  return Math.max(0.32, Math.min(1, people / 2600));
 }
 
 /**

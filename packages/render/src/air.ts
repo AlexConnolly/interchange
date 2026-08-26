@@ -344,6 +344,51 @@ export function mistAt(hour: number): number {
   return Math.max(0, 1 - (hour - 7.5) / 2.5);
 }
 
+/**
+ * And whether *this* morning is a foggy one.
+ *
+ * It was every morning, which is both wrong and self-defeating. Radiation fog
+ * wants a still, clear night and damp ground; England gets that often enough to
+ * be characteristic and nowhere near every day. And a thing that happens daily
+ * stops being weather — the first foggy dawn is the district showing you
+ * something, the fortieth is a filter you have stopped seeing. Rationing it is
+ * what buys back the first one.
+ *
+ * Autumn gets the most, which is when the ground is still warm and the nights
+ * have turned: about two mornings in five in October against one in six in
+ * midsummer. Curved rather than switched, so a middling day is thin fog in the
+ * hollows rather than either a blanket or nothing.
+ *
+ * Hashed off the day number, so a given date is always the same weather however
+ * many times you look at it — and so the whole thing costs no state at all.
+ */
+export function mistOnDay(day: number): number {
+  // Two mixed hashes, because one sine of the day number has a visible period.
+  const a = Math.sin(day * 12.9898) * 43758.5453;
+  const b = Math.sin(day * 78.233 + 1.7) * 12345.6789;
+  const roll = (((a - Math.floor(a)) + (b - Math.floor(b))) / 2);
+
+  /*
+   * Where in the year we are, as a season weight. `day` counts from the start of
+   * the game and a year is 288 days — see DAYS_PER_YEAR — so this is the phase
+   * of the year with autumn at the peak.
+   */
+  const phase = ((day % 288) / 288) * Math.PI * 2;
+  /*
+   * Day zero is the first of January, so October is about five and a quarter
+   * radians round — and the offset that puts the peak there is that minus a
+   * quarter turn. Worked out rather than guessed: the first attempt used 1.9 and
+   * put the foggiest month in July, which the measurement caught immediately.
+   */
+  const season = 0.5 + 0.5 * Math.sin(phase - 3.67);
+  const chance = 0.14 + season * 0.3;
+
+  if (roll > chance) return 0;
+  // How far under the line it fell decides how thick it is, so the common case
+  // is a thin morning and a real blanket is rare.
+  return Math.min(1, 0.35 + (1 - roll / chance) * 0.8);
+}
+
 export function makeAir(scene: Scene): Air {
   /*
    * Mist, and it is the one that is easy to overdo.
@@ -382,16 +427,24 @@ export function makeAir(scene: Scene): Air {
    * of the difference between smoke and a column of dots.
    */
   const smoke = new Field(scene, {
-    count: 620,
-    tiles: 0.42,
-    colour: '#cfd3d2',
-    opacity: 0.26,
+    /*
+     * Many faint sprites rather than a few strong ones.
+     *
+     * Two and a half times as many at half the opacity, which is the same total
+     * density arranged so that no single particle is visible as itself. That is
+     * the difference between smoke and "individual blankets": what you see at any
+     * point in the plume is four or five sprites deep, and the shape is the sum.
+     */
+    count: 1500,
+    tiles: 0.58,
+    colour: '#cdd1d0',
+    opacity: 0.13,
     /*
      * Billows, rather than merely growing. Four times its birth size, which is
      * most of what makes a column read as *mass* — a puff that keeps its size is
      * a ball, and a stack of balls is what "plastic rubber balloons" means.
      */
-    spread: 3.2,
+    spread: 2.3,
     behave: (f, i, k, dt, time) => {
       const j = i * 3;
       /*
@@ -523,7 +576,8 @@ export function makeAir(scene: Scene): Air {
        * it outright: fog over snow is a whiteout, and a whiteout is not a
        * picture.
        */
-      const mistLevel = mistAt(hour) * (1 - frame.snow * 0.85) * frame.level;
+      const mistLevel = mistAt(hour) * mistOnDay(frame.day)
+        * (1 - frame.snow * 0.85) * frame.level;
       mist.aim(0.14 * mistLevel, frame.pixelsPerTile);
       if (mistLevel > 0.01) {
         /*
@@ -593,7 +647,19 @@ export function makeAir(scene: Scene): Air {
       const cold = 0.55 + frame.snow * 0.45;
       const lit = hour < 9.5 ? 1 : hour > 16 ? 1 : 0.2;
       const smokeLevel = cold * lit * frame.level;
-      smoke.aim(0.26 * frame.level, frame.pixelsPerTile);
+      /*
+       * And it goes dark with everything else.
+       *
+       * The field is drawn with a flat colour rather than a lit material, so it
+       * had exactly the same brightness at midnight as at noon — which over an
+       * unlit village at half past eleven reads as a row of glowing white blobs
+       * hanging above the roofs. Smoke is only ever as bright as what is shining
+       * on it, and at night that is a quarter moon and a sodium lamp.
+       *
+       * Not all the way to nothing, because a chimney going at night is worth
+       * seeing: it is the one sign that anybody is in.
+       */
+      smoke.aim(0.30 * frame.level * (1 - frame.night * 0.72), frame.pixelsPerTile);
       if (smokeLevel > 0.02) {
         /*
          * Puffs a second from one chimney, so the density is the same whatever
@@ -608,7 +674,14 @@ export function makeAir(scene: Scene): Air {
          * and visible. The arithmetic is framerate-independent; the picture was
          * not.
          */
-        const chance = 2.6 * dt * smokeLevel;
+        /*
+         * Clumps of three, not a bead at a time. The most effective of the four
+         * changes by a distance: three sprites born at the same instant a few
+         * inches apart travel together for the whole of their lives, so the plume
+         * is made of overlapping *groups* rather than a line of individuals.
+         */
+        const chance = 2.4 * dt * smokeLevel;
+        const CLUMP = 3;
         for (let p = 0; p < src.placeCount; p++) {
           const x = src.px[p];
           const z = src.pz[p];
@@ -642,13 +715,20 @@ export function makeAir(scene: Scene): Air {
            * actually climbs and each puff is still there when the next four
            * arrive — which is what accumulating looks like.
            */
-          smoke.spawn(
-            x + (Math.random() - 0.5) * 0.13,
-            groundHeightAt(src, x, z) + 1.2 + Math.random() * 0.10,
-            z + (Math.random() - 0.5) * 0.13,
-            0, 0.13 + Math.random() * 0.07, 0,
-            7.5 + Math.random() * 4.0,
-          );
+          const base = groundHeightAt(src, x, z) + 1.2;
+          for (let c = 0; c < CLUMP; c++) {
+            smoke.spawn(
+              x + (Math.random() - 0.5) * 0.16,
+              base + Math.random() * 0.09,
+              z + (Math.random() - 0.5) * 0.16,
+              // A whisker of sideways, so a clump opens out as it rises rather
+              // than staying three sprites in a stack.
+              (Math.random() - 0.5) * 0.02,
+              0.085 + Math.random() * 0.05,
+              (Math.random() - 0.5) * 0.02,
+              9.0 + Math.random() * 5.0,
+            );
+          }
         }
       }
 

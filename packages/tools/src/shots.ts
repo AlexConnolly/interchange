@@ -59,6 +59,15 @@ const SHOTS: { name: string; query: string; wait?: number; hover?: string }[] = 
    */
   { name: 'ui-hover', query: 'across=30', hover: '.dock' },
   { name: 'rich', query: 'across=30&happyHour=1500000' },
+  /*
+   * Twenty-two seconds, not nine. A plume takes its particles' whole lifetime to
+   * fill in — fourteen seconds here — and a headless browser on software GL runs
+   * this scene at about three frames a second, so the default settle photographs
+   * a plume that is a third built. The emission rate is frame-rate independent;
+   * how far through its life the field is when the shutter opens is not.
+   */
+  { name: 'smoke', query: 'across=18&time=0.09&day=241', wait: 22000 },
+  { name: 'fog-day', query: 'across=34&time=0.02&day=261', wait: 14000 },
 ];
 
 const BASE = process.env.BASE ?? 'http://localhost:4173/';
