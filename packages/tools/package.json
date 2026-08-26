@@ -4,8 +4,11 @@
   "type": "module",
   "private": true,
   "dependencies": {
-    "@interchange/sim": "workspace:*",
     "@interchange/data": "workspace:*",
-    "@interchange/render": "workspace:*"
+    "@interchange/render": "workspace:*",
+    "@interchange/sim": "workspace:*"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.62.1"
   }
 }

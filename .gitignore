@@ -13,3 +13,6 @@ packages/tools/src/scratch*.ts
 art/shots/
 !art/reference/
 artefacts/
+
+# Screenshots of the running game. Artifacts of packages/tools/src/shots.ts.
+shots/
