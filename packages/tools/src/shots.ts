@@ -41,7 +41,7 @@ const CHROMES = [
  * only exist at one hour: the mist is a dawn thing and nothing else in the game
  * says so, and the lit windows and street lamps only mean anything after dusk.
  */
-const SHOTS: { name: string; query: string; wait?: number }[] = [
+const SHOTS: { name: string; query: string; wait?: number; hover?: string }[] = [
   { name: 'afternoon', query: 'across=30' },
   { name: 'wide', query: 'across=64' },
   { name: 'dawn-mist', query: 'across=30&time=0.02' },
@@ -50,6 +50,14 @@ const SHOTS: { name: string; query: string; wait?: number }[] = [
   { name: 'cloud-in', query: 'across=52' },
   { name: 'cloud-full', query: 'across=70' },
   { name: 'cloud-none', query: 'across=30' },
+  /*
+   * A hover state, because half the interface only exists in one.
+   *
+   * The furniture is deliberately near-invisible until you reach for it, so a
+   * screenshot of the resting state says nothing about whether the reaching-for
+   * state works — and that is the half with the contrast in it.
+   */
+  { name: 'ui-hover', query: 'across=30', hover: '.dock' },
 ];
 
 const BASE = process.env.BASE ?? 'http://localhost:4173/';
@@ -100,6 +108,11 @@ async function main(): Promise<void> {
     const url = `${BASE}?vfx=high&${shot.query}&shot=${Date.now()}`;
     await page.goto(url, { waitUntil: 'load' });
     await page.waitForTimeout(shot.wait ?? SETTLE);
+    if (shot.hover) {
+      await page.hover(shot.hover);
+      // Long enough for the 120ms transition in, and no longer.
+      await page.waitForTimeout(400);
+    }
     const file = `${OUT}/${shot.name}.png`;
     await page.screenshot({ path: file });
     console.log(`${file}  <-  ${shot.query}`);

@@ -1371,9 +1371,13 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
    thing in the frame and there is nothing above white to go to. And it needs no
    halo, because light text on a dark veil has its contrast from the veil.
 
-   Hovering brings the cream back — the panel you are reaching for is the one
-   that should be solid and readable — so the ink inverts with it. Both
-   transition together, slow in and quick out.
+   Hovering makes it *more* black rather than turning it cream. That was the
+   third go and the right one — "let's actually just keep it black cause it looks
+   better than horrible white" — and it is better for a reason worth keeping: a
+   panel that inverts on hover changes two things at once, its weight and its
+   polarity, so the eye reads it as a different object arriving rather than as
+   the same object coming forward. Holding the colour and moving only the opacity
+   means hovering *strengthens* what is already there. Slow in and quick out.
 
    Only the *permanent* furniture: the purse, the clock, the cog, the dock, the
    tool tray, the map markers. Panels and bubbles you opened stay as they are;
@@ -1401,10 +1405,10 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .dock:hover,
 .tools:hover,
 .cog:hover {
-  background: rgba(247, 243, 234, 0.97);
-  border-color: rgba(255, 255, 255, 0.5);
-  box-shadow: 0 6px 24px rgba(30, 40, 30, 0.24);
-  color: var(--ink);
+  background: rgba(12, 15, 13, 0.72);
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 6px 24px rgba(8, 14, 10, 0.34);
+  color: #fffdf6;
   transition-duration: 120ms;
 }
 
@@ -1443,9 +1447,7 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   cursor: pointer;
 }
 .speed:hover { background: rgba(255, 255, 255, 0.16); opacity: 1; }
-.clock:hover .speed:hover { background: rgba(0, 0, 0, 0.07); }
-.purse-icon { color: #e8cf82; transition: color 260ms ease; }
-.purse:hover .purse-icon { color: #8a7a46; }
+.purse-icon { color: #e8cf82; }
 
 /* Rules and dividers, drawn in whatever the panel's ink currently is. */
 .clock-rule,
@@ -1457,19 +1459,14 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   opacity: 0.18;
 }
 
-/* Hover states inside a dark panel have to go lighter, not darker. */
+/* Everything inside a dark panel highlights by going lighter. One rule, because
+   the panel no longer changes polarity underneath it. */
 .dock-btn:hover,
 .tool-btn:hover,
-.tool-x:hover { background: rgba(255, 255, 255, 0.14); color: inherit; }
-.dock:hover .dock-btn:hover,
-.tools:hover .tool-btn:hover,
-.tools:hover .tool-x:hover { background: rgba(0, 0, 0, 0.06); }
-/* Gold stays gold in both states: it is the only colour coding in the dock and
-   it has to survive the panel turning over underneath it. */
+.tool-x:hover { background: rgba(255, 255, 255, 0.16); color: inherit; }
+/* Gold is the only colour coding in the dock, and it reads on black. */
 .dock-btn.on,
-.dock:hover .dock-btn.on,
-.tool-btn.on,
-.tools:hover .tool-btn.on { background: #f4c95d; color: #4a3c14; }
+.tool-btn.on { background: #f4c95d; color: #4a3c14; }
 
 /* The day ring, which has to work on both grounds. */
 .ring-track { stroke: currentColor; opacity: 0.20; stroke-width: 3.4; }
@@ -1488,14 +1485,16 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   transition: background 260ms ease, border-color 260ms ease, color 260ms ease;
 }
 .mark:hover .mark-face {
-  background: rgba(250, 247, 238, 0.98);
-  border-color: rgba(255, 255, 255, 0.92);
-  color: var(--ink);
+  background: rgba(12, 15, 13, 0.80);
+  border-color: rgba(255, 255, 255, 0.30);
+  color: #fffdf6;
   transition-duration: 120ms;
 }
-/* Yours reads gold in both, dimmed rather than recoloured when idle. */
-.mark.mine .mark-face { background: rgba(126, 95, 20, 0.44); color: #f7e3ac; }
-.mark.mine:hover .mark-face { background: #f4c95d; color: #4a3c14; }
+/* Yours reads gold in both — dimmed when idle, and never inverted. It is the
+   only colour coding on the map and losing it would cost the one thing it is
+   for. */
+.mark.mine .mark-face { background: rgba(126, 95, 20, 0.46); color: #f7e3ac; }
+.mark.mine:hover .mark-face { background: rgba(163, 124, 27, 0.86); color: #ffeec0; }
 .mark-dot { border-color: rgba(255, 255, 255, 0.5); }
 .mine-mark { opacity: 0.55; transition: opacity 260ms ease; }
 .mine-mark:hover { opacity: 1; transition-duration: 120ms; }
