@@ -38,6 +38,7 @@ import {
 } from './ground.ts';
 import { makeAir, type Air } from './air.ts';
 import { makeBirds, type Birds } from './birds.ts';
+import { CAMERA_AZIMUTH, CAMERA_DISTANCE, CAMERA_ELEVATION } from './camera.ts';
 import { Mesh } from './geometry.ts';
 import { buildRoads, buildCatsEyes, type RoadSource } from './roads.ts';
 import type { Model } from './glb.ts';
@@ -59,14 +60,7 @@ export { HEIGHT_TO_WORLD };
  */
 const REVERSE_LIMIT = 3.5;
 
-/**
- * How far back the camera sits from what it is looking at.
- *
- * Named because the fog needs it too. With an orthographic camera every pixel is
- * at roughly this depth, so aerial perspective has to be graded *around* the
- * figure rather than outward from zero — see `aimFog`.
- */
-const CAMERA_DISTANCE = 120;
+
 
 /**
  * The two ways a facing is arrived at, side by side so they cannot disagree.
@@ -613,8 +607,10 @@ export class Renderer {
   private readonly tmpUp = new Vector3();
 
   private placeCamera(): void {
-    const el = (38 * Math.PI) / 180;
-    const az = (-32 * Math.PI) / 180;
+    // From `camera.ts`, which is also what the ground builder asks when it
+    // decides which face of a furrow is the one you can see.
+    const el = CAMERA_ELEVATION;
+    const az = CAMERA_AZIMUTH;
     const d = CAMERA_DISTANCE;
     /*
      * Aim at the ground, not at y = 0.

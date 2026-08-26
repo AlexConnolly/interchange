@@ -24,6 +24,7 @@
 
 import { BufferGeometry, Mesh as ThreeMesh, type Material } from 'three';
 import { Mesh } from './geometry.ts';
+import { nearFaceIsLow } from './camera.ts';
 import { CROP, FENCE, HEDGE, WALL, LAND, shade, type RGB } from './palette.ts';
 
 /** Height units to world units. A tile is one world unit. */
@@ -378,20 +379,22 @@ function tilth(
   const top = shade(colour, spec.top);
   const side = shade(colour, spec.side);
   /*
-   * Only the near side of each ridge, which is a third of the cost for nothing
+   * Only the near face of each ridge, which is a third of the cost for nothing
    * visible at all.
    *
-   * The camera sits at minus X and minus Z of whatever it is looking at, at a
-   * fixed azimuth this game does not let you turn — so the *far* face of every
-   * ridge is behind the ridge in front of it, except the very last one at the
-   * edge of a field, which is a tile boundary and has a hedge on it. Measured
-   * before trimming: a stubble tile was fifty triangles against a flat field's
-   * two, and the ground is the hottest geometry in the game.
+   * On a corrugated surface the *far* face of every ridge is hidden behind the
+   * ridge in front of it, so drawing it is pure waste — and the ground is the
+   * hottest geometry in the game. Measured before trimming: a stubble tile was
+   * fifty triangles against a flat field's two.
    *
-   * This is only safe because the azimuth is fixed. If the camera ever rotates,
-   * this is the line that breaks, and it will break by showing daylight through
-   * the furrows.
+   * Which face is near is *asked* rather than assumed. The first version hard-
+   * coded the lower one, with a comment admitting it only held because the
+   * azimuth is fixed and warning that a camera which turned would show daylight
+   * through the furrows. That is a trap with a note on it. `nearFaceIsLow` reads
+   * the same camera constants the camera itself uses, so the geometry follows the
+   * view instead of assuming it.
    */
+  const low = nearFaceIsLow(alongX);
   const pitch = 1 / spec.rows;
   const half = (pitch * spec.fill) / 2;
   for (let i = 0; i < spec.rows; i++) {
@@ -407,8 +410,13 @@ function tilth(
       const yd = at(0, b);
       m.quad(x, ya + hi, y + a, x + 1, yb + hi, y + a,
              x + 1, yc + hi, y + b, x, yd + hi, y + b, top);
-      m.quad(x, ya, y + a, x + 1, yb, y + a,
-             x + 1, yb + hi, y + a, x, ya + hi, y + a, side);
+      if (low) {
+        m.quad(x, ya, y + a, x + 1, yb, y + a,
+               x + 1, yb + hi, y + a, x, ya + hi, y + a, side);
+      } else {
+        m.quad(x, yd + hi, y + b, x + 1, yc + hi, y + b,
+               x + 1, yc, y + b, x, yd, y + b, side);
+      }
     } else {
       const ya = at(a, 0);
       const yb = at(a, 1);
@@ -416,8 +424,13 @@ function tilth(
       const yd = at(b, 0);
       m.quad(x + a, ya + hi, y, x + a, yb + hi, y + 1,
              x + b, yc + hi, y + 1, x + b, yd + hi, y, top);
-      m.quad(x + a, ya, y, x + a, yb, y + 1,
-             x + a, yb + hi, y + 1, x + a, ya + hi, y, side);
+      if (low) {
+        m.quad(x + a, ya, y, x + a, yb, y + 1,
+               x + a, yb + hi, y + 1, x + a, ya + hi, y, side);
+      } else {
+        m.quad(x + b, yd + hi, y, x + b, yc + hi, y + 1,
+               x + b, yc, y + 1, x + b, yd, y, side);
+      }
     }
   }
 }
