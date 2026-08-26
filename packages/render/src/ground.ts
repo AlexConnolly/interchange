@@ -204,17 +204,35 @@ export function buildGround(
       } else {
         const p = src.parcel[tile];
         colour = p === NO_PARCEL ? CROP[6] : (CROP[src.crop[tile]] ?? CROP[6]);
-        /*
-         * Crop rows, as a stripe on alternate tiles across the field.
-         *
-         * Done per tile rather than as separate geometry: a field is five to
-         * thirteen tiles across, so striping every other tile row gives a
-         * rhythm at exactly the frequency the target frame has, for no extra
-         * triangles at all.
-         */
         if (p !== NO_PARCEL) {
+          /*
+           * Every field its own shade.
+           *
+           * "Each field can have a slightly different yellow tint to it." Yes —
+           * and it is the single cheapest thing here, because a district of
+           * barley in one identical gold reads as a texture rather than as a
+           * dozen farms' worth of separate decisions. Hashed off the parcel so a
+           * field is one colour along its whole length and the field next to it
+           * is not, which is the only place the difference is ever seen.
+           *
+           * Six per cent, which sounds like nothing and is the difference
+           * between a quilt and a wash.
+           */
+          const n = ((p + 1) * 2654435761) >>> 0;
+          const vary = 0.94 + ((n >>> 11) & 255) / 255 * 0.12;
+          colour = [
+            Math.min(1, colour[0] * vary),
+            Math.min(1, colour[1] * (0.97 + (1 - vary) * 0.6)),
+            colour[2] * (2 - vary) * 0.99,
+          ];
+          /*
+           * And a stripe on alternate tiles, still. The corrugation below is the
+           * furrow; this is the *pass* — the width a machine covers in one run,
+           * which is several furrows wide and is what makes a big field read as
+           * having been worked in strips.
+           */
           const along = (p & 1) === 0 ? y : x;
-          if (along % 2 === 0) colour = shade(colour, 0.945);
+          if (along % 2 === 0) colour = shade(colour, 0.955);
         }
       }
       /*
@@ -241,6 +259,26 @@ export function buildGround(
        * rather than being bridged flat by whichever triangulation the loop
        * happened to pick.
        */
+      /*
+       * And the tilth on top of it, where the crop has any.
+       *
+       * After the base quad rather than instead of it: the corrugation is ridges
+       * standing *on* the field, so the ground still has to be there underneath
+       * — visible in the troughs, which is where the earth shows between rows of
+       * barley and is half of what says the barley is growing out of something.
+       *
+       * Only inside the influence area, on the same argument the hedges make: out
+       * there you see the shape of the country and not what is in it, and the
+       * detail would be a lot of triangles for a wash of fog.
+       */
+      const spec = TILTH[src.crop[tile]];
+      if (spec !== undefined && src.parcel[tile] !== NO_PARCEL && src.influence(tile) > 0.10) {
+        tilth(
+          m, x, y, h00, h10, h01, h11, spec, colour,
+          (src.parcel[tile] & 1) === 0,
+        );
+      }
+
       const flip = Math.abs(h00 - h11) > Math.abs(h10 - h01);
       if (flip) {
         m.tri(x, h00, y, x + 1, h11, y + 1, x + 1, h10, y, colour);
@@ -263,6 +301,127 @@ export function buildGround(
  * differ. Tapered towards the top so it is a hedge and not a wall — the target
  * frame tapered to 0.72 first and they read as grass banks, so 0.80 it is.
  */
+/**
+ * What each arable state looks like as *geometry* rather than as a colour.
+ *
+ * "You just made it brown. It looks ridiculous. I want it to look like it's been
+ * ploughed, literally been ploughed." Fair, and the whole field system was a
+ * colour lookup: a ploughed field and a field of barley were the same two
+ * triangles in different browns, and no amount of choosing a better brown makes
+ * a flat surface look turned over.
+ *
+ * A field of any of these is *corrugated*, and that is the one thing they have in
+ * common and the reason this is one function. What differs is how high the
+ * corrugation stands, how far apart it is, and what colour the top and the side
+ * are — and those three numbers are enough to tell a ploughed field from a
+ * drilled one from standing barley from stubble, at the zoom the game is played
+ * at, which is the only test that counts.
+ *
+ *   `rows`   how many across a tile. A plough leaves wide furrows; a drill
+ *            leaves fine ones; barley grows in rows you can count.
+ *   `height` how far it stands off the ground, in tiles. Earth is nearly flat;
+ *            a ripe crop is knee-high on this scale.
+ *   `fill`   how much of the pitch is ridge and how much is trough. Standing
+ *            crop nearly closes over; a fresh furrow is mostly trough.
+ */
+/*
+ * Crop indices, spelled out because this package does not depend on the
+ * simulation — the same reason `CROP[6]` above is a number and not a name. They
+ * must match `Crop` in `sim/fields.ts`, and the only guard against drift is that
+ * a wrong one here is instantly visible: a field of barley would be ploughed.
+ */
+const PLOUGH = 5;
+const DRILLED = 7;
+const GROWING = 8;
+const WHEAT = 3;
+const WHEAT_RIPE = 4;
+const STUBBLE = 9;
+const BARE = 10;
+
+const TILTH: Record<number, { rows: number; height: number; fill: number;
+  top: number; side: number }> = {
+  // Ploughed: deep, wide furrows of turned earth. The ridge catches the light
+  // and the trough is in shadow all day, which is what makes a ploughed field
+  // read as *striped* from the air rather than as brown.
+  [PLOUGH]: { rows: 4, height: 0.055, fill: 0.60, top: 1.16, side: 0.72 },
+  // Cleared and waiting for the plough: the old furrows, weathered down.
+  [BARE]: { rows: 4, height: 0.032, fill: 0.66, top: 1.10, side: 0.80 },
+  // Drilled and rolled: finer, flatter, and the seed lines are the only relief.
+  [DRILLED]: { rows: 5, height: 0.022, fill: 0.52, top: 1.12, side: 0.84 },
+  // Up and green, in rows with earth still showing between them.
+  [GROWING]: { rows: 6, height: 0.045, fill: 0.62, top: 1.10, side: 0.86 },
+  // In ear and not yet ripe: taller, and nearly closed over.
+  [WHEAT]: { rows: 6, height: 0.085, fill: 0.84, top: 1.08, side: 0.88 },
+  // Ripe. The tallest thing that is not a hedge, and the ears catch the sun.
+  [WHEAT_RIPE]: { rows: 6, height: 0.105, fill: 0.88, top: 1.14, side: 0.86 },
+  // Cut: short pale rows with the straw lying between them.
+  [STUBBLE]: { rows: 5, height: 0.026, fill: 0.70, top: 1.12, side: 0.88 },
+};
+
+/**
+ * Lay the corrugation across one tile.
+ *
+ * Ridges run along the parcel's own axis so a whole field is ploughed in one
+ * direction — which is both what a tractor does and what makes a field read as
+ * one field rather than as a patchwork of tiles. Heights come from the tile's own
+ * bilinear surface, so the furrows follow the ground over a rise instead of
+ * floating off it.
+ */
+function tilth(
+  m: Mesh, x: number, y: number,
+  h00: number, h10: number, h01: number, h11: number,
+  spec: { rows: number; height: number; fill: number; top: number; side: number },
+  colour: RGB, alongX: boolean,
+): void {
+  const at = (u: number, v: number): number => (
+    (h00 * (1 - u) + h10 * u) * (1 - v) + (h01 * (1 - u) + h11 * u) * v);
+  const top = shade(colour, spec.top);
+  const side = shade(colour, spec.side);
+  /*
+   * Only the near side of each ridge, which is a third of the cost for nothing
+   * visible at all.
+   *
+   * The camera sits at minus X and minus Z of whatever it is looking at, at a
+   * fixed azimuth this game does not let you turn — so the *far* face of every
+   * ridge is behind the ridge in front of it, except the very last one at the
+   * edge of a field, which is a tile boundary and has a hedge on it. Measured
+   * before trimming: a stubble tile was fifty triangles against a flat field's
+   * two, and the ground is the hottest geometry in the game.
+   *
+   * This is only safe because the azimuth is fixed. If the camera ever rotates,
+   * this is the line that breaks, and it will break by showing daylight through
+   * the furrows.
+   */
+  const pitch = 1 / spec.rows;
+  const half = (pitch * spec.fill) / 2;
+  for (let i = 0; i < spec.rows; i++) {
+    const c = (i + 0.5) * pitch;
+    const a = c - half;
+    const b = c + half;
+    const hi = spec.height;
+    if (alongX) {
+      // The ridge runs the length of the tile in X, a band in Z.
+      const ya = at(0, a);
+      const yb = at(1, a);
+      const yc = at(1, b);
+      const yd = at(0, b);
+      m.quad(x, ya + hi, y + a, x + 1, yb + hi, y + a,
+             x + 1, yc + hi, y + b, x, yd + hi, y + b, top);
+      m.quad(x, ya, y + a, x + 1, yb, y + a,
+             x + 1, yb + hi, y + a, x, ya + hi, y + a, side);
+    } else {
+      const ya = at(a, 0);
+      const yb = at(a, 1);
+      const yc = at(b, 1);
+      const yd = at(b, 0);
+      m.quad(x + a, ya + hi, y, x + a, yb + hi, y + 1,
+             x + b, yc + hi, y + 1, x + b, yd + hi, y, top);
+      m.quad(x + a, ya, y, x + a, yb, y + 1,
+             x + a, yb + hi, y + 1, x + a, ya + hi, y, side);
+    }
+  }
+}
+
 function buildHedges(
   src: GroundSource, m: Mesh, x0: number, y0: number, x1: number, y1: number,
 ): void {
