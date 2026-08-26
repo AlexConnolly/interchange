@@ -65,6 +65,22 @@ export interface RoadSource {
   level: Int16Array;
   /** Water under the road: a road tile that is also a watercourse is a bridge. */
   isStream: (tile: number) => boolean;
+  /**
+   * A building stands here, so do not pave it.
+   *
+   * Every business gets a track laid to its *own* tile — that is what makes the
+   * tile a graph node and therefore somewhere a lorry can stop — and the building
+   * is then drawn a tile off it. Which would be fine if a building were a tile
+   * across. A farm complex is two or three, so it reaches back over the stub and
+   * the lane comes out through the middle of the dairy: fifteen of eighteen
+   * businesses in the shipping district, measured.
+   *
+   * The road stays in the simulation, because the routing is correct — the track
+   * really does end at the farm. It just should not be *painted* under the farm,
+   * any more than a real one is painted under a barn. What is left is a track
+   * that runs up to the yard and stops, which is what a farm track does.
+   */
+  isYard: (tile: number) => boolean;
   influence: (tile: number) => number;
 }
 
@@ -193,6 +209,8 @@ export function buildRoads(
       const tile = z * s + x;
       const cls = src.roadClass[tile];
       if (cls < 0) continue;
+      // Under a building: the track is real, it is simply not drawn here.
+      if (src.isYard(tile)) continue;
       const st = STYLE[cls] ?? STYLE[1];
       const inf = src.influence(tile);
 

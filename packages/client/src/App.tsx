@@ -592,6 +592,7 @@ export function App(): JSX.Element {
        */
       isStream: (t) => (world.terrain.flags[t] & TileFlag.River) !== 0
         && world.terrain.height[t] > 0,
+      isYard: (t) => yardTiles.has(t),
       influence: (t) => world.influence.at(t),
       roadClass,
       level: layer.level,
@@ -733,6 +734,15 @@ export function App(): JSX.Element {
      * to move is toward the site's own ground, away from the tarmac.
      */
     const OFF_ROAD = 1.0;
+    /*
+     * The tiles a business is standing on, so the renderer does not pave them.
+     *
+     * Only the dead ends. A business on a through lane has traffic going past it
+     * and the lane belongs there; a business at the end of a stub laid purely to
+     * reach it is standing in its own yard, and painting tarmac under the barn is
+     * what "roads are going through buildings" was.
+     */
+    const yardTiles = new Set<number>();
     for (let i = 0; i < world.sites.count; i++) {
       const tile = world.siteAccessTile[i];
       if (tile < 0) continue;
@@ -767,6 +777,9 @@ export function App(): JSX.Element {
         tile,
         evening: eveningFor(bx, bz, seed),
       });
+      let arms = 0;
+      for (const d of [1, -1, DISTRICT, -DISTRICT]) if (roadClass[tile + d] >= 0) arms++;
+      if (arms <= 1) yardTiles.add(tile);
       fillYard(tile, world.content.industries[world.sites.def[i]].id);
     }
 
