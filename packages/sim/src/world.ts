@@ -5194,6 +5194,85 @@ export class World {
   }
 
   /**
+   * The standing run taking a cargo *out* of a place of yours, if there is one.
+   *
+   * The mirror of `runInto`, and needed for the same reason: a panel that offers
+   * to arrange a run has to know whether one already exists, or it offers to
+   * arrange a second lorry onto a job that has one.
+   */
+  runOutOf(site: number, cargo: number): { service: number; vehicle: number } | null {
+    for (let svc = 0; svc < this.services.count; svc++) {
+      if (!this.services.active[svc]) continue;
+      if (this.services.company[svc] !== this.player) continue;
+      const n = this.services.stopCount[svc];
+      let loadsHere = false;
+      for (let k = 0; k < n; k++) {
+        const si = svc * MAX_STOPS + k;
+        if (this.services.stopKind[si] !== 0) continue;
+        if (this.services.stopTarget[si] !== site) continue;
+        if (this.services.stopCargo[si] !== cargo) continue;
+        const a = this.services.stopAction[si];
+        if (a === StopAction.Load || a === StopAction.LoadFull || a === StopAction.Exchange) {
+          loadsHere = true;
+          break;
+        }
+      }
+      if (!loadsHere) continue;
+      let vehicle = NONE;
+      for (let v = 0; v < this.vehicles.count; v++) {
+        if (this.vehicles.alive[v] && this.vehicles.service[v] === svc) { vehicle = v; break; }
+      }
+      return { service: svc, vehicle };
+    }
+    return null;
+  }
+
+  /**
+   * Who would take what this place of yours makes, grouped by cargo.
+   *
+   * `buyersFor` returns a flat list of pairings, which is the shape the contract
+   * board wants and the wrong shape for a panel: a panel shows one row per thing
+   * you produce, and the buyers are what you choose *within* that row. Same
+   * shape as `suppliersFor`, so one component draws both directions.
+   */
+  buyerGroups(site: number): {
+    cargo: number;
+    owned: boolean;
+    candidates: { site: number; distance: number; visible: boolean }[];
+    hidden: number;
+  }[] {
+    const out: {
+      cargo: number; owned: boolean;
+      candidates: { site: number; distance: number; visible: boolean }[];
+      hidden: number;
+    }[] = [];
+    if (site < 0 || site >= this.sites.count) return out;
+    for (const cargo of this.offersOf(site)) {
+      const candidates: { site: number; distance: number; visible: boolean }[] = [];
+      let hidden = 0;
+      for (let b = 0; b < this.sites.count; b++) {
+        if (b === site) continue;
+        const ins = this.recipes.inputs[this.sites.def[b]];
+        let takes = false;
+        for (let k = 0; k < ins.length; k += 2) if (ins[k] === cargo) { takes = true; break; }
+        if (!takes) continue;
+        const tile = this.siteAccessTile[b];
+        if (tile === NONE || !this.influence.usable(tile)) { hidden++; continue; }
+        const dx = this.sites.x[b] - this.sites.x[site];
+        const dy = this.sites.y[b] - this.sites.y[site];
+        candidates.push({
+          site: b,
+          distance: Math.round(Math.sqrt(dx * dx + dy * dy)),
+          visible: true,
+        });
+      }
+      candidates.sort((a, b) => a.distance - b.distance);
+      out.push({ cargo, owned: false, candidates, hidden });
+    }
+    return out;
+  }
+
+  /**
    * End a run. The lorry comes off it and goes back to the yard list.
    *
    * The counterpart of `supply`, and the reason the panel can be a toggle: a line

@@ -101,7 +101,9 @@ export function Place({
    * decision. That is the "sliding UI with a back button" this wanted: one thing
    * on screen, one way back.
    */
-  const [arranging, setArranging] = useState<{ cargo: number; from: number } | null>(null);
+  const [arranging, setArranging] = useState<
+    { cargo: number; from: number; to: number; outward: boolean } | null
+  >(null);
   /*
    * Did we just come *back* from the sub-view? Only then does the main page slide
    * in from the left — opening the panel fresh should not animate as though you
@@ -131,6 +133,12 @@ export function Place({
   const mine = world.sites.owner[site] === world.player;
   const verdict = world.canBuySite(site);
   const supplies = world.suppliersFor(site);
+  /*
+   * The mirror of `supplies`: one group per thing this place makes, with the
+   * buyers in reach inside it. Only for a place of yours — somebody else's
+   * output is *their* business, and what they offer you is a contract.
+   */
+  const outputs = mine ? world.buyerGroups(site) : [];
 
   const board = world.contractBoard;
   /*
@@ -212,24 +220,30 @@ export function Place({
         * opened anything, which is what the old single scroll was trying to do
         * by showing all three at once.
         */}
-      {arranging && (
+      {arranging ? (
         <div className="bubble-body slide-in">
           <Arrange
             world={world}
             site={site}
             cargo={arranging.cargo}
             from={arranging.from}
-            onFrom={(f) => setArranging({ cargo: arranging.cargo, from: f })}
-            onHover={(to) => actions.preview(to, site)}
+            to={arranging.to}
+            outward={arranging.outward}
+            onOther={(other) => setArranging(arranging.outward
+              ? { ...arranging, to: other }
+              : { ...arranging, from: other })}
+            onHover={(other) => (arranging.outward
+              ? actions.preview(site, other)
+              : actions.preview(other, site))}
             onAssign={(vehicle) => {
-              actions.supply(arranging.from, site, arranging.cargo, vehicle);
+              actions.supply(arranging.from, arranging.to, arranging.cargo, vehicle);
               actions.preview(-1, -1);
               setArranging(null);
             }}
           />
         </div>
-      )}
-
+      ) : (
+        <>
       {/*
         * In and Out, not "Work" and "Supply".
         *
@@ -240,16 +254,26 @@ export function Place({
         * and Out is what it sells; for anybody else's, In is who could supply it
         * and Out is the work they are offering. One pair of words, both readings.
         */}
-      <div className="tabs" role="tablist" hidden={arranging !== null}>
+      <div className="tabs" role="tablist">
         <button
           className={`tab ${tab === 'about' ? 'on' : ''}`}
           onClick={() => setTab('about')}
         >About</button>
+        {/*
+          * What Out counts depends on whose place it is, because Out means
+          * different things: your own goods leaving, or the work somebody else is
+          * offering. Gating both on the contract count left the tab dead on a
+          * place of yours that had stock and no contracts — which is most of them,
+          * most of the time.
+          */}
         <button
           className={`tab ${tab === 'work' ? 'on' : ''}`}
           onClick={() => setTab('work')}
-          disabled={jobs === 0}
-        >Out{jobs > 0 && <em>{jobs}</em>}</button>
+          disabled={mine ? outputs.length === 0 : jobs === 0}
+        >
+          Out
+          {(mine ? outputs.length : jobs) > 0 && <em>{mine ? outputs.length : jobs}</em>}
+        </button>
         <button
           className={`tab ${tab === 'supply' ? 'on' : ''}`}
           onClick={() => setTab('supply')}
@@ -268,15 +292,42 @@ export function Place({
         )}
       </div>
 
-      <div
-        className={`bubble-body${came ? ' slide-back' : ''}`}
-        hidden={arranging !== null}
-      >
+      <div className={`bubble-body${came ? ' slide-back' : ''}`}>
         {tab === 'about' && (
           <About world={world} site={site} mine={mine} verdict={verdict} actions={actions} />
         )}
 
-        {tab === 'work' && (
+        {/*
+          * For a place of yours, Out is *your goods leaving* — one row per cargo,
+          * exactly mirroring In. It used to be two lists with a heading between
+          * them reading "Where it goes", which answered a question nobody had
+          * asked in words nobody could parse: "what's the split between the out
+          * thing with two things on it then a Where it goes section?" There is no
+          * split now. Choosing a destination happens on the Arrange page, which is
+          * where choosing belongs.
+          *
+          * For somebody else's place, Out is the work it is offering — which is
+          * what a contract is, and needs no rewording.
+          */}
+        {tab === 'work' && mine && outputs.map((g) => (
+          <Supply
+            key={`out-${g.cargo}`}
+            world={world}
+            site={site}
+            mine
+            outward
+            group={g}
+            onGo={actions.goTo}
+            onHover={(to) => actions.preview(site, to)}
+            onArrange={(cargo, from, to) => {
+              setCame(false);
+              setArranging({ cargo, from, to, outward: true });
+            }}
+            onEnd={actions.endRun}
+          />
+        ))}
+
+        {tab === 'work' && !mine && (
           <>
             {running.map((id) => {
               const cargo = C.cargo[board.cargo[id]];
@@ -370,28 +421,6 @@ export function Place({
               );
             })}
 
-            {buyers.length > 0 && <div className="head">Where it goes</div>}
-            {buyers.map((b) => (
-              <button
-                key={`${b.site}-${b.cargo}`}
-                className="job"
-                onMouseEnter={() => actions.preview(site, b.site)}
-                onMouseLeave={() => actions.preview(-1, -1)}
-                onClick={() => { actions.supply(site, b.site, b.cargo); actions.preview(-1, -1); }}
-              >
-                <span className="job-line">
-                  <span className="swatch" style={{ background: C.cargo[b.cargo].colour }} />
-                  <span className="grow">
-                    {C.cargo[b.cargo].name} → {C.industries[world.sites.def[b.site]].name}
-                  </span>
-                  <span className="pay">{money(b.pay)}<i>/t</i></span>
-                </span>
-                <span className={`needs ${world.fleetCanCarry(b.cargo) ? '' : 'cannot'}`}>
-                  <BodyIcon handling={C.cargo[b.cargo].handling} />
-                  {bodyFor(C.cargo[b.cargo].handling)}
-                </span>
-              </button>
-            ))}
           </>
         )}
 
@@ -406,11 +435,16 @@ export function Place({
             group={g}
             onGo={actions.goTo}
             onHover={(to) => actions.preview(to, site)}
-            onArrange={(cargo, from) => { setCame(false); setArranging({ cargo, from }); }}
+            onArrange={(cargo, from, to) => {
+              setCame(false);
+              setArranging({ cargo, from, to, outward: false });
+            }}
             onEnd={actions.endRun}
           />
         ))}
       </div>
+        </>
+      )}
       <span className="bubble-arrow" />
     </div>
   );
@@ -562,11 +596,19 @@ function Drivers({
  * hands you the map for free.
  */
 function Supply({
-  world, site, mine, group, onGo, onHover, onArrange, onEnd,
+  world, site, mine, outward = false, group, onGo, onHover, onArrange, onEnd,
 }: {
   world: World;
   site: number;
   mine: boolean;
+  /**
+   * Is this a thing leaving, rather than a thing arriving?
+   *
+   * One component draws both because they are the same row with the arrow turned
+   * round: a cargo, how much of it is here, and either the lorry on it or a way
+   * to put one on. Two components would be two places to fix the next thing.
+   */
+  outward?: boolean;
   group: {
     cargo: number; owned: boolean;
     candidates: { site: number; distance: number; visible: boolean }[];
@@ -574,7 +616,8 @@ function Supply({
   };
   onGo: (site: number) => void;
   onHover: (site: number) => void;
-  onArrange: (cargo: number, from: number) => void;
+  /** Both ends, because which one is fixed depends on the direction. */
+  onArrange: (cargo: number, from: number, to: number) => void;
   onEnd: (service: number) => void;
 }): JSX.Element {
   /*
@@ -593,7 +636,9 @@ function Supply({
    */
   const cargo = C.cargo[group.cargo];
   const stock = world.sites.stockOf(site, group.cargo);
-  const run = mine ? world.runInto(site, group.cargo) : null;
+  const run = !mine ? null
+    : outward ? world.runOutOf(site, group.cargo)
+      : world.runInto(site, group.cargo);
 
   if (!mine) {
     // Somebody else's place: this is a reference list, not a control panel.
@@ -655,7 +700,9 @@ function Supply({
   return (
     <button
       className="supply-row"
-      onClick={() => nearest && onArrange(group.cargo, nearest.site)}
+      onClick={() => nearest && (outward
+        ? onArrange(group.cargo, site, nearest.site)
+        : onArrange(group.cargo, nearest.site, site))}
       disabled={!nearest}
       onMouseEnter={() => nearest && onHover(nearest.site)}
       onMouseLeave={() => onHover(-1)}
@@ -668,8 +715,11 @@ function Supply({
         </span>
         <span className="running-sub">
           {nearest
-            ? `from ${C.industries[world.sites.def[nearest.site]].name}, ${nearest.distance} tiles`
-            : group.hidden > 0 ? 'the supplier is out of reach' : 'nothing makes it'}
+            ? `${outward ? 'to' : 'from'} ${C.industries[world.sites.def[nearest.site]].name}`
+              + `, ${nearest.distance} tiles`
+            : group.hidden > 0
+              ? outward ? 'the buyer is out of reach' : 'the supplier is out of reach'
+              : outward ? 'nobody near takes it' : 'nothing makes it'}
         </span>
       </span>
       {nearest && <span className="supply-go">›</span>}
@@ -692,31 +742,40 @@ function Supply({
  * question "which lorry" was three taps deep.
  */
 function Arrange({
-  world, site, cargo, from, onFrom, onHover, onAssign,
+  world, site, cargo, from, to, outward, onOther, onHover, onAssign,
 }: {
   world: World;
   site: number;
   cargo: number;
   from: number;
-  onFrom: (from: number) => void;
+  to: number;
+  outward: boolean;
+  onOther: (site: number) => void;
   onHover: (site: number) => void;
   onAssign: (vehicle: number) => void;
 }): JSX.Element {
   const [changing, setChanging] = useState(false);
-  const suppliers = world.suppliersFor(site).find((g) => g.cargo === cargo);
+  /*
+   * The end you did *not* fix is the one you may change. Going out, that is the
+   * buyer; coming in, the supplier. Everything else on this page is the same
+   * either way, which is why there is one page and not two.
+   */
+  const groups = outward ? world.buyerGroups(site) : world.suppliersFor(site);
+  const others = groups.find((g) => g.cargo === cargo);
+  const other = outward ? to : from;
   const drivers = world.driversForRun(from, cargo);
-  const def = C.industries[world.sites.def[from]];
+  const def = C.industries[world.sites.def[other]];
   const spare = drivers.filter((d) => d.suitable);
 
   if (changing) {
     return (
       <>
-        <div className="head">Collect from</div>
-        {(suppliers?.candidates ?? []).map((c) => (
+        <div className="head">{outward ? 'Deliver to' : 'Collect from'}</div>
+        {(others?.candidates ?? []).map((c) => (
           <button
             key={c.site}
-            className={`driver ${c.site === from ? 'on' : ''}`}
-            onClick={() => { onFrom(c.site); setChanging(false); }}
+            className={`driver ${c.site === other ? 'on' : ''}`}
+            onClick={() => { onOther(c.site); setChanging(false); }}
             onMouseEnter={() => onHover(c.site)}
             onMouseLeave={() => onHover(-1)}
           >
@@ -727,7 +786,7 @@ function Arrange({
               <span className="driver-name">{C.industries[world.sites.def[c.site]].name}</span>
               <span className="driver-where">{c.distance} tiles away</span>
             </span>
-            {c.site === from && <span className="driver-no">✓</span>}
+            {c.site === other && <span className="driver-no">✓</span>}
           </button>
         ))}
       </>
@@ -746,10 +805,10 @@ function Arrange({
         <span className="grow">
           <span className="running-name">{def.name}</span>
           <span className="running-sub">
-            {suppliers?.candidates.find((c) => c.site === from)?.distance ?? 0} tiles away
+            {others?.candidates.find((c) => c.site === other)?.distance ?? 0} tiles away
           </span>
         </span>
-        {(suppliers?.candidates.length ?? 0) > 1 && (
+        {(others?.candidates.length ?? 0) > 1 && (
           <button className="from-change" onClick={() => setChanging(true)}>change</button>
         )}
       </div>
