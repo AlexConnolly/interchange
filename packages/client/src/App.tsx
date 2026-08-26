@@ -743,30 +743,56 @@ export function App(): JSX.Element {
      * what "roads are going through buildings" was.
      */
     const yardTiles = new Set<number>();
-    for (let i = 0; i < world.sites.count; i++) {
-      const tile = world.siteAccessTile[i];
-      if (tile < 0) continue;
+    /*
+     * Mark a tile as built on, and drop the chunk so the tarmac goes.
+     *
+     * Businesses are known at startup and can be collected in one pass, but a
+     * yard or a depot can be founded at any point in a game — and the road mesh
+     * for a chunk is built once and cached, so simply adding to the set would
+     * change nothing until something else happened to invalidate it. Hence the
+     * drop, and hence the guard: without it this would rebuild the same chunk
+     * sixty times a second for the rest of the game.
+     */
+    const claimYard = (tile: number): void => {
+      if (yardTiles.has(tile)) return;
+      let arms = 0;
+      for (const d of [1, -1, DISTRICT, -DISTRICT]) if (roadClass[tile + d] >= 0) arms++;
+      if (arms > 1) return;
+      yardTiles.add(tile);
+      renderer.dropChunkAt(tile % DISTRICT, Math.floor(tile / DISTRICT));
+    };
+    /*
+     * Where a building goes, given the road tile it is reached from.
+     *
+     * Shared, because the three things that need it were three separate pieces
+     * of code and only one of them had it. Businesses were moved off the road
+     * back when lorries were driving through them; the player's own yards and
+     * depots were drawn dead centre on their access tile with no offset at all
+     * and no rotation either — so the lane went straight through the base, which
+     * is both the most-looked-at building in the game and the one the player
+     * built themselves.
+     */
+    const offRoad = (tile: number, ownX: number, ownZ: number): {
+      x: number; z: number; rot: number;
+    } => {
       const ax = tile % DISTRICT;
       const az = Math.floor(tile / DISTRICT);
       // Which way the road runs here, from whichever neighbours carry one.
       const eastWest = (roadClass[tile + 1] >= 0 || roadClass[tile - 1] >= 0);
-      // And which way is off it: toward the site's own tile, or failing that the
-      // first neighbour that is not road and not water.
+      // And which way is off it: toward the site's own ground, or failing that
+      // the first neighbour that is not road.
       let dx = 0;
       let dz = 0;
       if (eastWest) {
-        dz = Math.sign(world.sites.y[i] - az) || 1;
+        dz = Math.sign(ownZ - az) || 1;
         if (roadClass[tile + dz * DISTRICT] >= 0) dz = -dz;
       } else {
-        dx = Math.sign(world.sites.x[i] - ax) || 1;
+        dx = Math.sign(ownX - ax) || 1;
         if (roadClass[tile + dx] >= 0) dx = -dx;
       }
-      const bx = ax + 0.5 + dx * OFF_ROAD;
-      const bz = az + 0.5 + dz * OFF_ROAD;
-      placed.push({
-        x: bx,
-        z: bz,
-        model: world.sites.def[i],
+      return {
+        x: ax + 0.5 + dx * OFF_ROAD,
+        z: az + 0.5 + dz * OFF_ROAD,
         /*
          * Frontage along the road, with a half-turn either way from the tile so
          * a street is not a row of identical orientations. The models are built
@@ -774,8 +800,19 @@ export function App(): JSX.Element {
          * east-west therefore needs a quarter turn to lay that axis along it.
          */
         rot: ((eastWest ? 0.25 : 0) + ((tile * 2654435761) % 2) * 0.5) % 1,
+      };
+    };
+    for (let i = 0; i < world.sites.count; i++) {
+      const tile = world.siteAccessTile[i];
+      if (tile < 0) continue;
+      const at = offRoad(tile, world.sites.x[i], world.sites.y[i]);
+      placed.push({
+        x: at.x,
+        z: at.z,
+        model: world.sites.def[i],
+        rot: at.rot,
         tile,
-        evening: eveningFor(bx, bz, seed),
+        evening: eveningFor(at.x, at.z, seed),
       });
       let arms = 0;
       for (const d of [1, -1, DISTRICT, -DISTRICT]) if (roadClass[tile + d] >= 0) arms++;
@@ -1952,10 +1989,12 @@ export function App(): JSX.Element {
         if (!world.isDepot(i)) continue;
         const tile = world.siteAccessTile[i];
         if (tile < 0) continue;
-        src.px[pn] = (tile % DISTRICT) + 0.5;
-        src.pz[pn] = Math.floor(tile / DISTRICT) + 0.5;
+        const at = offRoad(tile, world.sites.x[i], world.sites.y[i]);
+        src.px[pn] = at.x;
+        src.pz[pn] = at.z;
         src.pModel[pn] = world.sites.def[i];
-        src.pRot[pn] = 0;
+        src.pRot[pn] = at.rot;
+        claimYard(tile);
         // A depot runs at night. That is what a depot is for.
         src.pLamp[pn * 3] = 1;
         src.pLamp[pn * 3 + 1] = 0.80;
@@ -1964,10 +2003,14 @@ export function App(): JSX.Element {
       }
       for (let y = 0; y < world.yards.count && pn < src.px.length; y++) {
         if (world.yards.owner[y] !== world.player) continue;
-        src.px[pn] = world.yards.x[y] + 0.5;
-        src.pz[pn] = world.yards.y[y] + 0.5;
+        // A yard's access is its own tile, like a business's — see `foundYard`.
+        const tile = world.yards.y[y] * DISTRICT + world.yards.x[y];
+        const at = offRoad(tile, world.yards.x[y], world.yards.y[y]);
+        src.px[pn] = at.x;
+        src.pz[pn] = at.z;
         src.pModel[pn] = YARD_MODEL;
-        src.pRot[pn] = 0;
+        src.pRot[pn] = at.rot;
+        claimYard(tile);
         // A yard of yours is lit all night: somebody is always on shift, and it
         // is also the one building on the map you need to be able to find in the
         // dark.
