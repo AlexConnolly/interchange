@@ -237,3 +237,107 @@ describe('trading into your own business', () => {
     expect(w.sites.addStock(works, cargo, 1)).toBe(0);
   });
 });
+
+describe('buying a business', () => {
+  function ready(): { w: ReturnType<typeof make>; site: number } {
+    const w = make();
+    w.primeStock();
+    let site = -1;
+    for (let s = 0; s < w.sites.count; s++) {
+      if (w.recipes.inputs[w.sites.def[s]].length > 0
+        && w.recipes.outputs[w.sites.def[s]].length > 0) { site = s; break; }
+    }
+    w.refreshInfluence([{ x: w.sites.x[site], y: w.sites.y[site], strength: 2.4 }]);
+    return { w, site };
+  }
+
+  it('takes the money out of the bank rather than putting it in', () => {
+    /*
+     * It put it in. `Line.AssetTrade` is an income line and `post` adds an
+     * income line to cash, so buying a business paid you its price — which made
+     * buying the district the single most profitable thing a player could do,
+     * and made every other mechanic in the game pointless.
+     */
+    const { w, site } = ready();
+    w.companies.cash[w.player] = 5_000_000_00;
+    const before = w.companies.cash[w.player];
+    const price = w.priceOf(site);
+    expect(price).toBeGreaterThan(0);
+    expect(w.buySite(site).ok).toBe(true);
+    expect(w.companies.cash[w.player]).toBe(before - price);
+  });
+
+  it('is refused when the money is not there', () => {
+    // Nothing checked. With the ownership gate gone the only condition left on
+    // buying anything at all was being able to see it.
+    const { w, site } = ready();
+    w.companies.cash[w.player] = 1_00;
+    const verdict = w.canBuySite(site);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toBe('Not enough in the bank.');
+    expect(w.buySite(site).ok).toBe(false);
+    expect(w.sites.owner[site]).not.toBe(w.player);
+  });
+
+  it('ends any contract that delivered into it, and keeps the lorry running', () => {
+    /*
+     * You cannot be hired to deliver to yourself. Leaving the paperwork in place
+     * paid a haulage rate and a completion bonus for carrying your own goods to
+     * your own shed, on top of the trading premium the same load already earns.
+     *
+     * The run survives, which is the point of absorbing rather than cancelling:
+     * the lorry keeps driving the route and simply stops being a job somebody
+     * gave you.
+     */
+    const w = make();
+    w.tick = 60 * TICKS_PER_DAY;
+    w.primeStock();
+    const o = w.planOpening();
+    w.refreshInfluence([{ x: o.x, y: o.y, strength: 3.2 }]);
+    w.companies.cash[w.player] = 5_000_000_00;
+    const vi = w.openingVehicle(o.cargo);
+    const veh = w.content.vehicles[vi];
+    const yard = w.foundYard(Math.round(o.x), Math.round(o.y) + 2, 'Yard');
+    if (yard >= 0) {
+      w.yards.add(yard, facilitiesFor({
+        handling: veh.handling as readonly string[], cls: veh.class,
+      }));
+    }
+    w.buyVehicleAtYard(vi, yard);
+    w.offerWorkNow();
+
+    const b = w.contractBoard;
+    let taken = -1;
+    for (let i = 0; i < b.count; i++) {
+      const d = w.driversFor(i).find((x) => x.suitable);
+      if (d && w.acceptContract(i, w.player, d.vehicle)) { taken = i; break; }
+    }
+    expect(taken).toBeGreaterThanOrEqual(0);
+    const destination = b.to[taken];
+    const service = b.service[taken];
+    expect(service).toBeGreaterThanOrEqual(0);
+
+    expect(w.buySite(destination).ok).toBe(true);
+    // The paperwork is gone…
+    expect(b.state[taken]).toBe(3);
+    // …and the run is not.
+    expect(w.services.active[service]).toBe(1);
+    let stillDriving = false;
+    for (let v = 0; v < w.vehicles.count; v++) {
+      if (w.vehicles.alive[v] && w.vehicles.service[v] === service) stillDriving = true;
+    }
+    expect(stillDriving).toBe(true);
+  });
+
+  it('never offers a contract into a place of yours', () => {
+    const { w, site } = ready();
+    w.companies.cash[w.player] = 5_000_000_00;
+    expect(w.buySite(site).ok).toBe(true);
+    w.offerWorkNow();
+    const b = w.contractBoard;
+    for (let i = 0; i < b.count; i++) {
+      if (b.state[i] === 3) continue;
+      expect(w.sites.owner[b.to[i]]).not.toBe(w.player);
+    }
+  });
+});

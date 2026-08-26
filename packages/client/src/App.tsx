@@ -483,9 +483,9 @@ export function App(): JSX.Element {
       if (!live) return;
       if (live.world.buySite(site).ok) bump();
     }, [live, bump]),
-    supply: useCallback((from: number, to: number, cargo: number): void => {
+    supply: useCallback((from: number, to: number, cargo: number, vehicle?: number): void => {
       if (!live) return;
-      if (live.world.supply(from, to, cargo)) bump();
+      if (live.world.supply(from, to, cargo, vehicle ?? -1)) bump();
     }, [live, bump]),
     accept: useCallback((contract: number, vehicle: number): void => {
       if (!live) return;

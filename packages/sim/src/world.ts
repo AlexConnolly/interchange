@@ -3150,6 +3150,20 @@ export class World {
       }
     }
     /*
+     * And whether you can pay for it, which nothing checked.
+     *
+     * There was no affordability test anywhere in this function — the price was
+     * computed in `buySite` and then posted, so with the ownership gate gone the
+     * only remaining condition on buying anything at all was that you could see
+     * it. Together with the sign error above, a player could buy every business
+     * in the district on day one and be paid for the privilege.
+     */
+    const price = this.priceOf(site);
+    if (this.companies.cash[this.player] < price) {
+      return { ok: false, reason: 'Not enough in the bank.', needs };
+    }
+
+    /*
      * `needs` is still filled in, and still means the same thing — which inputs
      * you have no supplier of. It is no longer a refusal; the interface reads it
      * to say what you will have to arrange, which is the useful half of what the
@@ -3183,8 +3197,22 @@ export class World {
     const verdict = this.canBuySite(site);
     if (!verdict.ok) return { ok: false, reason: verdict.reason };
     const price = this.priceOf(site);
-    this.companies.post(this.player, Line.AssetTrade, price);
+    /*
+     * Negative, because buying a business is not a way of earning money.
+     *
+     * `Line.AssetTrade` is an income line, and `post` adds an income line to
+     * cash — so posting the price to it paid the player the price of the thing
+     * they were buying. Buying the district made you rich, which is a
+     * sufficiently good deal that nobody would ever have done anything else.
+     *
+     * A negative on the same line rather than a new debit line, because asset
+     * trading is genuinely a net figure: what you paid for places and what you
+     * got for them belong in one row, and reading it as a net is how any set of
+     * accounts would present it.
+     */
+    this.companies.post(this.player, Line.AssetTrade, -price);
     this.sites.owner[site] = this.player;
+    this.absorbContracts(site);
     // The land it stands on is yours now too, and the ground is drawn from this.
     this.landRevision++;
     this.refreshInfluence();
@@ -4222,7 +4250,7 @@ export class World {
    * run you most need to set up is the one *into* a place you own. Same service,
    * same two stops, pointing inward.
    */
-  supply(from: number, to: number, cargo: number): boolean {
+  supply(from: number, to: number, cargo: number, vehicle = NONE): boolean {
     const outbound = this.sites.owner[from] === this.player;
     const inbound = this.sites.owner[to] === this.player;
     if (!outbound && !inbound) return false;
@@ -4235,12 +4263,27 @@ export class World {
     this.services.addStop(svc, from, 0, StopAction.LoadFull, cargo);
     this.services.addStop(svc, to, 0, StopAction.Unload, cargo);
     this.services.active[svc] = 1;
-    for (let v = 0; v < this.vehicles.count; v++) {
-      if (!this.vehicles.alive[v]) continue;
-      if (this.vehicles.company[v] !== this.player) continue;
-      if (this.vehicles.service[v] !== NONE) continue;
-      this.assignVehicle(v, svc, this.player);
-      break;
+    /*
+     * The lorry the player picked, or the first one going spare.
+     *
+     * It used to take the first free vehicle without asking, which is fine when
+     * there is one and wrong as soon as there are several — the whole decision
+     * in a run is *which* lorry, because that is where it will be for the next
+     * hour and what it will not be doing instead.
+     */
+    if (vehicle !== NONE
+      && this.vehicles.alive[vehicle]
+      && this.vehicles.company[vehicle] === this.player
+      && this.vehicles.service[vehicle] === NONE) {
+      this.assignVehicle(vehicle, svc, this.player);
+    } else if (vehicle === NONE) {
+      for (let v = 0; v < this.vehicles.count; v++) {
+        if (!this.vehicles.alive[v]) continue;
+        if (this.vehicles.company[v] !== this.player) continue;
+        if (this.vehicles.service[v] !== NONE) continue;
+        this.assignVehicle(v, svc, this.player);
+        break;
+      }
     }
     this.rebuild();
     return true;
@@ -4301,6 +4344,34 @@ export class World {
     return out;
   }
 
+  /**
+   * Contracts into a place you have just bought are not contracts any more.
+   *
+   * You cannot be hired to deliver to yourself. A contract is a third party
+   * paying you to move something; the moment you own the far end there is no
+   * third party, and leaving the paperwork in place paid a completion bonus for
+   * carrying your own goods to your own shed on top of the trading premium the
+   * same load already earns.
+   *
+   * The *run* survives, and that is the whole point of doing it this way rather
+   * than cancelling. The lorry keeps driving the route it was driving; it simply
+   * stops being a job somebody gave you and becomes a job you are doing for
+   * yourself. Releasing the board slot leaves the service and its vehicle
+   * untouched — see `ContractBoard.release` — so nothing is stranded and the
+   * player does not have to notice that anything happened.
+   */
+  private absorbContracts(site: number): void {
+    const b = this.contractBoard;
+    for (let i = 0; i < b.count; i++) {
+      if (b.state[i] === ContractState.Closed) continue;
+      if (b.to[i] !== site) continue;
+      const svc = b.service[i];
+      // A running job keeps running, as a standing supply run of your own.
+      if (svc !== NONE) this.services.active[svc] = 1;
+      b.release(i);
+    }
+  }
+
   private buyerFor(cargo: number, notSite: number): number {
     let best = NONE;
     let room = 0;
@@ -4313,6 +4384,17 @@ export class World {
         if (ins[i] === cargo) { takes = true; break; }
       }
       if (!takes) continue;
+      /*
+       * And not a place of your own.
+       *
+       * The board's whole premise is that somebody else wants something moved,
+       * so an offer to deliver into your own business is a contradiction — and
+       * an expensive one, since it paid a haulage rate and a completion bonus
+       * for a load that already earns the trading premium. Excluded at the point
+       * that *chooses* the buyer rather than filtered afterwards, for the same
+       * reason as the influence test below.
+       */
+      if (this.sites.owner[s] === this.player) continue;
       /*
        * Only somewhere you can see, and this was a real bug.
        *
@@ -4406,11 +4488,24 @@ export class World {
     vehicle: number; yard: number; deadTiles: number; suitable: boolean;
   }[] {
     const b = this.contractBoard;
+    if (contract < 0 || contract >= b.count) return [];
+    return this.driversForRun(b.from[contract], b.cargo[contract]);
+  }
+
+  /**
+   * Which of your lorries could run a load out of a given place.
+   *
+   * The same question `driversFor` asks, without a contract to ask it about.
+   * Fetching a business's own supplies is not a job anybody offered you — nobody
+   * in this district delivers — so the picker that chooses the lorry cannot be
+   * keyed to a piece of paperwork that does not exist. Both callers want the
+   * identical list in the identical order, so there is one of it.
+   */
+  driversForRun(from: number, cargo: number): {
+    vehicle: number; yard: number; deadTiles: number; suitable: boolean;
+  }[] {
     const out: { vehicle: number; yard: number; deadTiles: number; suitable: boolean }[] = [];
-    if (contract < 0 || contract >= b.count) return out;
-    const from = b.from[contract];
-    if (from === NONE) return out;
-    const cargo = b.cargo[contract];
+    if (from === NONE || from < 0 || from >= this.sites.count) return out;
     const handling = this.content.cargo[cargo]?.handling;
 
     for (let v = 0; v < this.vehicles.count; v++) {

@@ -63,7 +63,7 @@ export function perHour(world: World, contract: number): number {
 
 export interface PlaceActions {
   buy: (site: number) => void;
-  supply: (from: number, to: number, cargo: number) => void;
+  supply: (from: number, to: number, cargo: number, vehicle?: number) => void;
   accept: (contract: number, vehicle: number) => void;
   /** Draw a job on the map: the loaded run, from pickup to drop. */
   preview: (from: number, to: number) => void;
@@ -416,15 +416,21 @@ function About({
  * exactly that.
  */
 function Drivers({
-  world, contract, onPick, onHover, onCancel,
+  world, contract = -1, from = -1, cargo = -1, onPick, onHover, onCancel,
 }: {
   world: World;
-  contract: number;
+  /** A job somebody offered you… */
+  contract?: number;
+  /** …or a load you are fetching for yourself, which has no paperwork. */
+  from?: number;
+  cargo?: number;
   onPick: (vehicle: number) => void;
   onHover: (vehicle: number) => void;
   onCancel: () => void;
 }): JSX.Element {
-  const list = world.driversFor(contract);
+  const list = contract >= 0
+    ? world.driversFor(contract)
+    : world.driversForRun(from, cargo);
   return (
     <div className="drivers">
       {list.length === 0 && (
@@ -486,8 +492,9 @@ function Supply({
   };
   onGo: (site: number) => void;
   onHover: (site: number) => void;
-  onRun: (from: number, to: number, cargo: number) => void;
+  onRun: (from: number, to: number, cargo: number, vehicle: number) => void;
 }): JSX.Element {
+  const [picking, setPicking] = useState(-1);
   const cargo = C.cargo[group.cargo];
   const stock = world.sites.stockOf(site, group.cargo);
   return (
@@ -504,24 +511,58 @@ function Supply({
           ? <span className={stock > 0 ? 'have' : 'to'}>{stock > 0 ? `${stock} in hand` : 'none left'}</span>
           : group.owned ? <span className="have">✓ yours</span> : <span className="to">needed</span>}
       </div>
+      {/*
+        * What it has to be carried in.
+        *
+        * The tab listed places and no bodies at all, so the one hard constraint
+        * on fetching a load — milk needs a chiller, grain needs a tipper — was
+        * invisible until the picker greyed a lorry out for a reason it did not
+        * give either. Said once at the top of the line, where it belongs: it is a
+        * property of the cargo, not of any particular supplier.
+        */}
+      <span className="needs">
+        <BodyIcon handling={cargo.handling} />
+        {bodyFor(cargo.handling)}
+        {!world.fleetCanCarry(group.cargo) && <b>you have none</b>}
+      </span>
       {group.candidates.map((c) => {
         const yours = world.sites.owner[c.site] === world.player;
         const def = C.industries[world.sites.def[c.site]];
         /*
-         * For a place of yours, this button sets up the run. For anyone else's it
+         * For a place of yours this opens the lorry picker; for anyone else's it
          * takes you there to look, as it always did.
          *
-         * The same click that already exists on the other side of the panel — the
-         * "who takes it" list of a business you own — pointing inward. Nobody in
-         * this district delivers, so arranging the collection is the whole of
-         * what owning a business asks of you, and it should be one press on the
-         * place that needs it rather than a trip to a routing screen.
+         * Picking rather than firing, because the run is a commitment of a
+         * vehicle for as long as it lasts and "which lorry" is the entire
+         * decision. The first version put one on immediately, chose the first
+         * free one, and told you neither which it had taken nor that the load
+         * needed a particular body — so the two things you actually needed to
+         * know were the two it did not say.
          */
+        if (picking === c.site) {
+          return (
+            <Drivers
+              key={c.site}
+              world={world}
+              from={c.site}
+              cargo={group.cargo}
+              onPick={(v) => { onRun(c.site, site, group.cargo, v); setPicking(-1); }}
+              /*
+               * The run, not the driver's whole day. The loaded leg is the same
+               * whichever lorry does it and only the empty run out to the pickup
+               * differs, so this draws the part that is actually being chosen and
+               * does not pretend to know more than it does.
+               */
+              onHover={() => onHover(c.site)}
+              onCancel={() => { setPicking(-1); onHover(-1); }}
+            />
+          );
+        }
         return (
           <button
             key={c.site}
             className={`driver ${yours ? 'mine' : ''}`}
-            onClick={() => (mine ? onRun(c.site, site, group.cargo) : onGo(c.site))}
+            onClick={() => (mine ? setPicking(c.site) : onGo(c.site))}
             onMouseEnter={() => onHover(c.site)}
             onMouseLeave={() => onHover(-1)}
             title={mine ? `Put a lorry on ${def.name} → here` : undefined}
