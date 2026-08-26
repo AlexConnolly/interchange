@@ -626,8 +626,11 @@ html, body, #root, .app {
  * bubble is anchored from its bottom edge, so every height change slid the whole
  * panel up or down the screen. One height for all three tabs, and the arrow
  * stays put. */
+/* Trimmed from 132: the reason above still holds, but the tabs now hold as
+   little as a single row, and a hundred and thirty-two pixels under one line is
+   more empty panel than anti-jump is worth. */
 .bubble-body {
-  min-height: 132px;
+  min-height: 92px;
   max-height: 132px;
   overflow-y: auto;
 }
