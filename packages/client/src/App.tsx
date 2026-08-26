@@ -31,7 +31,7 @@ import { syncAnchors } from './anchor.ts';
 import {
   Settings, loadOptions, saveOptions, type Options,
 } from './Settings.tsx';
-import { Fleet, Yard } from './Fleet.tsx';
+import { Fleet, Upgrades, Yard } from './Fleet.tsx';
 import { Planning } from './Planning.tsx';
 import { Dock } from './Dock.tsx';
 import { Owned, Contracts } from './Owned.tsx';
@@ -233,6 +233,8 @@ type Panel =
   | { k: 'vehicles' }
   | { k: 'planning' }
   | { k: 'driver'; vehicle: number }
+  /** One vehicle, and what can be fitted to it. */
+  | { k: 'upgrades'; vehicle: number }
   | { k: 'owned' }
   | { k: 'contracts' };
 
@@ -2283,12 +2285,20 @@ export function App(): JSX.Element {
       {live && showPanel && shownPanel.k === 'vehicles' && (
         <Fleet
           world={live.world}
+          onOpenVehicle={(vehicle) => setPanel({ k: 'upgrades', vehicle })}
+          onClose={() => setPanel({ k: 'none' })}
+        />
+      )}
+      {live && showPanel && shownPanel.k === 'upgrades' && (
+        <Upgrades
+          world={live.world}
+          vehicle={shownPanel.vehicle}
           onFit={fit}
           onGoToYard={(yard) => {
             lookAt(live.world.yards.x[yard] + 0.5, live.world.yards.y[yard] + 0.5);
             setPanel({ k: 'yard', yard });
           }}
-          onClose={() => setPanel({ k: 'none' })}
+          onClose={() => setPanel({ k: 'vehicles' })}
         />
       )}
       {live && showPanel && shownPanel.k === 'owned' && (

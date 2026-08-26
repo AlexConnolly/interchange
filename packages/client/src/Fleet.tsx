@@ -24,7 +24,7 @@
 import { useEffect, useState, type JSX } from 'react';
 import {
   type World, Facility, FACILITY_NAMES, FACILITY_COST, facilitiesFor,
-  Fitting, FITTING_COST, SNOW_STOPS,
+  Fitting, FITTING_COST, FITTING_NAMES, SNOW_STOPS,
 } from '@interchange/sim';
 import { content } from '@interchange/data';
 import type { Renderer } from '@interchange/render';
@@ -82,16 +82,13 @@ function VehicleRow({
  * sits where a screen sits and wears the same clothes as the bubbles.
  */
 export function Fleet({
-  world, onGoToYard, onFit, onClose,
+  world, onOpenVehicle, onClose,
 }: {
   world: World;
-  onGoToYard: (yard: number) => void;
-  onFit: (vehicle: number, fitting: number) => void;
+  onOpenVehicle: (vehicle: number) => void;
   onClose: () => void;
 }): JSX.Element {
   const snow = world.snow;
-  const tyreCost = FITTING_COST[Fitting.WinterTyres] ?? 0;
-  const cash = world.companies.cash[world.player];
 
   const rows: JSX.Element[] = [];
   for (let v = 0; v < world.vehicles.count; v++) {
@@ -107,19 +104,22 @@ export function Fleet({
         id={def.id}
         name={def.name}
         sub={`${yard >= 0 ? world.yards.names[yard] : 'no yard'} · ${working ? 'working' : 'idle'}`}
-        warn={winter
-          ? undefined
-          : snow >= SNOW_STOPS ? 'Stopped — no winter tyres' : 'No winter tyres'}
-        onClick={yard >= 0 ? () => onGoToYard(yard) : undefined}
-        right={winter
-          ? <span className="have">❄</span>
-          : (
-            <button
-              className="btn tiny"
-              disabled={cash < tyreCost}
-              onClick={(e) => { e.stopPropagation(); onFit(v, Fitting.WinterTyres); }}
-            >{money(tyreCost)}</button>
-          )}
+        /*
+         * Only when it is actually stopped, not all year.
+         *
+         * The row used to carry "No winter tyres" every day of the year with the
+         * price beside it, which reads as a fault with the lorry and — with the
+         * money right there — as though you were being asked to buy the lorry
+         * again. It is not a fault. It is a thing the vehicle has not got, and
+         * for nine months of the year it does not matter in the slightest.
+         *
+         * A lorry that is *standing still in the snow right now* is a different
+         * matter: that is not a nag, it is the reason nothing is moving, and it
+         * belongs on the row.
+         */
+        warn={!winter && snow >= SNOW_STOPS ? 'Stopped — no winter tyres' : undefined}
+        onClick={() => onOpenVehicle(v)}
+        right={<span className="veh-more">›</span>}
       />,
     );
   }
@@ -141,6 +141,91 @@ export function Fleet({
           <div className="why">Nothing on the road. Buy one at a yard.</div>
         )}
         {rows}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One vehicle, and what can be done to it.
+ *
+ * "When a user clicks, it shows the upgrades you can have to that vehicle in
+ * another screen." Which is the right shape, and not only because the list was
+ * cluttered: a fitting is a decision about *one lorry* — which of yours gets the
+ * tyres this winter is the whole of that decision — and a decision about one
+ * thing wants a screen about one thing. Buried in a row it reads as a line item.
+ *
+ * There is one fitting today. The panel is built from `FITTING_NAMES` rather
+ * than around winter tyres, so the second one costs nothing to add and the
+ * screen does not have to be redesigned when it arrives.
+ */
+export function Upgrades({
+  world, vehicle, onFit, onGoToYard, onClose,
+}: {
+  world: World;
+  vehicle: number;
+  onFit: (vehicle: number, fitting: number) => void;
+  onGoToYard: (yard: number) => void;
+  onClose: () => void;
+}): JSX.Element {
+  const def = C.vehicles[world.vehicles.type[vehicle]];
+  const yard = world.vehicleYard[vehicle] ?? -1;
+  const fitted = world.vehicleFittings[vehicle];
+  const cash = world.companies.cash[world.player];
+  const working = world.vehicles.service[vehicle] !== -1;
+  const snow = world.snow;
+
+  return (
+    <div className="bubble fixed">
+      <div className="sheet-head">
+        <img className="veh-thumb" src={thumb(def.id)} alt="" />
+        <div className="grow">
+          <div className="sheet-title">{def.name}</div>
+          <div className="sheet-sub">
+            {yard >= 0 ? world.yards.names[yard] : 'no yard'}
+            {' · '}{working ? 'working' : 'idle'}
+          </div>
+        </div>
+        <button className="x" data-quiet onClick={onClose} aria-label="Close">×</button>
+      </div>
+      <div className="bubble-body">
+        {FITTING_NAMES.map(([bit, name]) => {
+          const has = (fitted & bit) !== 0;
+          const cost = FITTING_COST[bit] ?? 0;
+          const stopped = bit === Fitting.WinterTyres && !has && snow >= SNOW_STOPS;
+          return (
+            <div className="fit-row" key={bit}>
+              <span className="grow">
+                <span className="driver-name">{name}</span>
+                {/*
+                  * What it is *for*, which the price alone never says. A fitting
+                  * the player cannot see the point of is a tax; one they can is a
+                  * decision, and the difference is this sentence.
+                  */}
+                <span className="driver-where">
+                  {bit === Fitting.WinterTyres
+                    ? 'Keeps working once the snow is down'
+                    : 'Fitted at the yard'}
+                </span>
+                {stopped && <span className="veh-warn">Stopped in the snow now</span>}
+              </span>
+              {has
+                ? <span className="have">Fitted</span>
+                : (
+                  <button
+                    className="btn"
+                    disabled={cash < cost}
+                    onClick={() => onFit(vehicle, bit)}
+                  >{money(cost)}</button>
+                )}
+            </div>
+          );
+        })}
+        {yard >= 0 && (
+          <button className="btn ghost" onClick={() => onGoToYard(yard)}>
+            Go to {world.yards.names[yard]}
+          </button>
+        )}
       </div>
     </div>
   );
