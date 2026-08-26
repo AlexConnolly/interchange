@@ -39,6 +39,7 @@ import { Icon } from './Icons.tsx';
 import { Owned, Contracts } from './Owned.tsx';
 import { Market } from './Market.tsx';
 import { Land } from './Land.tsx';
+import { PLOT } from '@interchange/render';
 import { Status } from './Status.tsx';
 import { Driver } from './Driver.tsx';
 import { Place, type PlaceActions } from './Place.tsx';
@@ -432,6 +433,8 @@ export function App(): JSX.Element {
   const buildingRef = useRef(false);
   buildingRef.current = building;
   const toolRef = useRef<'none' | 'lay' | 'lift' | 'land'>('none');
+  /** The tile under the pointer while a road tool is in hand, or -1. */
+  const hoverRef = useRef(-1);
   toolRef.current = tool;
   /**
    * How fast the day runs. One, two or four.
@@ -1834,6 +1837,23 @@ export function App(): JSX.Element {
       const held = live.get(e.pointerId);
       if (held) { held.x = e.clientX; held.y = e.clientY; }
 
+      /*
+       * What a track would look like if you laid it here.
+       *
+       * The blue marks say *where* you may build and say nothing about what
+       * building there would do — "it's not obvious what it does". A ghost of the
+       * actual track, joined to the road it would join, answers that before the
+       * click rather than after it: you can see the stub reach out from the lane
+       * and decide whether that is the approach you wanted.
+       *
+       * Kept in a ref rather than in state because it changes with the pointer,
+       * and sixty re-renders a second of the whole overlay is the thing this
+       * client has been bitten by twice.
+       */
+      hoverRef.current = toolRef.current === 'lay' || toolRef.current === 'lift'
+        ? renderer.pick(e.clientX, e.clientY, src)
+        : -1;
+
       if (live.size >= 2) {
         const now = spread();
         if (pinchFrom > 8 && now > 8) {
@@ -2611,6 +2631,41 @@ export function App(): JSX.Element {
           }
         }
         dirty.clear();
+      }
+
+      /*
+       * The ghost track, rebuilt from the hovered tile each frame.
+       *
+       * In the frame loop rather than in React for the usual reason — it follows
+       * the pointer — and it costs nothing to call: `showPlots` compares a key and
+       * returns immediately when the hover has not moved.
+       */
+      {
+        /*
+         * `toolRef`, not `tool`. The frame loop lives in an effect that is set up
+         * once, so the `tool` it closed over is whatever it was at mount — always
+         * 'none' — and every check against it silently answers no. The refs beside
+         * it exist for exactly this and I reached past them.
+         */
+        const hover = hoverRef.current;
+        const lay = toolRef.current === 'lay' && hover >= 0
+          && world.trackHere(world.player, hover).ok;
+        if (lay) {
+          /*
+           * The tile, and the road it joins. Two tiles rather than one, because a
+           * single square hanging in a field does not show the *join*, and the join
+           * is the whole thing a player is judging.
+           */
+          const tiles = [hover];
+          for (const d of [1, -1, DISTRICT, -DISTRICT]) {
+            if (roadClass[hover + d] >= 0) { tiles.push(hover + d); break; }
+          }
+          renderer.showPlots(
+            [{ tiles, wash: PLOT.ghostWash, edge: PLOT.ghostEdge }], src,
+          );
+        } else if (toolRef.current !== 'land') {
+          renderer.showPlots([], src);
+        }
       }
 
       // The same number the tick rate uses, so the picture and the simulation

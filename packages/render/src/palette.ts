@@ -286,6 +286,16 @@ export const PLOT = {
    *  the wash by a long way, because it is drawn at the same low opacity and a
    *  border that reads as a border has to earn it in saturation. */
   edge: hex('#2ef066'),
+  /**
+   * A road that is not there yet.
+   *
+   * Deliberately the colour of a track rather than a signal colour: the point of
+   * the ghost is to show you *the thing you are about to make*, so it should look
+   * like the road it will become and not like a highlight. The edge is brighter
+   * only so the shape reads at a distance.
+   */
+  ghostWash: hex('#cbb89a'),
+  ghostEdge: hex('#f4e2bd'),
   /** And land already yours, which must not look like land you are choosing.
    *  Blue against green is the strongest pair the palette has that still reads as
    *  two states of the same thing rather than two unrelated markings. */
