@@ -867,9 +867,11 @@ function Arrange({
               : `Nothing free can carry ${C.cargo[cargo].name.toLowerCase()}.`}
           </span>
           {/* And what would do it, in both cases: the answer to "so what do I
-              buy" is the same whether you own none or own the wrong ones. */}
+              buy" is the same whether you own none or own the wrong ones. No
+              caption over it — three lorries under "nothing free can carry feed"
+              are self-evidently the things that could, and a label saying so is a
+              caption on a picture that has already made its point. */}
           <span className="nowt-needs">
-            <span className="nowt-label">This load takes</span>
             <Carriers handling={C.cargo[cargo].handling} size={30} />
           </span>
         </div>

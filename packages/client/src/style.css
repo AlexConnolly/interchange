@@ -65,13 +65,7 @@ html, body, #root, .app {
   pointer-events: none;
 }
 
-.brand {
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-size: 11px;
-  color: var(--ink-dim);
-}
+
 
 .dim { color: var(--ink-dim); }
 
@@ -299,10 +293,19 @@ html, body, #root, .app {
 .have { color: #3f8a5a; font-weight: 700; }
 .dim-row .title { color: var(--ink-dim); }
 .btn.tiny { padding: 5px 10px; font-size: 12px; border-radius: 7px; }
+/* Sentence case. Every small heading in this game used to be set in capitals
+   with wide tracking, which is a habit rather than a decision — "stop using
+   capitals for subheadings, ban on all" — and it was making the interface shout
+   its own furniture at the player. Capitals also cost legibility at exactly the
+   size they were being used at: caps have no ascenders or descenders, so a
+   ten-pixel word in capitals is a rectangle and a ten-pixel word in sentence case
+   has a shape. The tracking went with them; it only existed to prise the capitals
+   apart. Slightly larger to compensate, and dim rather than shouted, which is how
+   a label says "I am not the content" without raising its voice. */
 .head {
-  font-size: 10.5px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--ink-dim);
   margin: 14px 0 2px;
 }
@@ -402,9 +405,9 @@ html, body, #root, .app {
 .driver-where { display: block; font-size: 11px; color: var(--ink-dim); margin-top: 1px; }
 .driver-no { font-size: 10.5px; color: #8a5a2a; }
 .chip {
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0;
   background: rgba(240, 192, 74, 0.3);
   padding: 2px 6px;
   border-radius: 5px;
@@ -983,10 +986,9 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
    it. The date was the same size and weight as the time, which made the pill two
    competing lines instead of a figure with a note under it. */
 .clock-date {
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   white-space: nowrap;
 }
 
@@ -1089,10 +1091,9 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .opt-group { margin-bottom: 16px; }
 .opt-group h3 {
   margin: 0 0 8px;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 650;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   color: #9a9284;
 }
 
@@ -1191,10 +1192,9 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .needs em {
   margin-left: auto;
   font-style: normal;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0;
   color: #7d8a5e;
 }
 
@@ -1569,10 +1569,9 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 }
 .tally-cell i {
   font-style: normal;
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0;
   color: var(--ink-dim);
 }
 .tally-cell.net.good { color: #2f6b45; }
@@ -1931,12 +1930,6 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   align-items: center;
   gap: 4px;
   margin-top: 5px;
-}
-.nowt-label {
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ink-dim);
 }
 /* Full colour here, unlike the inline constraint elsewhere: this row is not a
    footnote on something else, it is the only thing on the panel worth looking
