@@ -31,6 +31,9 @@ function source(stream: (tile: number) => boolean): RoadSource {
     level: new Int16Array(S * S),
     influence: () => 1,
     isStream: stream,
+    // No buildings in this fixture: the yard suppression is a different test's
+    // business and leaving it on would quietly delete the road under it.
+    isYard: () => false,
   };
 }
 
