@@ -429,7 +429,9 @@ export function App(): JSX.Element {
    */
   const [tool, setTool] = useState<'none' | 'lay' | 'lift' | 'land'>('none');
   // So the tray can animate out rather than vanish, the same way panels do.
-  const [, toolLeaving] = useLeaving(tool, tool !== 'none', 150);
+  /* Whether the *road tray* is up, which is not the same as whether a tool is in
+     hand: the land tool has its own panel and no tray. */
+  const [, toolLeaving] = useLeaving(tool, tool === 'lay' || tool === 'lift', 150);
   const buildingRef = useRef(false);
   buildingRef.current = building;
   const toolRef = useRef<'none' | 'lay' | 'lift' | 'land'>('none');
@@ -2962,9 +2964,23 @@ export function App(): JSX.Element {
         />
       )}
 
-      {(tool !== 'none' || toolLeaving) && (
+      {(tool === 'lay' || tool === 'lift' || toolLeaving) && (
         /*
          * The tools, in a tray that rises out of the dock.
+         *
+         * Mounted only for the tools it holds, which it was not: the condition
+         * was `tool !== 'none'`, and the land tool is a tool. So opening Land put
+         * an invisible road tray on screen — invisible because the class below
+         * animates it out, present because nothing unmounted it — sitting at
+         * `bottom: 84px; left: 50%`, which is exactly where the land confirmation
+         * panel is. Its ✕ landed on top of "Buy it". Clicking Buy pressed the
+         * close button instead: the tool shut, the panel vanished, no land
+         * changed hands and the field was still for sale. "I just clicked buy on
+         * land and it did nothing."
+         *
+         * Two elements at identical coordinates is the sort of thing that reads
+         * as fine in the source and is invisible in a screenshot, because the
+         * thing on top has nothing to draw.
          *
          * It was two text buttons, a sentence and a "Done" in a wide cream
          * strip — a dialog wearing a toolbar's clothes, and it looked nothing
@@ -2978,7 +2994,7 @@ export function App(): JSX.Element {
          * ✕, Escape, or a right-click on the district — the last being the one
          * people reach for first, and the only one that needs no aiming.
          */
-        <div className={`tools${tool === 'none' || tool === 'land' || toolLeaving ? ' tools-leaving' : ''}`}>
+        <div className={`tools${tool === 'lay' || tool === 'lift' ? '' : ' tools-leaving'}`}>
           <button
             className={`tool-btn ${tool === 'lay' ? 'on' : ''}`}
             onClick={() => { setTool('lay'); setNote(''); }}

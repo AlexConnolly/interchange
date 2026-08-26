@@ -1300,8 +1300,22 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   animation: dock-rise 170ms cubic-bezier(0.2, 1.35, 0.4, 1);
 }
 /* Down into the dock rather than straight out, so putting the tool away is the
-   same gesture in reverse. */
-.tools-leaving { animation: dock-sink 150ms ease-in both; }
+   same gesture in reverse.
+
+   And it stops taking clicks the instant it starts leaving. An element animating
+   out is still in the document at full size, and `both` keeps it there at zero
+   opacity afterwards — so without this it is a sheet of invisible buttons lying
+   over whatever took its place. That is precisely what ate "Buy it": the road
+   tray and the land panel are both `bottom: 84px; left: 50%`, and the tray's ✕
+   sat on the buy button.
+
+   Worth stating as a rule, alongside the fill-mode one further down: anything on
+   its way out must be `pointer-events: none`, because it is no longer a thing you
+   can mean to press. */
+.tools-leaving {
+  animation: dock-sink 150ms ease-in both;
+  pointer-events: none;
+}
 @keyframes dock-sink {
   from { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
   to { opacity: 0; transform: translateX(-50%) translateY(14px) scale(0.96); }
