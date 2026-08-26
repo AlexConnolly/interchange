@@ -243,13 +243,13 @@ type YardTab = 'bays' | 'kit';
  * a place take you to it.
  */
 export function Yard({
-  world, renderer, yard, onAdd, onFit, onBuy, onClose,
+  world, renderer, yard, onAdd, onOpenVehicle, onBuy, onClose,
 }: {
   world: World;
   renderer: Renderer;
   yard: number;
   onAdd: (yard: number, facility: number) => void;
-  onFit: (vehicle: number, fitting: number) => void;
+  onOpenVehicle: (vehicle: number) => void;
   onBuy: (yard: number, typeIndex: number) => void;
   onClose: () => void;
 }): JSX.Element | null {
@@ -265,7 +265,6 @@ export function Yard({
   if (yard < 0 || yard >= world.yards.count) return null;
   const cash = world.companies.cash[world.player];
   const snow = world.snow;
-  const tyreCost = FITTING_COST[Fitting.WinterTyres] ?? 0;
 
   const based: number[] = [];
   for (let v = 0; v < world.vehicles.count; v++) {
@@ -325,18 +324,12 @@ export function Yard({
                   id={def.id}
                   name={def.name}
                   sub={`${def.capacity} t · ${world.vehicles.service[v] !== -1 ? 'working' : 'idle'}`}
-                  warn={winter
-                    ? undefined
-                    : snow >= SNOW_STOPS ? 'Stopped — no winter tyres' : 'No winter tyres'}
-                  right={winter
-                    ? <span className="have">❄</span>
-                    : (
-                      <button
-                        className="btn tiny"
-                        disabled={cash < tyreCost}
-                        onClick={() => onFit(v, Fitting.WinterTyres)}
-                      >{money(tyreCost)}</button>
-                    )}
+                  // Same rule as the fleet list, and the *second* copy of it —
+                  // which is why the nag was still here after being taken off
+                  // the other one. A yard's bays are a list of lorries too.
+                  warn={!winter && snow >= SNOW_STOPS ? 'Stopped — no winter tyres' : undefined}
+                  onClick={() => onOpenVehicle(v)}
+                  right={<span className="veh-more">›</span>}
                 />
               );
             })}

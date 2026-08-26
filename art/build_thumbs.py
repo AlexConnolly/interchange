@@ -23,6 +23,7 @@ import math
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import bmesh
 import bpy  # noqa: E402
 import mathutils  # noqa: E402
 
@@ -94,6 +95,11 @@ def render_settings():
 PLAYER_LIVERY = (0.184, 0.431, 0.659, 1.0)
 
 
+#: Matches `LAMP` in `lib.py` and `LAMP_MATERIAL` in `glb.ts`. Named once here
+#: rather than spelt inline, because it is the third place that has to agree.
+LAMP_SLOT = 'lamp'
+
+
 def load(name):
     path = os.path.join(MODELS, name + '.glb')
     if not os.path.exists(path):
@@ -101,8 +107,52 @@ def load(name):
     before = set(bpy.data.objects)
     bpy.ops.import_scene.gltf(filepath=path)
     objs = [o for o in bpy.data.objects if o not in before]
+    objs = drop_lamps(objs)
     paint_livery(objs)
     return objs
+
+
+def drop_lamps(objs):
+    """Throw the lamp geometry away before framing.
+
+    The reserved `lamp` slot is everything that emits — headlamps, tail lights,
+    lit windows — and the game draws it as a *separate* additive mesh over the
+    body, which is why it can go out at dusk. Imported into a thumbnail it is
+    just more geometry: the lorry comes out with its lights on in broad
+    daylight, and worse, the beams and lit panels stick out beyond the bodywork
+    so `frame` sizes the camera to them and the whole vehicle shrinks. "It zooms
+    back rather than close up."
+
+    A thumbnail is a picture of the shape you are buying. Drop the slot, and the
+    framing is the bodywork again.
+    """
+    keep = []
+    for o in objs:
+        if o.type != 'MESH' or not o.data.materials:
+            keep.append(o)
+            continue
+        me = o.data
+        slots = {i for i, m in enumerate(me.materials)
+                 if m is not None and m.name.startswith(LAMP_SLOT)}
+        if slots:
+            # Faces, not objects. The glTF importer puts every primitive of a
+            # mesh on one object as separate *material slots*, so a van arrives
+            # as a single object carrying both its bodywork and its headlamps —
+            # which is why removing whole objects changed nothing at all.
+            bm = bmesh.new()
+            bm.from_mesh(me)
+            doomed = [f for f in bm.faces if f.material_index in slots]
+            if doomed:
+                bmesh.ops.delete(bm, geom=doomed, context='FACES')
+            bm.to_mesh(me)
+            bm.free()
+        # An object that was *only* lamp now has no faces left; drop it so it
+        # does not contribute an empty bounding box to the framing.
+        if len(me.polygons) == 0:
+            bpy.data.objects.remove(o, do_unlink=True)
+            continue
+        keep.append(o)
+    return keep
 
 
 def paint_livery(objs):

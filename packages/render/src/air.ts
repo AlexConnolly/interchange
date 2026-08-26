@@ -241,6 +241,8 @@ export interface AirFrame {
   snow: number;
   /** 0..1, the global VFX dial. Zero switches the whole thing off. */
   level: number;
+  /** Which day it is, so which chimneys are lit changes from one to the next. */
+  day: number;
 }
 
 /**
@@ -323,10 +325,10 @@ export function makeAir(scene: Scene): Air {
    * of the difference between smoke and a column of dots.
    */
   const smoke = new Field(scene, {
-    count: 260,
+    count: 520,
     tiles: 0.5,
     colour: '#cfd3d2',
-    opacity: 0.30,
+    opacity: 0.36,
     behave: (f, i, k, dt, time) => {
       const j = i * 3;
       f.vel[j + 1] *= 1 - dt * 0.45;
@@ -335,7 +337,6 @@ export function makeAir(scene: Scene): Air {
       return Math.min(1, (1 - k) * 3.4) * k * k;
     },
   });
-  let smokeAcc = 0;
 
   /*
    * Exhaust. Small, dark, brief — a 1985 diesel at the moment it pulls away.
@@ -427,32 +428,67 @@ export function makeAir(scene: Scene): Air {
        * which the renderer already knows as `snow` — an imperfect proxy for cold
        * and the only one to hand, but it is the right shape.
        */
-      const cold = 0.35 + frame.snow * 0.65;
-      const lit = hour < 9.5 ? 1 : hour > 16 ? 1 : 0.15;
+      /*
+       * Smoke, per chimney in view rather than sampled from the district.
+       *
+       * The old emitter picked a random place out of *all* of them and threw the
+       * pick away if it was off screen. Instrumented: forty-eight attempts over a
+       * run, twenty-five of them discarded for being out of view, fourteen puffs
+       * actually spawned — one or two per chimney at a time, which is not a plume,
+       * it is a speck. Every guess I made about why it was invisible (too pale
+       * against the snow, born inside the roof) was wrong, and the counter said so
+       * in one run.
+       *
+       * Walking the places in view instead makes the rate mean what it says: this
+       * many puffs a second *per chimney that is lit*, with nothing wasted. And it
+       * is cheap — there are twenty places in a district, not twenty thousand.
+       */
+      const cold = 0.55 + frame.snow * 0.45;
+      const lit = hour < 9.5 ? 1 : hour > 16 ? 1 : 0.2;
       const smokeLevel = cold * lit * frame.level;
-      smoke.aim(0.30 * frame.level, frame.pixelsPerTile);
-      if (src.placeCount > 0 && smokeLevel > 0.02) {
-        smokeAcc += dt * 16 * smokeLevel;
-        while (smokeAcc >= 1) {
-          smokeAcc -= 1;
-          const p = (Math.random() * src.placeCount) | 0;
+      smoke.aim(0.36 * frame.level, frame.pixelsPerTile);
+      if (smokeLevel > 0.02) {
+        /*
+         * Puffs a second from one chimney, so the density is the same whatever
+         * the frame rate. Four a second against four and a half seconds of life
+         * is about eighteen in the air at once, which is a column rather than a
+         * dotted line.
+         *
+         * Not verified by eye, and worth saying so: a headless browser on
+         * software GL runs this scene at three frames a second, which cannot
+         * accumulate a plume however fast it is emitting — every screenshot I
+         * took of it was empty while the counters said fourteen puffs were alive
+         * and visible. The arithmetic is framerate-independent; the picture was
+         * not.
+         */
+        const chance = 4 * dt * smokeLevel;
+        for (let p = 0; p < src.placeCount; p++) {
           const x = src.px[p];
           const z = src.pz[p];
           if (Math.abs(x - frame.camX) > reach || Math.abs(z - frame.camZ) > reach) continue;
           /*
-           * Two thirds of the chimneys are out at any moment, chosen per puff.
+           * Which chimneys are going, decided by the building and the day.
            *
-           * Deliberately not per building: a stable set would mean the same
-           * houses smoke every time you look, which is a pattern, and a pattern
-           * in something this incidental is worse than the randomness. What the
-           * eye reads is "some chimneys are going", and that is true either way.
+           * Stable within a day and different the next, which is better than the
+           * per-puff coin flip it replaces: that gave every chimney a thin
+           * intermittent wisp, where what actually happens is that some houses
+           * have a fire lit and some do not. The pattern is the realism.
            */
-          if (Math.random() > 0.34) continue;
+          const h = Math.sin((x * 12.9898 + z * 78.233 + frame.day * 3.1) * 43758.5453);
+          if (h - Math.floor(h) > 0.62) continue;
+          if (Math.random() > chance) continue;
+          /*
+           * At the chimney, which is higher than it looks.
+           *
+           * The buildings measure 0.63 to 1.22 tall, most of them 0.95, so the
+           * old 0.85 put the plume *inside the roof* — depth-tested away for the
+           * part of its life when it is brightest.
+           */
           smoke.spawn(
             x + (Math.random() - 0.5) * 0.3,
-            groundHeightAt(src, x, z) + 0.85 + Math.random() * 0.15,
+            groundHeightAt(src, x, z) + 1.2 + Math.random() * 0.18,
             z + (Math.random() - 0.5) * 0.3,
-            (Math.random() - 0.5) * 0.08, 0.30 + Math.random() * 0.16,
+            (Math.random() - 0.5) * 0.08, 0.42 + Math.random() * 0.18,
             (Math.random() - 0.5) * 0.08,
             3.4 + Math.random() * 2.2,
           );

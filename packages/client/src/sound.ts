@@ -200,44 +200,72 @@ export class Sound {
   }
 
   /**
-   * Start, on a user gesture.
+   * Build the graph and start fetching, without waiting for a gesture.
    *
-   * Browsers will not let audio begin without one, and calling this before the
-   * player has touched anything creates a context stuck in `suspended` that
-   * silently never plays. So it is called from the first pointer or key event and
-   * is safe to call again after that.
+   * "Audio initially takes 20 seconds to load. Why is that?" Three reasons
+   * stacked, and this fixes the two that were mine.
+   *
+   * Nothing started until the player's first click. A browser will not let audio
+   * *play* without a gesture, which is true and is the whole reason `start`
+   * exists — but it has never stopped anything downloading, and a suspended
+   * `AudioContext` decodes perfectly well. So the clock used to begin when the
+   * player touched something, having sat idle through however long they spent
+   * looking at the district first.
+   *
+   * And it awaited *everything*. The two music tracks are 11.6MB of a 14.3MB
+   * set, so the click sound waited on the music: measured over the tunnel the
+   * game is actually served on, 4.8s and 4.4s to fetch and another 3.0s to
+   * decode between them, against 1.1s for every effect in the game put
+   * together.
+   *
+   * So: called at startup, effects first, and the music arrives whenever it
+   * arrives. `playing` is checked against `buffers` everywhere already, so a
+   * clip that has not landed yet is silent rather than an error — which is the
+   * same tolerance that lets a missing file be a missing file.
    */
-  async start(): Promise<void> {
-    if (this.started) {
-      if (this.ctx?.state === 'suspended') await this.ctx.resume();
-      return;
-    }
+  prepare(): void {
+    if (this.started) return;
     this.started = true;
     try {
       this.ctx = new AudioContext();
       this.master = this.ctx.createGain();
       this.master.gain.value = this.muted ? 0 : 1;
       this.master.connect(this.ctx.destination);
-      /*
-       * A linear distance model, not inverse.
-       *
-       * Inverse-square is physically right and wrong here for the same reason the
-       * point lights needed a linear falloff: a tile is a symbolic unit, not a
-       * metre, so the physical curve puts everything either deafening or
-       * inaudible. Linear over a fixed earshot is the one that behaves.
-       */
-      await this.loadAll();
       this.makeVoices();
+      // Deliberately not awaited. Nothing below needs a buffer to exist.
+      void this.loadAll();
     } catch {
       // No audio available at all. Everything below is a no-op from here.
       this.ctx = null;
     }
   }
 
+  /**
+   * Resume on a user gesture, which is the one thing that does need one.
+   *
+   * Safe to call repeatedly, and safe to call before `prepare` — it will do the
+   * preparing itself if something has managed to click before the app mounted.
+   */
+  async start(): Promise<void> {
+    this.prepare();
+    if (this.ctx?.state === 'suspended') await this.ctx.resume();
+  }
+
+  /**
+   * Everything, smallest first, and the music last of all.
+   *
+   * Two phases rather than one `Promise.all`, because the point is not the total
+   * — it is when the *first* sound works. Twelve concurrent fetches of which two
+   * are six megabytes will contend for the connection and finish together; the
+   * effects on their own are done in about a second.
+   */
   private async loadAll(): Promise<void> {
     const ctx = this.ctx;
     if (!ctx) return;
-    await Promise.all((Object.keys(MANIFEST) as SoundName[]).map(async (name) => {
+    const names = Object.keys(MANIFEST) as SoundName[];
+    const music = names.filter((n) => n.startsWith('music'));
+    const effects = names.filter((n) => !n.startsWith('music'));
+    const load = async (name: SoundName): Promise<void> => {
       try {
         const res = await fetch(DIR + MANIFEST[name]);
         if (!res.ok) throw new Error(String(res.status));
@@ -245,7 +273,9 @@ export class Sound {
       } catch {
         this.missing.add(name);
       }
-    }));
+    };
+    await Promise.all(effects.map(load));
+    await Promise.all(music.map(load));
     if (this.missing.size > 0) {
       // Once, listing all of them, rather than one line per failed fetch.
       console.info(

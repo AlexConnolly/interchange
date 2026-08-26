@@ -1167,6 +1167,15 @@ export function App(): JSX.Element {
       }
     }
 
+    /*
+     * Start fetching the audio now, not on the first click.
+     *
+     * Playing needs a gesture; downloading and decoding never did. See
+     * `prepare` — this is most of the twenty seconds the first sound used to
+     * take, because the clock did not start until the player touched something.
+     */
+    sound.prepare();
+
     const renderer = new Renderer(canvas);
     const farmwork = new Farmwork({
       size: DISTRICT,
@@ -2351,7 +2360,7 @@ export function App(): JSX.Element {
           renderer={live.renderer}
           yard={shownPanel.yard}
           onAdd={addFacility}
-          onFit={fit}
+          onOpenVehicle={(vehicle) => setPanel({ k: 'upgrades', vehicle })}
           onBuy={buy}
           onClose={() => setPanel({ k: 'none' })}
         />

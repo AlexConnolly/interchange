@@ -1964,6 +1964,7 @@ export class Renderer {
       dayFraction: src.dayFraction,
       night: this.night,
       snow: this.snowDepth,
+      day: src.dayNumber,
       level: this.vfx === 'high' ? 1 : this.vfx === 'low' ? 0.5 : 0,
     }, dt, this.elapsed);
 
