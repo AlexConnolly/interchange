@@ -17,7 +17,8 @@ import {
   ACCESS_SCALE, STALLED_DAYS,
 } from './constants.ts';
 import {
-  LandRegister, LAND_BASE, LAND_TOWN_PREMIUM, LAND_ROAD_PREMIUM, LAND_TOWN_REACH,
+  LandRegister, LAND_PER_TILE, LAND_TOWN_PREMIUM, LAND_ROAD_PREMIUM,
+  LAND_TOWN_REACH,
   NO_OWNER,
 } from './land.ts';
 import { Cmd, CommandQueue, type Command } from './commands.ts';
@@ -273,10 +274,20 @@ export class World {
   constructor(config: WorldConfig, content: Content) {
     this.config = config;
     this.content = content;
-    // After `config`, because it is sized from the district.
-    this.land = new LandRegister(config.size);
+    // After the terrain, because a field is a property of the terrain.
     this.rng = new Rng(config.seed);
     this.terrain = generateTerrain(config);
+    /*
+     * An empty register for now; the real one is built after world generation.
+     *
+     * Fields are a property of the terrain and the terrain exists by this point,
+     * but *worldgen* is still to run and it rewrites the parcel map — it decides
+     * what grows where from the farms it is about to place, and merges parcels
+     * where woods meet. A register built here holds tile lists that are quietly
+     * wrong: measured, the fifth field's own tiles came back belonging to no field
+     * at all. See `settleLand`.
+     */
+    this.land = new LandRegister(new Int32Array(0), 0, config.size);
     this.tileRouter = new TileRouter(this.terrain);
 
     for (let m = 0; m < MODE_COUNT; m++) this.layers.push(new WayLayer(m, config.size));
@@ -5449,7 +5460,7 @@ export class World {
    * deliberately the simplest transaction in the game: no board, no approval, no
    * charter. Money, and the block has to be somewhere you could plausibly reach.
    */
-  readonly land: LandRegister;
+  land: LandRegister;
 
   /**
    * Tiles with somebody's building on them, told to us by the client.
@@ -5473,76 +5484,24 @@ export class World {
   }
 
   /**
-   * Is anybody else's property standing on this block?
+   * Build the land register, once the fields have stopped moving.
    *
-   * Three kinds, and the distinction that matters is *whose*: a business or a yard
-   * of your own is exactly the case where buying the ground under it makes sense,
-   * so those are allowed. Somebody else's works, somebody else's yard, and the
-   * village's own houses are not for sale at any price, which is both obvious and
-   * was not enforced.
+   * Called at the end of world generation. It cannot be done in the constructor
+   * because worldgen rewrites the parcel map after that, and it cannot be done
+   * lazily on first use without every land method having to remember to ask.
    */
-  private landOccupied(block: number): boolean {
-    const size = this.config.size;
-    const b = this.land.bounds(block);
-    for (let y = b.y0; y <= b.y1; y++) {
-      for (let x = b.x0; x <= b.x1; x++) {
-        if (x >= size || y >= size) continue;
-        if (this.built.has(y * size + x)) return true;
-      }
-    }
-    const inside = (tile: number): boolean => {
-      const x = tile % size;
-      const y = (tile / size) | 0;
-      return x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
-    };
-    for (let i = 0; i < this.sites.count; i++) {
-      if (this.sites.owner[i] === this.player) continue;
-      if (inside(this.sites.tile[i])) return true;
-    }
-    for (let i = 0; i < this.yards.count; i++) {
-      if (this.yards.owner[i] === this.player) continue;
-      if (inside(this.yards.tile[i])) return true;
-    }
-    return false;
+  settleLand(): void {
+    this.land = new LandRegister(
+      this.terrain.fields.parcel, this.terrain.fields.count, this.config.size,
+    );
   }
 
-  /**
-   * Where a block is, in words.
-   *
-   * "Four acres, near enough" was a joke that had to be read every time somebody
-   * bought a field, which is the worst kind. What a player wants to know is
-   * *where* — so this is a bearing and a distance from the nearest settlement,
-   * which is how anybody in 1985 would have described a field to somebody else.
-   */
-  landPlaceName(block: number): string {
-    const c = this.land.centre(block);
-    let best = -1;
-    let bestD = 1e9;
-    for (let t = 0; t < this.towns.count; t++) {
-      const d = Math.hypot(this.towns.x[t] - c.x, this.towns.y[t] - c.y);
-      if (d < bestD) { bestD = d; best = t; }
-    }
-    if (best < 0) return 'Open country';
-    const dx = c.x - this.towns.x[best];
-    const dy = c.y - this.towns.y[best];
-    // Eight points is as fine as anybody says out loud.
-    const dirs = ['east', 'south-east', 'south', 'south-west',
-      'west', 'north-west', 'north', 'north-east'];
-    const a = Math.atan2(dy, dx);
-    const dir = dirs[(Math.round((a / (Math.PI / 4)) + 8)) % 8];
-    const name = this.towns.names[best] ?? 'the village';
-    if (bestD < 4) return `In ${name}`;
-    // Tiles are not a unit the player is ever shown, so this is in miles at the
-    // scale the rest of the game implies: a tile is about a furlong.
-    const miles = bestD / 8;
-    const how = miles < 0.6 ? 'Just' : miles < 2 ? 'A little' : '';
-    return `${how ? `${how} ` : ''}${dir} of ${name}`.replace(/^./, (m) => m.toUpperCase());
-  }
-
-  /** What this block would cost. See the note on `LAND_BASE`. */
-  landPriceOf(block: number): number {
+  /** What this field would cost. See the note on `LAND_PER_TILE`. */
+  landPriceOf(parcel: number): number {
     const size = this.config.size;
-    const c = this.land.centre(block);
+    const tiles = this.land.tiles[parcel];
+    if (!tiles || tiles.length === 0) return 0;
+    const c = this.land.centres[parcel];
 
     // How built-up it is round here, weighted by population like `priceOf`.
     let nearest = 1e9;
@@ -5556,61 +5515,53 @@ export class World {
     const town = 1 + Math.max(0, 1 - nearest / LAND_TOWN_REACH) * (LAND_TOWN_PREMIUM - 1);
 
     /*
-     * And what is actually on it. Walked rather than sampled: sixteen tiles is
-     * nothing, and a block that is half river should not be priced as if it were
-     * all pasture — you are buying the water as well.
+     * And what is actually on it. Walked, because a field is however big it is and
+     * a field that is half river should not be priced as if it were all pasture —
+     * you are buying the water too.
      */
-    const b = this.land.bounds(block);
     let dry = 0;
     let road = 0;
-    let tiles = 0;
-    for (let y = b.y0; y <= b.y1; y++) {
-      for (let x = b.x0; x <= b.x1; x++) {
-        if (x >= size || y >= size) continue;
-        const t = y * size + x;
-        tiles++;
-        if (this.terrain.height[t] > 0) dry++;
-        if (this.layers[Mode.Road].cls[t] !== NO_WAY) road++;
-      }
+    for (const t of tiles) {
+      if (this.terrain.height[t] > 0) dry++;
+      if (this.layers[Mode.Road].cls[t] !== NO_WAY) road++;
     }
-    if (tiles === 0 || dry === 0) return 0;
-    const usable = dry / tiles;
+    if (dry === 0) return 0;
     const frontage = road > 0 ? LAND_ROAD_PREMIUM : 1;
-    return Math.round(LAND_BASE * town * frontage * usable);
+    return Math.round(LAND_PER_TILE * dry * town * frontage);
   }
 
   /**
-   * May this company buy this block?
+   * May this company buy this field?
    *
    * Two ways in, and between them they are the whole rule: land you can *reach*.
    * Either it touches land you already hold — so a holding grows outward from
    * itself rather than appearing in patches across the district — or it has a road
-   * on it or beside it, which is how anybody gets a first foothold and how a
-   * player who has sold up can start again.
+   * on or beside it, which is how anybody gets a first foothold and how a player
+   * who has sold up can start again.
    *
    * Deliberately no approval and no charter. Owning land is not a favour the
    * parish does you, and making it one would put a second gate in front of the
    * rung that the planning board is already the top of.
    */
-  canBuyLand(company: number, block: number): { ok: boolean; reason: string; price: number } {
-    const price = this.landPriceOf(block);
-    if (block < 0 || block >= this.land.owner.length) {
-      return { ok: false, reason: 'No such land.', price };
+  canBuyLand(company: number, parcel: number): { ok: boolean; reason: string; price: number } {
+    const price = this.landPriceOf(parcel);
+    if (parcel < 0 || parcel >= this.land.owner.length) {
+      return { ok: false, reason: 'No such field.', price };
     }
-    if (this.land.owner[block] === company) {
+    if (this.land.owner[parcel] === company) {
       return { ok: false, reason: 'Already yours.', price };
     }
-    if (this.land.owner[block] !== NO_OWNER) {
+    if (this.land.owner[parcel] !== NO_OWNER) {
       return { ok: false, reason: 'Somebody else holds it.', price };
     }
     if (price <= 0) return { ok: false, reason: 'Nothing but water.', price };
-    if (this.landOccupied(block)) {
+    if (this.landOccupied(parcel)) {
       return { ok: false, reason: 'Somebody else s property stands on it.', price };
     }
-    if (!this.landInReach(block)) {
+    if (!this.landInReach(parcel)) {
       return { ok: false, reason: 'Too far out. Buy toward it, or find a road.', price };
     }
-    if (!this.landVisible(block)) {
+    if (!this.landVisible(parcel)) {
       return { ok: false, reason: 'You have no standing out there yet.', price };
     }
     if (this.companies.cash[company] < price) {
@@ -5619,86 +5570,164 @@ export class World {
     return { ok: true, reason: '', price };
   }
 
-  /** Touching land of the player's, or touching a road. */
-  private landInReach(block: number): boolean {
-    for (const n of this.land.neighbours(block)) {
-      if (this.land.owner[n] === this.player) return true;
-    }
+  /**
+   * Touching a field of the player's, or touching a road.
+   *
+   * Adjacency is per *tile* rather than per field, which is what makes it mean
+   * anything on an irregular map: two fields are neighbours if any of their tiles
+   * are, which is the same thing as sharing a hedge.
+   */
+  private landInReach(parcel: number): boolean {
     const size = this.config.size;
-    const b = this.land.bounds(block);
-    // One tile of slop round the edge, so a lane running *along* a boundary
-    // counts as frontage for the block beside it as well as the one it is in.
-    for (let y = b.y0 - 1; y <= b.y1 + 1; y++) {
-      for (let x = b.x0 - 1; x <= b.x1 + 1; x++) {
-        if (x < 0 || y < 0 || x >= size || y >= size) continue;
-        if (this.layers[Mode.Road].cls[y * size + x] !== NO_WAY) return true;
+    const map = this.terrain.fields.parcel;
+    /*
+     * Two tiles of slop, not one, and that is a fact about the map rather than a
+     * kindness. Only about a quarter of the district is enclosed — measured, four
+     * thousand tiles in a hundred and sixty — so fields are routinely separated by
+     * a strip of unenclosed hillside, a verge or a lane. Requiring them to share a
+     * tile edge would mean owning a field opened up almost nothing, and the "buy
+     * toward it" rule would quietly never apply.
+     *
+     * Two tiles is a hedge, a track and its verges: near enough to be the next
+     * field along, far enough that it cannot jump a river.
+     */
+    const REACH = 2;
+    for (const t of this.land.tiles[parcel]) {
+      const x = t % size;
+      const y = (t / size) | 0;
+      if (this.layers[Mode.Road].cls[t] !== NO_WAY) return true;
+      for (let dy = -REACH; dy <= REACH; dy++) {
+        for (let dx = -REACH; dx <= REACH; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+          const n = ny * size + nx;
+          // A road only counts right beside the field, or every field within two
+          // tiles of a lane would be frontage.
+          if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1
+            && this.layers[Mode.Road].cls[n] !== NO_WAY) return true;
+          const p = map[n];
+          if (p >= 0 && p !== parcel && this.land.owner[p] === this.player) return true;
+        }
       }
     }
     return false;
   }
 
   /** Somewhere the player can see. The fog is the map's own limit on ambition. */
-  private landVisible(block: number): boolean {
-    const size = this.config.size;
-    const b = this.land.bounds(block);
-    for (let y = b.y0; y <= b.y1; y++) {
-      for (let x = b.x0; x <= b.x1; x++) {
-        if (x >= size || y >= size) continue;
-        if (this.influence.usable(y * size + x)) return true;
-      }
+  private landVisible(parcel: number): boolean {
+    for (const t of this.land.tiles[parcel]) {
+      if (this.influence.usable(t)) return true;
     }
     return false;
   }
 
   /**
-   * Every block the player could buy right now, with its price.
+   * Is anybody else's property standing on this field?
+   *
+   * Three kinds, and the distinction that matters is *whose*: a business or a yard
+   * of your own is exactly the case where buying the ground under it makes sense,
+   * so those are allowed. Somebody else's works, somebody else's yard, and the
+   * village's own houses are not for sale at any price.
+   */
+  private landOccupied(parcel: number): boolean {
+    const mine = new Set(this.land.tiles[parcel]);
+    for (const t of mine) if (this.built.has(t)) return true;
+    for (let i = 0; i < this.sites.count; i++) {
+      if (this.sites.owner[i] === this.player) continue;
+      if (mine.has(this.sites.tile[i])) return true;
+    }
+    for (let i = 0; i < this.yards.count; i++) {
+      if (this.yards.owner[i] === this.player) continue;
+      if (mine.has(this.yards.tile[i])) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Every field the player could buy right now, with its price.
    *
    * Walked whole rather than kept as a list, because the answer changes whenever a
    * road is laid, a business is bought or the fog moves — and a stale list of
-   * things for sale is worse than a slow one. A thousand blocks with a cheap test
-   * each is nothing next to a frame.
+   * things for sale is worse than a slow one.
    */
-  landForSale(): { block: number; price: number }[] {
-    const out: { block: number; price: number }[] = [];
-    for (let b = 0; b < this.land.owner.length; b++) {
-      if (this.land.owner[b] !== NO_OWNER) continue;
-      const verdict = this.canBuyLand(this.player, b);
-      // Affordability is *not* a filter here: seeing what you cannot yet afford
-      // is how a player decides what to save for. Only reachability hides a block.
+  landForSale(): { parcel: number; price: number }[] {
+    const out: { parcel: number; price: number }[] = [];
+    for (let p = 0; p < this.land.owner.length; p++) {
+      if (this.land.owner[p] !== NO_OWNER) continue;
+      const verdict = this.canBuyLand(this.player, p);
       // Affordability is not a filter — seeing what you cannot yet afford is how a
-      // player decides what to save for. Everything else hides the block.
+      // player decides what to save for. Everything else hides the field.
       if (verdict.reason === 'Not enough in the bank.' || verdict.ok) {
-        out.push({ block: b, price: verdict.price });
+        out.push({ parcel: p, price: verdict.price });
       }
     }
     return out;
   }
 
-  /** The blocks you hold, for drawing them. */
+  /** The fields you hold, for drawing them. */
   landOwned(): number[] {
     const out: number[] = [];
-    for (let b = 0; b < this.land.owner.length; b++) {
-      if (this.land.owner[b] === this.player) out.push(b);
+    for (let p = 0; p < this.land.owner.length; p++) {
+      if (this.land.owner[p] === this.player) out.push(p);
     }
     return out;
   }
 
+  /** Every tile of every field you hold, for drawing one merged outline. */
+  landOwnedTiles(): number[] {
+    const out: number[] = [];
+    for (const p of this.landOwned()) out.push(...this.land.tiles[p]);
+    return out;
+  }
+
+  /**
+   * Where a field is, in words.
+   *
+   * A bearing and a rough distance from the nearest settlement, which is how
+   * anybody in 1985 would have described a field to somebody else — and a great
+   * deal more use than the joke about acres that was here before.
+   */
+  landPlaceName(parcel: number): string {
+    const c = this.land.centres[parcel];
+    if (!c) return 'Open country';
+    let best = -1;
+    let bestD = 1e9;
+    for (let t = 0; t < this.towns.count; t++) {
+      const d = Math.hypot(this.towns.x[t] - c.x, this.towns.y[t] - c.y);
+      if (d < bestD) { bestD = d; best = t; }
+    }
+    if (best < 0) return 'Open country';
+    const dx = c.x - this.towns.x[best];
+    const dy = c.y - this.towns.y[best];
+    const dirs = ['east', 'south-east', 'south', 'south-west',
+      'west', 'north-west', 'north', 'north-east'];
+    const a = Math.atan2(dy, dx);
+    const dir = dirs[(Math.round((a / (Math.PI / 4)) + 8)) % 8];
+    const name = this.towns.names[best] ?? 'the village';
+    if (bestD < 4) return `In ${name}`;
+    const miles = bestD / 8;
+    const how = miles < 0.6 ? 'Just' : miles < 2 ? 'A little' : '';
+    return `${how ? `${how} ` : ''}${dir} of ${name}`.replace(/^./, (m) => m.toUpperCase());
+  }
+
+  /** Does the player hold the field this tile is in? Read by the renderer. */
+  ownsLandAt(tile: number): boolean {
+    const p = this.terrain.fields.parcel[tile];
+    return p >= 0 && p < this.land.owner.length && this.land.owner[p] === this.player;
+  }
+
   /** Buy it. */
-  buyLand(block: number): { ok: boolean; reason: string } {
-    const verdict = this.canBuyLand(this.player, block);
+  buyLand(parcel: number): { ok: boolean; reason: string } {
+    const verdict = this.canBuyLand(this.player, parcel);
     if (!verdict.ok) return { ok: false, reason: verdict.reason };
     this.companies.post(this.player, Line.AssetTrade, -verdict.price);
-    this.land.owner[block] = this.player;
+    this.land.owner[parcel] = this.player;
     this.note(NONE, MoneyKind.Land, -verdict.price);
     // The ground is drawn from this, and your reach grows with it.
     this.landRevision++;
     this.refreshInfluence();
     return { ok: true, reason: '' };
-  }
-
-  /** Does the player hold the block this tile is in? Read by the renderer. */
-  ownsLandAt(tile: number): boolean {
-    return this.land.owner[this.land.blockAt(tile, this.config.size)] === this.player;
   }
 
   /** Rebuild the influence area from the yards and places you hold. */
@@ -5743,7 +5772,7 @@ export class World {
      */
     for (let b = 0; b < this.land.owner.length; b++) {
       if (this.land.owner[b] !== this.player) continue;
-      const c = this.land.centre(b);
+      const c = this.land.centres[b];
       sources.push({ x: c.x, y: c.y, strength: 0.55 * carry });
     }
     for (let s = 0; s < this.sites.count; s++) {

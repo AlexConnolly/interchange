@@ -582,6 +582,15 @@ export function generateWorld(w: World): void {
   }
 
   w.rebuild();
+  /*
+   * And the land register last of all.
+   *
+   * Everything above can still move a field: crops are assigned from the farms
+   * placed in this pass, and adjacent woods are merged into single parcels. A
+   * register built before this holds tile lists for fields that no longer exist.
+   */
+  w.settleLand();
+
 }
 
 function nearestLand(t: Terrain, x: number, y: number, radius: number): [number, number] | null {

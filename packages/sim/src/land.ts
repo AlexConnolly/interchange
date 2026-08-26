@@ -1,112 +1,115 @@
 /**
- * Land you can buy, as a grid of uniform squares.
+ * Land you can buy, by the field.
  *
- * The district already had a notion of owned land and it was the wrong shape for
- * buying. It came *with* a business — the parcel a farm stands in and the ones its
- * tile touches — so it was irregular, implicit, and impossible to point at: field
- * boundaries follow hedges, and a hedge is not a thing you can offer for sale at a
- * price. "They have to be in uniform squares" is therefore not a simplification, it
- * is the requirement: a market in land needs a unit, and the unit has to be one
- * everybody can see the edges of.
+ * This started as a grid of four-by-four squares, on the reasoning that a market
+ * needs a unit whose edges everybody can see. The reasoning was right and the unit
+ * was wrong: "it should be field based, not random squares — otherwise it's super
+ * not right to buy half one field half another." Which is exactly what it did, and
+ * the district makes the point better than any argument, because the renderer has
+ * been drawing hedges round the fields since long before any of this existed. The
+ * edges were already there and already visible; a grid laid over them cut every
+ * one of them in half.
  *
- * So there are two ideas of land in the game now and they do different jobs. A
- * *parcel* is a field, which is what the countryside is made of and what the
- * renderer draws hedges around. A *block* is four tiles by four, which is what
- * changes hands. They coexist without interfering because neither is derived from
- * the other.
+ * So the unit is the **parcel** — the thing `fields.ts` divides the district into
+ * by recursive subdivision, the thing the hedges enclose, the thing one crop grows
+ * in. A field is what a farmer sells and what a hedge encloses, and now it is what
+ * changes hands.
  *
- * ## Why four
- *
- * A block has to be big enough to put a building on and small enough that buying
- * one is a decision rather than a commitment. Four by four is sixteen tiles: room
- * for a works and its yard with space to spare, about the footprint of the largest
- * thing in the content, and a thousand-odd of them in a district — enough that the
- * map has a market in it and few enough that the whole grid can be walked every
- * frame without thinking about it.
+ * The one thing the grid had going for it was uniformity, and losing it costs
+ * nothing: parcels differ in size, so they differ in price, which is more honest
+ * than pretending four acres of hillside is four acres of river meadow.
  */
-
-/** Tiles along one edge of a land block. */
-export const LAND_BLOCK = 4;
 
 /** Nobody's, and the value stored for unowned land. */
 export const NO_OWNER = -1;
 
 /**
- * The land register: who owns which block.
+ * The land register: who owns which field, and where each field is.
  *
- * One flat array indexed by block, sized from the district. Kept here rather than
- * on the world so that the rules about *what land is* live next to the data, and
- * the world can stay the thing that knows about money and vehicles.
+ * The tile lists are built once from the parcel map and never change — parcels are
+ * a property of the terrain, which is a pure function of the seed. Everything that
+ * wants to draw a field, price it or test what stands on it needs its tiles, and
+ * walking sixteen thousand tiles to answer that would make every one of those a
+ * scan of the whole district.
  */
 export class LandRegister {
-  /** Blocks along one edge of the district. */
-  readonly across: number;
-
   readonly owner: Int16Array;
 
-  constructor(size: number) {
-    this.across = Math.ceil(size / LAND_BLOCK);
-    this.owner = new Int16Array(this.across * this.across).fill(NO_OWNER);
+  /** Tiles making up each parcel. */
+  readonly tiles: number[][];
+
+  /** Where to put a label: the middle of the field, in tiles. */
+  readonly centres: { x: number; y: number }[];
+
+  constructor(parcelMap: Int32Array, parcelCount: number, size: number) {
+    this.owner = new Int16Array(Math.max(1, parcelCount)).fill(NO_OWNER);
+    this.tiles = Array.from({ length: Math.max(1, parcelCount) }, () => [] as number[]);
+    for (let t = 0; t < parcelMap.length; t++) {
+      const p = parcelMap[t];
+      if (p >= 0 && p < parcelCount) this.tiles[p].push(t);
+    }
+    /*
+     * The centroid, not the middle of the bounding box.
+     *
+     * An enclosure field is rarely a rectangle — it is whatever shape the
+     * subdivision left — so the centre of its bounds can easily fall outside it,
+     * on the far side of a hedge. A label there points at somebody else's grass.
+     */
+    this.centres = this.tiles.map((list) => {
+      if (list.length === 0) return { x: 0, y: 0 };
+      let sx = 0;
+      let sy = 0;
+      for (const t of list) {
+        sx += t % size;
+        sy += (t / size) | 0;
+      }
+      const cx = sx / list.length;
+      const cy = sy / list.length;
+      /*
+       * And then snapped to the tile of the field nearest that point, because a
+       * centroid is not necessarily *in* the shape.
+       *
+       * An enclosure field is whatever the subdivision left, and plenty of them
+       * are L-shaped or wrap round a wood — measured, the centroid of the fifth
+       * field in the opening district lands on unenclosed ground outside it. A
+       * price label there points at somebody else's grass, which is worse than
+       * being a tile off centre.
+       */
+      let best = list[0];
+      let bestD = Infinity;
+      for (const t of list) {
+        const dx = (t % size) - cx;
+        const dy = ((t / size) | 0) - cy;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; best = t; }
+      }
+      return { x: (best % size) + 0.5, y: ((best / size) | 0) + 0.5 };
+    });
   }
 
-  /** Which block a tile falls in. */
-  blockAt(tile: number, size: number): number {
-    const x = tile % size;
-    const y = (tile / size) | 0;
-    return ((y / LAND_BLOCK) | 0) * this.across + ((x / LAND_BLOCK) | 0);
-  }
-
-  /** The tile range a block covers, inclusive. */
-  bounds(block: number): { x0: number; y0: number; x1: number; y1: number } {
-    const bx = block % this.across;
-    const by = (block / this.across) | 0;
-    return {
-      x0: bx * LAND_BLOCK,
-      y0: by * LAND_BLOCK,
-      x1: bx * LAND_BLOCK + LAND_BLOCK - 1,
-      y1: by * LAND_BLOCK + LAND_BLOCK - 1,
-    };
-  }
-
-  /** The middle of a block, in tiles, for putting a label on. */
-  centre(block: number): { x: number; y: number } {
-    const b = this.bounds(block);
-    return { x: (b.x0 + b.x1 + 1) / 2, y: (b.y0 + b.y1 + 1) / 2 };
-  }
-
-  /** The four blocks orthogonally touching this one. */
-  neighbours(block: number): number[] {
-    const bx = block % this.across;
-    const by = (block / this.across) | 0;
-    const out: number[] = [];
-    if (bx > 0) out.push(block - 1);
-    if (bx + 1 < this.across) out.push(block + 1);
-    if (by > 0) out.push(block - this.across);
-    if (by + 1 < this.across) out.push(block + this.across);
-    return out;
+  /** How many tiles this field covers. */
+  acres(parcel: number): number {
+    return this.tiles[parcel]?.length ?? 0;
   }
 }
 
 /**
- * What a block costs, before anybody has bought anything.
+ * What a field costs, per tile of it.
  *
- * Three things move it, and the shape matters more than the figures: land is
- * dearer near a town, dearer with a road on it, and worthless if it is mostly
- * water. Nothing about *what you could build there* enters into it, because the
- * game does not restrict that and a price that pretended to would be a lie.
+ * Priced by the acre rather than by the field, which is the whole reason losing
+ * the uniform grid costs nothing: a big field is dearer than a small one for the
+ * obvious reason, and the player can see which is which without being told.
  *
- * The base is set against the one price the player already knows. A business costs
- * forty to fifty thousand pounds; a block of open country is about three, so a
- * dozen blocks is a business. That is the intended exchange rate — "it should be
- * cheaper to buy a business in most cases, but not buy a massive amount" — and it
- * means land is the patient purchase and a business is the quick one.
+ * The figure is set against the one price the player already knows. A business is
+ * forty to fifty thousand pounds; a middling field of open country comes out around
+ * three, so a dozen fields is a business. Land is the patient purchase.
  */
-export const LAND_BASE = 300_000;
+export const LAND_PER_TILE = 22_000;
 
 /** Doubles at the town gate. A field beside the market square is not a field. */
 export const LAND_TOWN_PREMIUM = 1.9;
 
-/** And half again with a road already on it: you are buying the frontage too. */
+/** And half again with a road on it: you are buying the frontage too. */
 export const LAND_ROAD_PREMIUM = 1.5;
 
 /** Beyond this many tiles from any town, land is simply land. */

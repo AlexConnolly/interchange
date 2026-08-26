@@ -2254,31 +2254,29 @@ export class Renderer {
   }
 
   /**
-   * Plots on the ground: a wash inside a border, any number of them.
+   * Land on the ground: a wash over a set of tiles, with a border round the
+   * *outside* of it.
    *
-   * Several at once because the land tool shows two things that mean different
-   * things and must not look alike — **blue** for ground you already hold, and
-   * **green** for the square you are about to buy. One mesh for the lot, because
-   * they are all the same kind of object and rebuilding one list is simpler than
-   * keeping two in step.
+   * Takes tiles rather than rectangles, and that is the whole of "make the squares
+   * join, not lots of squares — one big one". A border drawn per field gives four
+   * hedgerows down the middle of a holding; a border drawn only where a tile's
+   * neighbour is *not* in the set gives the outline of the union, so two fields
+   * that touch read as one piece of ground and always will, whatever shape they
+   * are. Nothing has to merge anything: asking each edge whether it is on the
+   * boundary is the merge.
    *
-   * A separate mesh from the road tool's marks and from the route line, since all
-   * three can be on screen together. This one means "*this* ground", which needs
-   * an edge more than a fill: the question a player is asking is where the square
-   * stops.
-   *
-   * Hence both. The wash says which ground is included and stays faint enough that
-   * the field underneath is still a field; the border answers the question, drawn
-   * as long thin quads rather than a line because a line primitive is one pixel
-   * wide at every zoom and this has to read at fourteen tiles across and at
-   * seventy.
+   * Two layers because they answer different questions. The wash says which ground
+   * is included and stays faint enough that the field underneath is still a field;
+   * the border says where it stops, which is what a player is actually looking for.
+   * Long thin quads rather than a line primitive, because a line is one pixel wide
+   * at every zoom and this has to read at fourteen tiles across and at seventy.
    */
   showPlots(
-    regions: { x0: number; y0: number; x1: number; y1: number; wash: RGB; edge: RGB }[],
+    regions: { tiles: readonly number[]; wash: RGB; edge: RGB }[],
     src: RenderSource,
   ): void {
     const key = regions
-      .map((r) => `${r.x0},${r.y0},${r.x1},${r.y1},${r.wash[0]}`)
+      .map((r) => `${r.tiles.length}:${r.tiles[0] ?? -1}:${r.wash[0]}`)
       .join('|');
     if (key === this.plotKey) return;
     this.plotKey = key;
@@ -2291,57 +2289,40 @@ export class Renderer {
 
     const sz = src.size;
     let quads = 0;
-    for (const r of regions) {
-      quads += (r.x1 - r.x0 + 1) * (r.y1 - r.y0 + 1) + 4 * (r.x1 - r.x0 + 2);
-    }
+    for (const r of regions) quads += r.tiles.length * 5;
     const m = new Mesh(quads * 6);
+    const w = 0.16;
 
     for (const r of regions) {
-      const x0 = r.x0;
-      const z0 = r.y0;
-      const x1 = r.x1 + 1;
-      const z1 = r.y1 + 1;
+      const inside = new Set(r.tiles);
+      for (const t of r.tiles) {
+        const x = t % sz;
+        const z = (t / sz) | 0;
+        const y = this.groundTop(src, x + 0.5, z + 0.5) + 0.03;
+        m.quad(x, y, z, x + 1, y, z, x + 1, y, z + 1, x, y, z + 1, r.wash);
 
-      /*
-       * The wash per tile rather than as one big quad, and it has to be: the ground
-       * is not flat, so a single quad across sixteen tiles would sink into every
-       * rise and float over every dip.
-       */
-      for (let z = z0; z < z1; z++) {
-        for (let x = x0; x < x1; x++) {
-          if (x < 0 || z < 0 || x >= sz || z >= sz) continue;
-          const y = this.groundTop(src, x + 0.5, z + 0.5) + 0.03;
-          m.quad(x, y, z, x + 1, y, z, x + 1, y, z + 1, x, y, z + 1, r.wash);
+        /*
+         * One strip per edge that faces out of the set. A tile in the middle of a
+         * holding contributes none, a tile on the boundary contributes one or two,
+         * and the result is the outline — including round the inside of a hole,
+         * which comes free and is correct.
+         */
+        const ey = y + 0.02;
+        if (!inside.has(z > 0 ? t - sz : -1)) {
+          m.quad(x, ey, z, x + 1, ey, z, x + 1, ey, z + w, x, ey, z + w, r.edge);
+        }
+        if (!inside.has(z + 1 < sz ? t + sz : -1)) {
+          m.quad(x, ey, z + 1 - w, x + 1, ey, z + 1 - w,
+                 x + 1, ey, z + 1, x, ey, z + 1, r.edge);
+        }
+        if (!inside.has(x > 0 ? t - 1 : -1)) {
+          m.quad(x, ey, z, x + w, ey, z, x + w, ey, z + 1, x, ey, z + 1, r.edge);
+        }
+        if (!inside.has(x + 1 < sz ? t + 1 : -1)) {
+          m.quad(x + 1 - w, ey, z, x + 1, ey, z,
+                 x + 1, ey, z + 1, x + 1 - w, ey, z + 1, r.edge);
         }
       }
-
-      const w = 0.14;
-      const edge = (
-        ax: number, az: number, bx: number, bz: number, nx: number, nz: number,
-      ): void => {
-        const steps = Math.max(1, Math.round(Math.abs(bx - ax) + Math.abs(bz - az)));
-        for (let i = 0; i < steps; i++) {
-          const t0 = i / steps;
-          const t1 = (i + 1) / steps;
-          const px0 = ax + (bx - ax) * t0;
-          const pz0 = az + (bz - az) * t0;
-          const px1 = ax + (bx - ax) * t1;
-          const pz1 = az + (bz - az) * t1;
-          const y0 = this.groundTop(src, px0 + nx * w * 0.5, pz0 + nz * w * 0.5) + 0.05;
-          const y1 = this.groundTop(src, px1 + nx * w * 0.5, pz1 + nz * w * 0.5) + 0.05;
-          m.quad(
-            px0, y0, pz0,
-            px1, y1, pz1,
-            px1 + nx * w, y1, pz1 + nz * w,
-            px0 + nx * w, y0, pz0 + nz * w,
-            r.edge,
-          );
-        }
-      };
-      edge(x0, z0, x1, z0, 0, 1);
-      edge(x0, z1, x1, z1, 0, -1);
-      edge(x0, z0, x0, z1, 1, 0);
-      edge(x1, z0, x1, z1, -1, 0);
     }
 
     this.plotMesh = toMesh(m, this.plotMaterial);

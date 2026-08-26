@@ -56,7 +56,7 @@ export function Land({
   const reach = tilesAcross * 0.75;
   const near = forSale
     .map((s) => {
-      const c = world.land.centre(s.block);
+      const c = world.land.centres[s.parcel];
       return { ...s, c, d: Math.hypot(c.x - camX, c.y - camZ) };
     })
     .filter((s) => Math.abs(s.c.x - camX) < reach && Math.abs(s.c.y - camZ) < reach)
@@ -64,7 +64,6 @@ export function Land({
     .slice(0, CHIPS);
 
   const verdict = chosen >= 0 ? world.canBuyLand(world.player, chosen) : null;
-  const bounds = chosen >= 0 ? world.land.bounds(chosen) : null;
 
   /*
    * The squares on the ground: blue for what you hold, green for what you are
@@ -78,14 +77,24 @@ export function Land({
    * Keyed on a string rather than on the arrays, because the owned list is rebuilt
    * every render and a dependency on it would re-run this sixty times a second.
    */
-  const owned = world.landOwned();
+  /*
+   * Everything you hold as *one* region, not one per field.
+   *
+   * The renderer draws a border only where a tile's neighbour is outside the set,
+   * so handing it every owned tile at once gives the outline of the whole holding —
+   * two fields that touch become one shape with one edge round it. Handing it a
+   * region per field would draw a hedgerow down the middle of your own land.
+   */
+  const ownedTiles = world.landOwnedTiles();
   const plots = [
-    ...owned.map((b) => ({
-      ...world.land.bounds(b), wash: PLOT.ownWash, edge: PLOT.ownEdge,
-    })),
-    ...(bounds ? [{ ...bounds, wash: PLOT.wash, edge: PLOT.edge }] : []),
+    ...(ownedTiles.length > 0
+      ? [{ tiles: ownedTiles, wash: PLOT.ownWash, edge: PLOT.ownEdge }]
+      : []),
+    ...(chosen >= 0
+      ? [{ tiles: world.land.tiles[chosen], wash: PLOT.wash, edge: PLOT.edge }]
+      : []),
   ];
-  const plotKey = plots.map((r) => `${r.x0},${r.y0},${r.wash[0]}`).join('|');
+  const plotKey = `${ownedTiles.length}:${chosen}`;
   useEffect(() => {
     renderer.showPlots(plots, src);
     return () => renderer.showPlots([], src);
@@ -131,18 +140,18 @@ export function Land({
         const height = world.terrain.height[mid];
         return (
           <button
-            key={s.block}
-            className={`plot ${chosen === s.block ? 'on' : ''}`}
+            key={s.parcel}
+            className={`plot ${chosen === s.parcel ? 'on' : ''}`}
             {...anchorAt(s.c.x, height, s.c.y)}
-            onClick={() => setChosen(chosen === s.block ? -1 : s.block)}
-            title={`${money(s.price)} — four tiles by four`}
+            onClick={() => setChosen(chosen === s.parcel ? -1 : s.parcel)}
+            title={`${money(s.price)} — ${world.land.acres(s.parcel)} tiles`}
           >
             {money(s.price)}
           </button>
         );
       })}
 
-      {verdict && bounds && (
+      {verdict && chosen >= 0 && (
         /*
          * The confirmation, and it is deliberately tiny. The decision was made on
          * the map; this exists to say what it costs and to be a place where the
@@ -152,7 +161,7 @@ export function Land({
         <div className="plot-buy">
           <div className="plot-title">{world.landPlaceName(chosen)}</div>
           <div className="plot-sub">
-            Four tiles by four · {money(verdict.price)}
+            {world.land.acres(chosen)} tiles · {money(verdict.price)}
           </div>
           {!verdict.ok && <div className="why">{verdict.reason}</div>}
           <div className="plot-row">
