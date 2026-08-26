@@ -836,7 +836,6 @@ export function App(): JSX.Element {
      */
     let ownedParcels = new Set<number>();
     let landAt = -1;
-    let marksAt = '';
     let hedgeAt = -1;
 
     const yardTiles = new Set<number>();
@@ -2533,46 +2532,6 @@ export function App(): JSX.Element {
        * several chunks, so enumerating them costs more than redrawing. It happens
        * a handful of times in a game.
        */
-      /*
-       * The blue marks, which are the tool's whole interface.
-       *
-       * Recomputed only when something that could change the answer changes —
-       * the tool, the camera tile, or the roads — because it asks `trackHere` of
-       * every tile in view and the answer is stable while you sit still. Bounded
-       * by the frame rather than by the district: nobody can build off screen.
-       */
-      // Through the ref, not the captured state: this closure was made once and
-      // `tool` in it is whatever it was at mount. The classic trap next to a
-      // long-lived listener, and the reason `toolRef` exists at all.
-      const nowTool = toolRef.current;
-      const marksNow = `${nowTool}:${world.landRevision}:${Math.round(renderer.camX)}`
-        + `:${Math.round(renderer.camZ)}:${Math.round(renderer.tilesAcross)}`;
-      if (marksNow !== marksAt) {
-        marksAt = marksNow;
-        const list: number[] = [];
-        if (nowTool !== 'none') {
-          const owned = world.ownedParcels(world.player);
-          const half = Math.ceil(renderer.tilesAcross * 0.62);
-          const cx0 = Math.round(renderer.camX);
-          const cz0 = Math.round(renderer.camZ);
-          for (let z = cz0 - half; z <= cz0 + half; z++) {
-            for (let x = cx0 - half; x <= cx0 + half; x++) {
-              if (x < 0 || z < 0 || x >= DISTRICT || z >= DISTRICT) continue;
-              const t = z * DISTRICT + x;
-              const okHere = nowTool === 'lay'
-                ? world.trackHere(world.player, t, owned).ok
-                : world.liftHere(world.player, t, owned).ok;
-              if (okHere) list.push(t);
-            }
-          }
-        }
-        renderer.showMarks(
-          list,
-          // Blue to lay, red to lift. Two tools, two answers, no label needed.
-          nowTool === 'lift' ? [0.86, 0.34, 0.32] : [0.34, 0.62, 0.92],
-          src,
-        );
-      }
 
       /*
        * Rebuild the ground when the hedges would be built differently.
@@ -2634,36 +2593,45 @@ export function App(): JSX.Element {
       }
 
       /*
-       * The ghost track, rebuilt from the hovered tile each frame.
+       * What would happen if you pressed the button here.
        *
-       * In the frame loop rather than in React for the usual reason — it follows
-       * the pointer — and it costs nothing to call: `showPlots` compares a key and
+       * In the frame loop rather than in React because it follows the pointer, and
+       * it costs nothing to call every frame: `showPlots` compares a key and
        * returns immediately when the hover has not moved.
+       *
+       * This replaced a field of blue dots marking every legal tile in view. The
+       * dots described the *rules* — a scattering of places the game would accept —
+       * and said nothing about what pressing the button would do, which is the only
+       * thing anybody wants to know while holding a tool.
+       *
+       * So: one square under the pointer, green where it will work and red where it
+       * will not, and the green includes the road tile it would join, because the
+       * join is the half a player is actually judging.
+       *
+       * A refusal shows *something* rather than nothing, which is the other half of
+       * what was missing. An unmarked tile could mean "not allowed here" or "the
+       * tool is not really on", and those are indistinguishable when the answer is
+       * an absence.
        */
       {
-        /*
-         * `toolRef`, not `tool`. The frame loop lives in an effect that is set up
-         * once, so the `tool` it closed over is whatever it was at mount — always
-         * 'none' — and every check against it silently answers no. The refs beside
-         * it exist for exactly this and I reached past them.
-         */
         const hover = hoverRef.current;
-        const lay = toolRef.current === 'lay' && hover >= 0
-          && world.trackHere(world.player, hover).ok;
-        if (lay) {
-          /*
-           * The tile, and the road it joins. Two tiles rather than one, because a
-           * single square hanging in a field does not show the *join*, and the join
-           * is the whole thing a player is judging.
-           */
+        const held = toolRef.current;
+        if ((held === 'lay' || held === 'lift') && hover >= 0) {
+          const ok = held === 'lay'
+            ? world.trackHere(world.player, hover).ok
+            : world.liftHere(world.player, hover).ok;
           const tiles = [hover];
-          for (const d of [1, -1, DISTRICT, -DISTRICT]) {
-            if (roadClass[hover + d] >= 0) { tiles.push(hover + d); break; }
+          if (ok && held === 'lay') {
+            for (const d of [1, -1, DISTRICT, -DISTRICT]) {
+              if (roadClass[hover + d] >= 0) { tiles.push(hover + d); break; }
+            }
           }
-          renderer.showPlots(
-            [{ tiles, wash: PLOT.ghostWash, edge: PLOT.ghostEdge }], src,
-          );
-        } else if (toolRef.current !== 'land') {
+          renderer.showPlots([{
+            tiles,
+            wash: ok ? PLOT.yesWash : PLOT.noWash,
+            edge: ok ? PLOT.yesEdge : PLOT.noEdge,
+          }], src);
+        } else if (held !== 'land') {
           renderer.showPlots([], src);
         }
       }

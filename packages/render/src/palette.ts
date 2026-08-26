@@ -287,6 +287,23 @@ export const PLOT = {
    *  border that reads as a border has to earn it in saturation. */
   edge: hex('#2ef066'),
   /**
+   * Yes and no, under the cursor.
+   *
+   * The road tool used to answer "where may I build" by marking every legal tile
+   * in view — a field of blue dots that says a great deal about the rules and
+   * nothing about what pressing the button would do. A preview under the pointer
+   * answers a better question, and it can answer it in both directions: green
+   * where the thing you are about to do will work, red where it will not.
+   *
+   * A full tile rather than the small mark the dots used, because this is no
+   * longer an invitation scattered over a field — it is *the piece of road*, and
+   * it should be the size and shape of the piece of road.
+   */
+  yesWash: hex('#7ee08a'),
+  yesEdge: hex('#2ef066'),
+  noWash: hex('#e08a86'),
+  noEdge: hex('#f04a44'),
+  /**
    * A road that is not there yet.
    *
    * Deliberately the colour of a track rather than a signal colour: the point of

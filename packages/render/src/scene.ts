@@ -2206,54 +2206,6 @@ export class Renderer {
   }
 
   /**
-   * Where you may build, as a mark on every tile you may build on.
-   *
-   * A separate mesh from the route preview rather than a reuse of it, because
-   * the two are shown at the same time and mean opposite things: a route is
-   * where a lorry *would go*, and this is where a spade *may go*. Sharing one
-   * mesh would make choosing a road destroy the preview that told you why.
-   *
-   * Keyed on the tile list's length and first tile, like the route, so panning
-   * across a district does not rebuild the mesh sixty times a second while the
-   * answer is the same.
-   */
-  showMarks(tiles: readonly number[], colour: RGB, src: RenderSource): void {
-    const key = `${tiles.length}:${tiles[0] ?? -1}:${colour[0]}`;
-    if (key === this.markKey) return;
-    this.markKey = key;
-    if (this.markMesh) {
-      this.scene.remove(this.markMesh);
-      this.markMesh.geometry.dispose();
-      this.markMesh = null;
-    }
-    if (tiles.length === 0) return;
-    const m = new Mesh(tiles.length * 6);
-    const sz = src.size;
-    for (const t of tiles) {
-      const x = t % sz;
-      const z = (t / sz) | 0;
-      const y = this.groundTop(src, x + 0.5, z + 0.5) + 0.045;
-      /*
-       * A small square rather than a full tile.
-       *
-       * A tile-sized patch reads as "the ground here is blue", which is a state;
-       * a mark with grass round it reads as "you may put something here", which
-       * is an invitation. It also lets the hedges and the crop stripes stay
-       * visible underneath, so the field is still a field while you work.
-       */
-      const h = 0.22;
-      m.quad(
-        x + 0.5 - h, y, z + 0.5 - h, x + 0.5 + h, y, z + 0.5 - h,
-        x + 0.5 + h, y, z + 0.5 + h, x + 0.5 - h, y, z + 0.5 + h, colour,
-      );
-    }
-    this.markMesh = toMesh(m, this.routeMaterial);
-    this.markMesh.castShadow = false;
-    this.markMesh.receiveShadow = false;
-    this.scene.add(this.markMesh);
-  }
-
-  /**
    * Land on the ground: a wash over a set of tiles, with a border round the
    * *outside* of it.
    *
@@ -2403,10 +2355,6 @@ export class Renderer {
   private plotMesh: ReturnType<typeof toMesh> | null = null;
 
   private plotKey = '';
-
-  private markMesh: ReturnType<typeof toMesh> | null = null;
-
-  private markKey = '';
 
   /**
    * Where a place on the ground lands on the screen.
