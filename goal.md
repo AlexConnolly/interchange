@@ -88,6 +88,20 @@ the run rather than guessed.
 
 ---
 
+## ~~7. The opening~~ — done
+
+**What.** The district takes a moment to be ready — a dozen GLB files to fetch and
+bake, a heightmap to mesh, influence to resolve — and that moment was spent looking
+at an empty field while things popped into it.
+
+**Done when.** Ten seconds of coming down through cloud: three of solid overcast
+with "Loading game...", four of descending from far outside the playing zoom as the
+cloud clears, three of the interface sliding in from the edges it lives on. No
+input until it ends. `?intro=0` skips it, which is what makes the game
+photographable.
+
+---
+
 ## Standing rules, for anything on this list
 
 - **Nothing whose visibility matters may be animated through opacity.** Third time

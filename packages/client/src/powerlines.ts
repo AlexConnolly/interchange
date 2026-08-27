@@ -56,6 +56,22 @@
  */
 export const SPAN = 3.0;
 
+/**
+ * How high above the pole's foot the wires attach, in world units.
+ *
+ * The top of the insulators, and shared with `POLE_WIRE_H` in
+ * `art/build_props.py`, which derives it from the crossarm rather than guessing
+ * at it. The guess is what went wrong the first time: the span was built at
+ * `POLE_H - 0.045` and the insulator tops are at `0.628`, so every wire in the
+ * district ran 5cm *below* the arm it was supposed to be sitting on — "the cables
+ * don't line up correctly on the model itself, they are offset".
+ *
+ * Two numbers in two languages that have to be equal is a thing to state loudly
+ * rather than to hide, so it is stated in both places with a note pointing at the
+ * other.
+ */
+export const WIRE_H = 0.628;
+
 /** A pole, and the direction of the wire leaving it. */
 export interface Pole {
   x: number;

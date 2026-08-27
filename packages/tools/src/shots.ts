@@ -128,7 +128,15 @@ async function main(): Promise<void> {
   const only = (process.env.ONLY ?? '').split(',').filter((x) => x !== '');
   for (const shot of SHOTS) {
     if (only.length > 0 && !only.includes(shot.name)) continue;
-    const url = `${BASE}?vfx=high&${shot.query}&shot=${Date.now()}`;
+    /*
+     * `intro=0`, always, and it is not optional.
+     *
+     * The game opens with ten seconds of coming down through cloud, which is
+     * lovely and would make every screenshot in this file a photograph of weather:
+     * the settle is nine seconds and the descent is not over until ten. Anything
+     * automated wants the game, not the arrival.
+     */
+    const url = `${BASE}?vfx=high&intro=0&${shot.query}&shot=${Date.now()}`;
     await page.goto(url, { waitUntil: 'load' });
     await page.waitForTimeout(shot.wait ?? SETTLE);
     for (const sel of shot.click ?? []) {

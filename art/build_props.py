@@ -488,24 +488,50 @@ def blossom():
 # The American kind, deliberately: one timber pole, a crossarm, wires strung
 # between. Not a lattice pylon. A steel pylon is a landmark and would dominate a
 # district whose tallest thing is a farmhouse; a wooden pole is *furniture*, and
-# furniture is what the grid should be here. The line crosses the map from edge to
-# edge because the grid comes from somewhere else and goes somewhere else - the
+# furniture is what the grid should be here. The line crosses the map from side to
+# side because the grid comes from somewhere else and goes somewhere else - the
 # district is a place the wires pass through, not a place they serve.
 #
-# Two models, and the split is what makes a run of them possible at all. The
-# renderer draws scatter as instanced geometry: one mesh, many transforms, no
-# per-instance shape. A wire between two arbitrary points needs its own length,
-# which instancing cannot give it. So the *span* is its own model, exactly one
-# pole-gap long, and the layout keeps every step the same length so one span mesh
-# fits every gap in the district at nothing but a rotation.
+# Two models, and the split is what makes a run possible at all. The renderer
+# draws scatter as instanced geometry: one mesh, many transforms, no per-instance
+# shape. A wire between two arbitrary points needs its own length and its own
+# angle, which the transform can give it - but only if the mesh is built so that
+# the transform means something exact.
 #
-# `POLE_SPAN` is that gap, and it is shared with `powerlines.ts`, which is the one
-# number the two halves have to agree on.
+# ## The three numbers that have to agree
+#
+# `POLE_SPAN`, `POLE_WIRE_H` and `WIRE_Y` are shared with `powerlines.ts`, which
+# computes where each span goes. They are the whole interface between the model
+# and the layout, and getting any of them wrong is invisible in the source and
+# obvious on screen - which is exactly what happened: "the cables don't line up
+# correctly on the model itself, they are offset", and "they do not connect
+# correctly to the other side, often overlapping."
+#
+# So the span is built to make the maths trivial rather than to look tidy in
+# Blender. Its wires start at the model **origin** and run along **+X**, which
+# means the client can place one by putting its origin exactly on a pole's
+# insulator and rotating +X onto the direction of the next pole's insulator. No
+# offset to rotate, nothing to correct for, and the far end lands where it is
+# supposed to by construction.
 POLE_SPAN = 3.0
 POLE_H = 0.62
-# Where the three wires sit on the crossarm, across the run.
+
+# The crossarm, stated once and used to derive everything above it.
+ARM_Z = POLE_H - 0.028
+ARM_HALF = 0.010
+INS_H = 0.026
+
+# Where the wires actually attach: the top of the insulators.
+#
+# This is the number that was wrong. `WIRE_Z` used to be `POLE_H - 0.045`, an
+# independent guess, which put the cables 0.053 *below* the insulator tops - so
+# every wire in the district ran through the middle of the crossarm it was
+# supposed to be sitting on. Derived now, so it cannot drift again.
+POLE_WIRE_H = ARM_Z + ARM_HALF + INS_H
+
+# Where the three wires sit across the run. Shared with the layout only so that
+# nothing else has to guess how wide the arm is.
 WIRE_Y = (-0.115, 0.0, 0.115)
-WIRE_Z = POLE_H - 0.045
 TIMBER = (0.435, 0.357, 0.286, 1)
 WIRE = (0.212, 0.196, 0.184, 1)
 INSULATOR = (0.706, 0.741, 0.729, 1)
@@ -522,7 +548,7 @@ def pole():
     Taller than a street lamp and shorter than an oak. That ordering is the whole
     of the scale decision: a power line has to clear the hedges and read across a
     field, and it must not compete with the trees for the skyline, because the
-    trees are the thing this district is supposed to be about.
+    trees are what this district is supposed to be about.
     """
     made = []
     made.append(_paint(lib.cyl('pl_pole', 0.027, 0.020, POLE_H,
@@ -530,8 +556,8 @@ def pole():
                        TIMBER, 'pl_timber', rough=0.9))
     # The crossarm. Square-sawn, because it is, and it is the one part of this
     # whose silhouette says "power line" rather than "post".
-    made.append(_paint(lib.box('pl_arm', (0.026, 0.275, 0.020),
-                               loc=(0, 0, POLE_H - 0.028)),
+    made.append(_paint(lib.box('pl_arm', (0.026, 0.275, ARM_HALF * 2),
+                               loc=(0, 0, ARM_Z)),
                        TIMBER, 'pl_timber', rough=0.9))
     # And a knee brace each side, which is the detail that stops the arm reading
     # as a plus sign nailed to a stick.
@@ -541,29 +567,39 @@ def pole():
                     rot=(sy * 0.62, 0, 0))
         made.append(_paint(o, TIMBER, 'pl_timber', rough=0.9))
     # Three insulators, pale on purpose: they are the only light-coloured thing on
-    # the pole and they are what makes the arm legible against a dark hedge.
+    # the pole and they are what makes the arm legible against a dark hedge. Their
+    # tops are `POLE_WIRE_H`, which is where the wires attach.
     for i, y in enumerate(WIRE_Y):
-        made.append(_paint(lib.cyl('pl_ins%d' % i, 0.013, 0.010, 0.026,
-                                   loc=(0, y, POLE_H - 0.005), segments=4),
+        made.append(_paint(lib.cyl('pl_ins%d' % i, 0.013, 0.010, INS_H,
+                                   loc=(0, y, POLE_WIRE_H - INS_H / 2), segments=4),
                            INSULATOR, 'pl_insulator', rough=0.35))
     return made
 
 
 def span():
-    """The wires for one pole-gap, sagging, running +X from a pole.
+    """The wires for one pole-gap, sagging, running +X from the model origin.
+
+    **At height zero**, and that is the whole design of this mesh. The client puts
+    the origin exactly on one pole's insulator and rotates +X onto the direction of
+    the next pole's insulator; with the wires at the origin there is no vertical
+    offset for that rotation to swing about, so the far end arrives exactly on the
+    far insulator at every angle. The previous version built them at the insulator
+    *height* instead, so aiming the model tilted that offset too and the ends missed
+    by more the steeper the ground - "they do not connect correctly to the other
+    side, often overlapping."
 
     Three wires, three segments each, and the segments exist only to make the sag
-    a curve rather than a fold. Real conductors sag a good deal more than this at
+    a curve rather than a fold. Real conductors sag a great deal more than this at
     forty metres; a truthful sag at playing zoom reads as slack cable about to be
     stood on, so it is flattened to a suggestion.
 
     Deliberately thicker than a wire, and no thicker than the pole. At twenty-two
     tiles across the screen a truthfully sized conductor is well under a pixel and
     simply is not there - the same argument as the street lamp's oversized lantern.
-    But the first go overshot in the other direction: at 0.022 the conductors were
-    *thicker than the pole holding them up*, so a run read as three dark planks
-    laid across a field with an occasional stick under them. A wire has to be the
-    thinnest thing in the assembly or it stops being a wire.
+    But there is a ceiling on that: at 0.022 the conductors were *thicker than the
+    pole holding them up*, so a run read as three dark planks laid across a field
+    with an occasional stick under them. A wire has to be the thinnest thing in the
+    assembly or it stops being a wire.
     """
     made = []
     mat = lib.material('pl_wire', WIRE, rough=0.55)
@@ -573,9 +609,10 @@ def span():
         for k in range(segs):
             a = k / segs
             b = (k + 1) / segs
-            # A parabola through the gap, zero at both poles.
-            za = WIRE_Z - sag * 4 * a * (1 - a)
-            zb = WIRE_Z - sag * 4 * b * (1 - b)
+            # A parabola through the gap, zero at both ends so the wire meets both
+            # insulators exactly and dips between them.
+            za = -sag * 4 * a * (1 - a)
+            zb = -sag * 4 * b * (1 - b)
             mx = (a + b) / 2 * POLE_SPAN
             mz = (za + zb) / 2
             dx = (b - a) * POLE_SPAN

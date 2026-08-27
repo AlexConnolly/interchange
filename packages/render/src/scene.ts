@@ -28,6 +28,7 @@
  */
 
 import {
+  Quaternion,
   AdditiveBlending, BackSide, Color, DirectionalLight, DoubleSide, Fog, Group,
   InstancedBufferAttribute, InstancedMesh, MeshBasicMaterial, MeshLambertMaterial,
   Object3D, OrthographicCamera, HemisphereLight, PCFSoftShadowMap, PointLight,
@@ -167,6 +168,12 @@ export const TILES_ACROSS_OPENING = TILES_ACROSS_DEFAULT * 1.4;
  */
 const LAMP_POOL = 8;
 
+/** The two axes a pitched span is aimed with. Constants, not allocations. */
+const UP = new Vector3(0, 1, 0);
+
+/** +X is lifted by a rotation about Z, which is the half that was got wrong. */
+const ROLL = new Vector3(0, 0, 1);
+
 export interface RenderSource extends GroundSource, RoadSource {
   /** Vehicles: position in tiles, heading in turns, whose it is, and which
    *  model to draw — a tanker has to look like a tanker, or the yard rule that
@@ -282,11 +289,23 @@ export interface RenderSource extends GroundSource, RoadSource {
    * Stretch along the thing's own length, for the same reason.
    *
    * A span is modelled exactly one pole-gap long, and the distance between two
-   * crossarms is that gap only when the two poles are level. Over a dip it is
+   * insulators is that gap only when the two poles are level. Over a dip it is
    * longer. One number fixes it, and it is a *stretch* rather than a scale
-   * because the wire must get longer without getting thicker.
+   * because a wire must get longer without getting thicker.
    */
   sStretch: Float32Array;
+  /**
+   * How far above the ground the thing's origin sits.
+   *
+   * Everything scattered stands *on* the ground, so this is zero for all of it
+   * bar the wires — and the wires need it because they do not start at ground
+   * level, they start on an insulator. Lifting the origin to the attachment point
+   * is what makes the rotation exact: with the wires modelled at the origin there
+   * is no vertical offset left for the aiming rotation to swing about, so the far
+   * end lands on the far insulator at every angle rather than missing by more the
+   * steeper the ground.
+   */
+  sLift: Float32Array;
   sx: Float32Array;
   sz: Float32Array;
   sModel: Uint8Array;
@@ -983,6 +1002,21 @@ export class Renderer {
   private drift = 0;
   /** How overcast it is, 0..1. Read by the client for the sky. */
   cloud = 0.5;
+
+  /**
+   * How much of the opening's cloud is still in front of everything, 1 down to 0.
+   *
+   * The intro's veil, and it lives on the renderer rather than in the DOM because
+   * the thing it has to hide is the *scene*: a translucent sheet in the interface
+   * layer would sit over the interface too, and the whole point of the last three
+   * seconds is that the furniture slides in over clear country.
+   *
+   * It drives the existing cloud deck to full and the haze with it, which is why
+   * this is nine lines rather than a new render pass. The deck is already a screen
+   * of cloud drawn above the district; being *inside* it is what the top of the
+   * descent is, and the deck is at its most convincing exactly there.
+   */
+  introVeil = 0;
   /** How hard it is coming down, 0..1. Read by the client for the sound. */
   rain = 0;
   /** True when what is falling is snow. Winter turns rain into snow. */
@@ -1539,15 +1573,33 @@ export class Renderer {
       if (counts[mi] >= batch.instanceMatrix.count) continue;
       const x = src.sx[i];
       const z = src.sz[i];
-      this.tmp.position.set(x, groundHeightAt(src, x, z), z);
+      this.tmp.position.set(
+        x, groundHeightAt(src, x, z) + src.sLift[i], z,
+      );
       /*
-       * Yaw then pitch, and the order matters: `rotation` is applied XYZ, so a
-       * pitch written into X would be taken *before* the yaw and would tilt the
-       * span north rather than along its own run. Euler order 'YXZ' turns it the
-       * right way round — swing to face the next pole, then lift the far end.
+       * Yaw, then pitch, composed as quaternions rather than as an Euler triple.
+       *
+       * The Euler version of this was wrong in a way that reads as correct: the
+       * pitch went into `rotation.x`, and a rotation about X tilts a thing in the
+       * YZ plane — it rolls the span sideways and does not lift the far end at
+       * all. Lifting the +X end is a rotation about **Z**, and it has to happen
+       * *inside* the yaw or it tilts toward north instead of along the run.
+       *
+       * Written with two axis-angle quaternions multiplied in that order there is
+       * nothing left to get wrong: `Ry(yaw) * Rz(pitch)` applied to +X gives
+       * `(cos p cos y, sin p, -cos p sin y)`, which is exactly the direction the
+       * layout solved for. Euler order conventions are a place to make this
+       * mistake twice.
        */
-      this.tmp.rotation.order = 'YXZ';
-      this.tmp.rotation.set(src.sPitch[i], src.sRot[i] * Math.PI * 2, 0);
+      const pitch = src.sPitch[i];
+      if (pitch !== 0) {
+        this.tmpQ.setFromAxisAngle(UP, src.sRot[i] * Math.PI * 2);
+        this.tmpQ2.setFromAxisAngle(ROLL, pitch);
+        this.tmpQ.multiply(this.tmpQ2);
+        this.tmp.quaternion.copy(this.tmpQ);
+      } else {
+        this.tmp.rotation.set(0, src.sRot[i] * Math.PI * 2, 0);
+      }
       const k = src.sScale[i];
       this.tmp.scale.set(k * src.sStretch[i], k, k);
       this.tmp.updateMatrix();
@@ -1555,11 +1607,9 @@ export class Renderer {
       batch.setMatrixAt(at, this.tmp.matrix);
       this.scatterLamps[mi]?.setMatrixAt(at, this.tmp.matrix);
     }
-    // Everything else in this file uses an unscaled `tmp` on the default euler
-    // order, so put both back or a building drawn after a tree comes out
-    // tree-sized and facing the wrong way.
+    // Everything else in this file uses an unscaled `tmp`, so put it back or a
+    // building drawn after a tree comes out tree-sized.
     this.tmp.scale.set(1, 1, 1);
-    this.tmp.rotation.order = 'XYZ';
 
     for (let mi = 0; mi < this.scatterBatches.length; mi++) {
       const batch = this.scatterBatches[mi];
@@ -1576,6 +1626,11 @@ export class Renderer {
   }
 
   private scatterKey = '';
+
+  /** Scratch, for composing the two rotations a pitched span needs. */
+  private readonly tmpQ = new Quaternion();
+
+  private readonly tmpQ2 = new Quaternion();
   /*
    * Nothing here needs redoing when night falls: the lamp meshes hold the same
    * matrices as the bodies for as long as the bodies do, and how lit they are is
@@ -2168,10 +2223,22 @@ export class Renderer {
      * the frame that is purely for looking at, so it is the first thing a
      * machine that is struggling should stop drawing.
      */
+    /*
+     * The deck, and the opening rides it.
+     *
+     * `introVeil` forces the coverage to full and holds the drawing on even at
+     * reduced detail: the descent is the one moment where the cloud is not
+     * decoration but the subject, so a machine that would otherwise skip it has to
+     * draw it anyway. It goes back to the weather's own coverage the moment the
+     * veil reaches zero, with nothing to reset.
+     */
     this.clouds.update(
       this.camX, this.camZ, this.tilesAcross,
-      CLOUD_DRIFT.value, this.mood.haze, this.night,
-      this.vfx === 'high' ? 1 : 0,
+      CLOUD_DRIFT.value,
+      this.mood.haze,
+      this.night,
+      this.introVeil > 0.01 ? 1 : (this.vfx === 'high' ? 1 : 0),
+      this.introVeil,
     );
 
     if (this.vfx === 'off' || !this.composed) {

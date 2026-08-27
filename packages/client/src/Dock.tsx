@@ -29,9 +29,18 @@ export interface DockItem {
   onClick: () => void;
 }
 
-export function Dock({ items }: { items: DockItem[] }): JSX.Element {
+export function Dock({
+  items, fresh = false,
+}: { items: DockItem[]; fresh?: boolean }): JSX.Element {
   return (
-    <div className="dock">
+    /*
+     * `fresh` for the opening's arrival, and only for it.
+     *
+     * The dock slides up out of the bottom of the frame once, at the end of the
+     * intro, and then never again — so the class is passed in rather than kept
+     * here: the dock has no idea a game has just started and should not have to.
+     */
+    <div className={`dock${fresh ? ' dock-in' : ''}`}>
       {items.map((it) => (
         <button
           key={it.key}

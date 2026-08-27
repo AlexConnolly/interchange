@@ -40,8 +40,9 @@ import { Owned } from './Owned.tsx';
 import { Contracts } from './Contracts.tsx';
 import { Market } from './Market.tsx';
 import { Land } from './Land.tsx';
-import { powerLines, SPAN } from './powerlines.ts';
-import { PLOT, HEIGHT_TO_WORLD, type RGB } from '@interchange/render';
+import { powerLines, SPAN, WIRE_H } from './powerlines.ts';
+import { introAt, INTRO_LENGTH, INTRO_ACROSS, type Intro } from './intro.ts';
+import { PLOT, groundHeightAt, type RGB } from '@interchange/render';
 
 import { Status } from './Status.tsx';
 import { Driver } from './Driver.tsx';
@@ -455,6 +456,29 @@ export function App(): JSX.Element {
   const [buildAt, setBuildAt] = useState<'closed' | 'cats' | 'roads' | 'works'>('closed');
   /** Which business is in hand, as an index into the industry content. */
   const [placeDef, setPlaceDef] = useState(-1);
+  /*
+   * The opening, which is a picture rather than a mode.
+   *
+   * Only the three things React has to know about are state: whether to say we
+   * are loading, whether the interface may show, and whether it is over. The
+   * camera and the cloud are written straight to the renderer from the frame loop
+   * — sixty re-renders a second of the whole tree to animate a descent is the
+   * mistake this client has already made twice.
+   */
+  const [intro, setIntro] = useState<{ label: boolean; ui: boolean; done: boolean }>(
+    { label: true, ui: false, done: false },
+  );
+  /** The same, for the handlers, which must not close over a stale copy. */
+  const introDone = useRef(false);
+  /*
+   * And the last values pushed into state, so the frame loop can tell whether
+   * anything actually changed. Without it the loop would call `setIntro` sixty
+   * times a second with an equal object and re-render the tree every frame — which
+   * is the exact cost this design exists to avoid.
+   */
+  const introRef = useRef<Intro | { label: boolean; ui: boolean; done: boolean }>(
+    { label: true, ui: false, done: false },
+  );
   // So the tray can animate out rather than vanish, the same way panels do.
   /* Whether the *road tray* is up, which is not the same as whether a tool is in
      hand: the land tool has its own panel and no tray. */
@@ -473,6 +497,7 @@ export function App(): JSX.Element {
   const hoverRef = useRef(-1);
   toolRef.current = tool;
   placeDefRef.current = placeDef;
+  introDone.current = intro.done;
   buildRef.current = buildAt;
   /**
    * How fast the day runs. One, two or four.
@@ -714,6 +739,7 @@ export function App(): JSX.Element {
       scatterCount: 0,
       sPitch: new Float32Array(SCATTER_MAX),
       sStretch: new Float32Array(SCATTER_MAX).fill(1),
+      sLift: new Float32Array(SCATTER_MAX),
       sx: new Float32Array(SCATTER_MAX),
       sz: new Float32Array(SCATTER_MAX),
       sModel: new Uint8Array(SCATTER_MAX),
@@ -1065,6 +1091,8 @@ export function App(): JSX.Element {
       pitch?: number;
       /** And how much longer it has to be to get there. */
       stretch?: number;
+      /** And how far off the ground it starts, for one that starts on a pole. */
+      lift?: number;
       /** When it is there at all. Absent means always. */
       season?: (f: { leaf: number; spring: number; autumn: number }) => boolean;
     }
@@ -1492,13 +1520,12 @@ export function App(): JSX.Element {
        *
        * A Y-rotation of theta sends +X to `(cos theta, 0, -sin theta)` — the Z is
        * negated — so pointing a model along a world direction `(dx, dz)` wants
-       * `theta = atan2(-dz, dx)`, which is minus the bearing. The same quarter-turn
-       * family of mistakes that once drew every lorry in the game broadside to its
-       * own direction of travel, and here it silently mirrored every span in Z so
-       * the wires set off away from the pole they were supposed to reach.
+       * `theta = atan2(-dz, dx)`, which is minus the bearing. The same
+       * quarter-turn family of mistakes that once drew every lorry in the game
+       * broadside to its own direction of travel.
        *
        * `run` stays a plain world bearing, because that is what is testable and
-       * what the layout means; the conversion lives here, next to the renderer
+       * what the layout means; the conversion lives here, beside the renderer
        * that needs it.
        */
       const yaw = q.run < 0 ? 0 : (1 - q.run) % 1;
@@ -1511,32 +1538,49 @@ export function App(): JSX.Element {
       });
       if (q.run >= 0 && q.toX !== undefined && q.toZ !== undefined) {
         /*
-         * And the wire is aimed at the far crossarm rather than laid flat.
+         * The wire, aimed exactly.
          *
-         * Both poles stand on their own ground, and the district is not flat, so
-         * the far end of a level span hangs in the air above or below the pole it
-         * is meant to reach. The pitch is the angle to the other crossarm and the
-         * stretch is how much longer the wire has to be to get there — computed
-         * here because this is the only place that knows both ground heights.
+         * "We need an EXACT calculation distance and angle." Right — and the
+         * exactness comes from the *model* being built for it rather than from
+         * arithmetic here being cleverer. `span()` puts its wires at the model
+         * origin running along +X, so this reduces to: put the origin on this
+         * pole's insulator, aim +X at the next pole's insulator, and stretch to
+         * the distance between them. Three numbers, no fudge, and the far end
+         * cannot miss because nothing is being corrected for.
+         *
+         * `groundHeightAt` rather than the raw heightmap value, and this is the
+         * subtle half. The scatter layer places every instance at
+         * `groundHeightAt(x, z)` — a bilinear sample of the four corners — so
+         * that is the height the poles are actually standing at. Reading
+         * `terrain.height[tile]` here instead would compute the rise between two
+         * heights that neither pole is at, and the wires would miss by the
+         * interpolation difference: small, everywhere, and exactly the sort of
+         * near-miss that reads as "often overlapping".
          */
-        const ay = world.terrain.height[
-          Math.min(DISTRICT * DISTRICT - 1, Math.max(0,
-            Math.floor(q.z) * DISTRICT + Math.floor(q.x)))
-        ];
-        const by = world.terrain.height[
-          Math.min(DISTRICT * DISTRICT - 1, Math.max(0,
-            Math.floor(q.toZ) * DISTRICT + Math.floor(q.toX)))
-        ];
-        const rise = HEIGHT_TO_WORLD(by) - HEIGHT_TO_WORLD(ay);
-        const flat = Math.hypot(q.toX - q.x, q.toZ - q.z);
+        const ay = groundHeightAt(src, q.x, q.z) + WIRE_H;
+        const by = groundHeightAt(src, q.toX, q.toZ) + WIRE_H;
+        const dx = q.toX - q.x;
+        const dz = q.toZ - q.z;
+        const flat = Math.hypot(dx, dz);
+        const rise = by - ay;
+        const reach = Math.hypot(flat, rise);
         trees.push({
           x: q.x,
           z: q.z,
           model: TREE_MODELS.length + PROP_SPAN,
           rot: yaw,
           scale: 1,
-          pitch: Math.atan2(rise, flat),
-          stretch: Math.hypot(flat, rise) / SPAN,
+          /*
+           * `asin(rise / reach)`, which is the angle whose sine is the rise over
+           * the hypotenuse — and it is `asin` rather than `atan2` because of how
+           * the two rotations compose: `Ry(yaw) * Rz(pitch)` sends +X to
+           * `(cos p cos y, sin p, -cos p sin y)`, so the Y component *is*
+           * `sin p`. Solving for the pitch from the vertical component is the
+           * whole derivation.
+           */
+          pitch: reach > 1e-6 ? Math.asin(rise / reach) : 0,
+          stretch: reach / SPAN,
+          lift: WIRE_H,
         });
       }
     }
@@ -1744,6 +1788,11 @@ export function App(): JSX.Element {
      * the point of the mechanic — but not so wide that the roads become threads,
      * which 2.4x did.
      */
+    /*
+     * Where the descent is aiming. The intro starts far outside this and comes
+     * down to it; without an intro this is simply where the game opens.
+     */
+    let openingAcross = TILES_ACROSS_OPENING;
     renderer.tilesAcross = TILES_ACROSS_OPENING;
     /*
      * `?across=` to force the zoom, in tiles across the frame.
@@ -1756,7 +1805,21 @@ export function App(): JSX.Element {
     const askedAcross = Number(params.get('across'));
     if (params.has('across') && Number.isFinite(askedAcross)) {
       renderer.tilesAcross = Math.max(14, Math.min(70, askedAcross));
+      openingAcross = renderer.tilesAcross;
     }
+    /*
+     * `?intro=0` to skip it, which is not a convenience — it is what makes the
+     * game photographable. Every screenshot tool in `packages/tools` opens the
+     * page, waits, and shoots; with a ten-second cinematic in front of it, half of
+     * them would be photographing cloud. The skip is off by default and on for
+     * anything automated.
+     */
+    const wantsIntro = params.get('intro') !== '0';
+    let introClock = wantsIntro ? 0 : INTRO_LENGTH;
+    /** The frame timestamp the opening began on. -1 until the first frame. */
+    let introStart = -1;
+    if (wantsIntro) renderer.tilesAcross = INTRO_ACROSS;
+    else setIntro({ label: false, ui: true, done: true });
 
     /*
      * The fleet, straight out of the art pipeline.
@@ -2006,6 +2069,7 @@ export function App(): JSX.Element {
     };
 
     const down = (e: PointerEvent): void => {
+      if (!introDone.current) return;
       live.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (live.size >= 2) {
         // Second finger: stop panning and start pinching.
@@ -2193,6 +2257,9 @@ export function App(): JSX.Element {
     };
     const wheel = (e: WheelEvent): void => {
       e.preventDefault();
+      // Not while the opening is running: the descent owns the camera, and a wheel
+      // event fighting it would be two things animating one number.
+      if (!introDone.current) return;
       const was = renderer.tilesAcross;
       const next = was * (e.deltaY > 0 ? 1.12 : 1 / 1.12);
       // Bounded so a lorry never becomes unreadable, which is the number the
@@ -2245,6 +2312,7 @@ export function App(): JSX.Element {
      */
     const held = new Set<string>();
     const keyDown = (e: KeyboardEvent): void => {
+      if (!introDone.current) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const k = e.key.toLowerCase();
       if (PAN_KEYS.has(k)) {
@@ -2295,6 +2363,7 @@ export function App(): JSX.Element {
     // needs a different gesture to leave than to enter is a menu people get
     // stuck in.
     const onKey = (e: KeyboardEvent): void => {
+      if (!introDone.current) return;
       if (e.key !== 'Escape') return;
       e.preventDefault();
       /*
@@ -2389,6 +2458,45 @@ export function App(): JSX.Element {
     const body = (now: number): void => {
       const dt = Math.min(0.25, (now - last) / 1000);
       last = now;
+
+      /*
+       * The opening, if it is still running.
+       *
+       * The camera and the veil are written straight to the renderer here rather
+       * than held in React state, because they change every frame and a descent
+       * animated through re-renders would re-render the whole tree sixty times a
+       * second. Only the three facts the interface needs — the label, whether the
+       * furniture may show, and whether input is allowed — go into state, and each
+       * of them changes exactly once.
+       *
+       * Off the **wall clock**, not off accumulated `dt`, and that distinction is
+       * the difference between a ten-second opening and a thirteen-second one.
+       * `dt` is clamped at a quarter of a second — rightly, for everything else —
+       * so a machine running at four frames a second accumulates one second of
+       * simulated time per real second and anything slower loses time it never
+       * gets back. Measured in the headless browser at about three frames a
+       * second, "Loading game" was still up at seven and a half real seconds
+       * against a four-second budget.
+       *
+       * Which is the honest reading anyway: the intro is a fixed ten seconds of a
+       * player's life, and it should be exactly that on a slow machine as on a
+       * fast one. A slow machine simply sees fewer frames of the descent, which is
+       * the correct thing for it to lose.
+       */
+      if (introClock < INTRO_LENGTH) {
+        if (introStart < 0) introStart = now;
+        introClock = (now - introStart) / 1000;
+        const at = introAt(introClock, openingAcross);
+        renderer.tilesAcross = at.across;
+        renderer.introVeil = at.veil;
+        fit();
+        if (at.label !== introRef.current.label
+          || at.ui !== introRef.current.ui
+          || at.done !== introRef.current.done) {
+          introRef.current = { label: at.label, ui: at.ui, done: at.done };
+          setIntro(introRef.current);
+        }
+      }
 
       /*
        * Keyboard panning, with a bit of weight to it.
@@ -2771,6 +2879,7 @@ export function App(): JSX.Element {
          */
         src.sPitch[sn] = q.pitch ?? 0;
         src.sStretch[sn] = q.stretch ?? 1;
+        src.sLift[sn] = q.lift ?? 0;
         sn++;
       }
       src.scatterCount = sn;
@@ -3188,7 +3297,13 @@ export function App(): JSX.Element {
         + `${tool === 'none' ? '' : ' tool-held'}`}
     >
       <canvas ref={canvasRef} className="world" />
-      {live && (
+      {/*
+        * Not during the opening. A marker is interface, and the descent should be
+        * country — a dozen labelled pins over a district seen from four thousand
+        * feet is a map, and the whole point of coming down through the cloud is
+        * that you are arriving somewhere rather than opening a document.
+        */}
+      {live && intro.ui && (
         <Markers
           world={live.world}
           renderer={live.renderer}
@@ -3458,8 +3573,22 @@ export function App(): JSX.Element {
           onResume={() => setPaused(false)}
         />
       )}
-      <div className="hud">
-        {live && (
+      {/*
+        * "Loading game...", for the first four seconds.
+        *
+        * Over the cloud rather than over the district, because for those seconds
+        * there *is* no district to obscure — which is the whole reason the opening
+        * is shaped this way. It leaves before the descent ends, so the last thing
+        * you see before the interface arrives is only countryside.
+        */}
+      {intro.label && (
+        <div className="loading">
+          <span className="loading-word">Loading game</span>
+          <span className="loading-dots"><i /><i /><i /></span>
+        </div>
+      )}
+      <div className={`hud${intro.ui && !intro.done ? ' hud-in' : ''}`}>
+        {live && intro.ui && (
           <Status
             cash={hud.cash}
             date={hud.date}
@@ -3470,8 +3599,9 @@ export function App(): JSX.Element {
           />
         )}
       </div>
-      {live && (
+      {live && intro.ui && (
         <Dock
+          fresh={!intro.done}
           items={[
             {
               key: 'owned',

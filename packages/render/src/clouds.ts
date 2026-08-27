@@ -79,6 +79,16 @@ export interface Clouds {
     camX: number, camZ: number, tilesAcross: number,
     drift: readonly [number, number], haze: readonly [number, number, number],
     night: number, level: number,
+    /**
+     * The opening's veil, 1 down to 0, which overrides coverage entirely.
+     *
+     * The deck's own coverage is a function of zoom, and at the top of the intro's
+     * descent that already reads as full — but "already reads as full" is not the
+     * same as "is opaque", and the first three seconds have to hide a district that
+     * is still loading. So the veil takes over the amount rather than adding to it,
+     * and the deck goes back to the weather's own answer the moment it is zero.
+     */
+    veil?: number,
   ): void;
   dispose(): void;
 }
@@ -227,9 +237,12 @@ void main() {
   const shade = new Color();
 
   return {
-    update(camX, camZ, tilesAcross, drift, haze, night, level): void {
+    update(camX, camZ, tilesAcross, drift, haze, night, level, veil = 0): void {
       const zoom = (tilesAcross - FROM_ACROSS) / (TO_ACROSS - FROM_ACROSS);
-      const amount = Math.max(0, Math.min(1, zoom)) * MOST * level;
+      const amount = Math.max(
+        Math.max(0, Math.min(1, zoom)) * MOST * level,
+        Math.max(0, Math.min(1, veil)),
+      );
       if (amount <= 0.002) {
         mesh.visible = false;
         return;
