@@ -127,7 +127,12 @@ export function Inbox({
 
   if (showing) {
     return (
-      <div className="bubble fixed">
+      /*
+       * `reading` for the extra height. A list is a thing you scan and a letter is
+       * a thing you read, and the panel that suits the first is too short for the
+       * second — see the note on `.bubble.fixed.reading`.
+       */
+      <div className="bubble fixed reading">
         <div className="sheet-head">
           <button
             className="x"

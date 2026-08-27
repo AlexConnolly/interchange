@@ -274,10 +274,12 @@ export class Advisor {
     this.read.add(id);
   }
 
-  /** Opening the inbox does *not* read everything: see `Inbox.tsx` for why. */
-  markAllRead(): void {
-    for (const l of this.letters) this.read.add(l.id);
-  }
+  /*
+   * There is deliberately no `markAllRead`. It was written, went unused, and is
+   * gone — which is the right end for it: the dot means "there is something here
+   * you have not seen", and a method that clears it wholesale exists only to make
+   * that a lie.
+   */
 }
 
 /**

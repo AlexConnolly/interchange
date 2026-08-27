@@ -31,8 +31,24 @@ file nobody can ever safely replace or defend.
 | `ui-open.mp3` | A book being opened. A panel appearing. Mono, 0.40 s | *Book Opening*, `Soumages` |
 | `ui-close.mp3` | And shut again. Mono, 0.17 s | *Book Closing* (Read, Library, Book), `freesound_community` |
 | `ui-confirm.mp3` | A purchase going through. Mono, 1 s | *Positive Notification*, `Universfield` |
+| `bird.mp3` | A chaffinch, for a letter arriving. Mono, 1.28 s | *Chaffinch March 2011*, Adam Clark — see below |
 | `music-summer.mp3` | Background music, warm half of the year. Looped | *Settled in F* |
 | `music-winter.mp3` | Background music, cold half. Looped | *Room of Ashen Notes* |
+
+### The bird is not from Pixabay
+
+`bird.mp3` came from the **Internet Archive** rather than Pixabay, under
+[CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) — *Chaffinch March
+2011* by Adam Clark, `archive.org/details/ChaffinchMarch2011`.
+
+Sourcing it took some looking, and the reason is worth recording. Wikimedia
+Commons has a great deal of birdsong and almost none of it is usable here: of 123
+recordings checked across eight searches, **zero** were CC0 — they are
+overwhelmingly CC BY-SA, because most of them are Xeno-canto uploads. Share-alike
+is a licensing decision about the whole project rather than about one sound
+effect, so it was not mine to make. The Archive's CC0 pool had a chaffinch in it,
+which is also simply the right bird: it is the one you actually hear from a
+hedgerow in an English March, which is the month this game opens in.
 
 ## How they were prepared
 
@@ -84,6 +100,24 @@ normalised to 0 dBFS is still far too loud after that.
 `art/`-style rebuild script: the ffmpeg pipeline that produced these lives in
 the scratchpad rather than the repo, because it ran once. If a clip is replaced,
 the three rules above are what to reproduce.
+
+**The bird, exactly**, since it is the newest and the recipe is short. The source
+is 58 seconds of a chaffinch singing in the open; the phrase used starts at 7.05 s,
+which is where the per-half-second RMS of the whole recording peaks *and* where the
+quietest run-in was — both measured rather than chosen by ear:
+
+    ffmpeg -ss 7.05 -t 1.28 -i chaffinch-raw.mp3       -af "highpass=f=420,afade=t=in:st=0:d=0.025,afade=t=out:st=1.13:d=0.15,volume=-10.6dB"       -ac 1 -ar 44100 -codec:a libmp3lame -q:a 5 bird.mp3
+
+The high-pass takes out the wind rumble under the recording. The fades are what
+stop a one-shot clicking at either end. The −10.6 dB is not a taste judgement: the
+cut peaks at −1.9 dB and `ui-open.mp3` peaks at −12.5, and this is the difference —
+the bird fires *unprompted*, so it is levelled to the quietest of the one-shots
+rather than the loudest. Result: mean −28.7 dB, peak −11.3 dB, which sits between
+`ui-open` and `ui-confirm`.
+
+A first attempt used `dynaudnorm` and came out at mean −12.1 dB, peak 0.0 dB —
+clipping, and about sixteen decibels louder than everything around it. Normalising
+by a measured gain rather than by an automatic one is the whole lesson.
 
 ## MP3 loops seamlessly in Chrome — measured, not assumed
 

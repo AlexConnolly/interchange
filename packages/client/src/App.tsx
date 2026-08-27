@@ -3242,8 +3242,19 @@ export function App(): JSX.Element {
          * rather than every frame, because a letter that turns up a quarter of a
          * second late is a letter that turned up on time, and the predicates walk
          * the fleet and the sites.
+         *
+         * And not until the opening is over, which is a bug fix rather than a
+         * nicety. The first letter's predicate is `() => true`, so it fired on the
+         * very first hud tick and started its seven-second toast — while the
+         * interface that toast hangs off does not exist until the descent ends at
+         * seven seconds. Measured with the intro held at 7.2, 8.5 and 9.8 seconds:
+         * no toast at any of them. Tom Ashbury's letter was arriving to an empty
+         * room every single time.
+         *
+         * Waiting for the player to have controls is better pacing anyway: the
+         * post comes as you take the wheel, not while you are still in cloud.
          */
-        {
+        if (introDone.current) {
           let stranded = false;
           let holding = false;
           let places = 0;
@@ -3273,6 +3284,19 @@ export function App(): JSX.Element {
           });
           if (fresh.length > 0) {
             setPost((n) => n + 1);
+            /*
+             * A chaffinch, once, however many letters arrived.
+             *
+             * `oneShot` rather than `press`, which exists to be superseded by
+             * whatever a click turned out to mean — nothing superseded this,
+             * because nobody clicked. Flat rather than positional: the post does
+             * not come from a place on the map.
+             *
+             * Quiet on purpose. This is the only sound in the game that fires
+             * unprompted, and a notice louder than the thing you were listening to
+             * is a notice you resent by the fourth one.
+             */
+            sound.oneShot('bird', 0.55);
             /*
              * The last of them gets the toast. More than one letter arriving in the
              * same quarter-second is possible and stacking notices for it would be

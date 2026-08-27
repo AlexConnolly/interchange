@@ -783,6 +783,15 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   min-height: 92px;
   max-height: min(236px, calc(100vh - var(--dock-rise) - 168px));
 }
+/* A letter gets nearly twice that, because reading is the entire point of it.
+ *
+ * Measured: a four-paragraph letter is 371px of content in a 236px box, so the
+ * last thing Tom Ashbury says is below the fold on every letter he writes. A list
+ * wants to be scrollable; a page of prose wants to be *read*, and scrolling a
+ * short letter is the interface asking you to work for it. */
+.bubble.fixed.reading .bubble-body {
+  max-height: min(440px, calc(100vh - var(--dock-rise) - 168px));
+}
 
 /* Taller, and a scrollbar you can look at.
  *

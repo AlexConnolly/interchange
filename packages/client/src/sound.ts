@@ -79,6 +79,18 @@ export const MANIFEST = {
   /** A slightly warmer one for a purchase going through. */
   confirm: 'ui-confirm.mp3',
   /**
+   * A chaffinch, for a letter arriving.
+   *
+   * A bird rather than a chime, and the reason is that this is the one notice in
+   * the game that fires without being asked for. A chime is a machine telling you
+   * something; a bird outside the office window is a thing that happens in a
+   * district, and it can happen while you are watching a lorry without feeling
+   * like an alert. It is also the only sound here that has to work when the player
+   * was not expecting *any* sound, which is why it is levelled to the quietest of
+   * the one-shots rather than the loudest.
+   */
+  bird: 'bird.mp3',
+  /**
    * Music, one track for the warm half of the year and one for the cold.
    *
    * Crossfaded on the *season* rather than switched, because a cut between two
