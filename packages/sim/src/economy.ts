@@ -596,6 +596,7 @@ export const HAUL_BASE = 36000;
  */
 export const SITE_PRICE_SCALE = 8;
 
+
 /**
  * How much further than the direct line a haul may be paid for.
  *

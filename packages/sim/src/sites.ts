@@ -63,6 +63,21 @@ export class SiteTable {
    * initial value means. Nothing else has to special-case them.
    */
   readonly fed = new Uint8Array(MAX_SITES).fill(100);
+  /**
+   * 1 if there is no road this site can be reached from.
+   *
+   * A business needs road access to *work*, not to be built — you may put a
+   * creamery in the middle of your own field and it will stand there doing
+   * nothing until you lay a track to it, which is a decision the game should let
+   * you get wrong. So this is a gate on production rather than a rule about
+   * placement, and it sits beside `powered` and `watered` because it is the same
+   * kind of fact: a thing the site needs from the world around it.
+   *
+   * Recomputed by `World.rebuild`, which is called whenever the road network
+   * changes — so laying the track starts the works, and lifting it stops them,
+   * with nothing having to remember to ask.
+   */
+  readonly stranded = new Uint8Array(MAX_SITES);
   /** Consecutive days below the decline threshold. */
   readonly starvedDays = new Int32Array(MAX_SITES);
   /** Days since mothballing; past the grace period it is dead for good. */
@@ -337,6 +352,16 @@ export function stepSites(
     if (--sites.cycle[s] > 0) continue;
     const def = sites.def[s];
     sites.cycle[s] = r.period[def];
+
+    /*
+     * No road, no work. Before the three networks, because it is not a matter of
+     * degree: a works nobody can drive to does not run at reduced output, it
+     * stands idle. The cycle above has already been reset, so a site that gets
+     * its track laid resumes on the next full cycle rather than instantly, which
+     * is the right way round — building the road is the work, and the work takes
+     * a moment to pay off.
+     */
+    if (sites.stranded[s]) continue;
 
     // Three networks. Each is a percentage; the binding one wins, because a
     // mine with power and no water produces nothing, not two thirds.

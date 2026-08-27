@@ -164,7 +164,9 @@ build one, but the district can, and whether it does is —
 
 ## 4. The world is two nouns
 
-Everything the player owns is one of two things, and nothing is a third thing.
+Everything the player owns is a vehicle, a business, or — since buying land — the
+ground itself. The first two are the ones that *do* anything; see "Land, which is
+the third noun after all" below for why the third earns its place.
 
 **A vehicle.** The unit of measurement for the entire game.
 
@@ -186,6 +188,65 @@ and a lot of bays.
 
 **Vehicles belong to a yard, and can be moved between yards.** A vehicle always
 lives somewhere; being based somewhere is what makes geography matter.
+
+### Land, which is the third noun after all
+
+Two nouns was right for a while and then buying land arrived, and land is
+genuinely a third thing: it produces nothing, consumes nothing and has no bays.
+What it does is let you put the other two nouns **exactly where you want them**,
+and that turns out to be the whole reason it exists.
+
+**The unit is the field.** Not a grid square. The district is already divided
+into enclosed fields with hedges round them — the renderer has been drawing those
+since long before any of this — so a grid laid over them would cut every one in
+half and let you buy half of one field and half of another. A field is what a
+farmer sells and what a hedge encloses, and now it is what changes hands.
+
+**The rule is reach.** A field is for sale if it touches land you already hold or
+has a road on or beside it. That is the entire rule: no board, no charter, no
+approval. Owning land is not a favour the parish does you, and making it one would
+put a second gate in front of the rung the planning board is already the top of.
+
+**The price is by the acre, times the density.** A big field costs more than a
+small one, land at the town gate costs about twice what land out in the hills
+costs, and a field with frontage costs half again — you are buying the approach
+as well as the grass.
+
+### Building a business, rather than buying one
+
+Land is what makes this possible, and this is what makes land worth having.
+
+**The footprint is the business's own footprint.** A distribution centre is four
+tiles across and needs four tiles of your ground; a village shop is one. The
+preview under the cursor is that exact square, green where the click will work and
+red where it will not, because a one-tile marker for a three-tile works would be a
+promise the click could not keep.
+
+**Land plus building costs what buying one costs.** This is the load-bearing
+number in the whole feature. The price of building is the going-concern value of
+one *here*, minus the worth of the ground it stands on — because you bought that
+ground separately and paid the land price for it. Build it and buy the field and
+you have spent, within a few per cent, what the works down the lane would have
+cost.
+
+It lands slightly *above* buying rather than below, and that is deliberate. You
+have to buy a whole field to put a shop on one tile of it. What the difference
+buys is position — a creamery on the lane between your two farms instead of eleven
+tiles the wrong side of a village — and position is worth what the haulage it
+saves is worth, which a player can work out for themselves. Building must not be
+the cheap way in or nobody would ever buy anything again.
+
+**Road access is needed to work, not to build.** You may put a creamery in the
+middle of your own field with no way in, and it will stand there doing nothing:
+no production, no contracts, no deliveries. A warning sits on its map marker and
+across the top of its panel, and it says what to do rather than what is wrong —
+"lay a track to it" rather than "no road access". Lay the track and it starts.
+
+This is the one rule in the feature that can be got wrong, and letting the player
+get it wrong is the point. A game that refused to let you build somewhere silly
+would be teaching by prohibition; one that lets you and then shows you, in amber,
+exactly what it cost, is teaching by consequence — and the fix is one tool and a
+few pounds away.
 
 ### Vehicles, not people
 

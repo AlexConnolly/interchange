@@ -226,6 +226,44 @@ function Pick(): JSX.Element {
  * forgetting an icon shows the fallback rather than crashing — and the fallback
  * is a pound sign, which at least says "a business, with work".
  */
+/**
+ * A brewing copper with its chimney: the brewery.
+ *
+ * A vessel rather than a bottle, because the creamery is already a bottle and two
+ * businesses with the same silhouette in one tray is a tray you have to read
+ * rather than glance at.
+ */
+function Copper(): JSX.Element {
+  return (
+    <>
+      <path d="M6.6 9h10.8l-1.1 10.4a1 1 0 0 1-1 .9H8.7a1 1 0 0 1-1-.9Z" />
+      <rect x="5.8" y="7.3" width="12.4" height="1.9" rx="0.9" />
+      <rect x="14.6" y="3" width="2.2" height="4.4" rx="0.9" />
+      <rect x="8.6" y="12.4" width="6.8" height="1.3" fill="#fff" opacity="0.45" />
+    </>
+  );
+}
+
+/**
+ * A shed with a shutter and a loading bay: the distribution centre.
+ *
+ * The one industry that is nothing but a door. It takes seven cargoes in and
+ * makes nothing, so what it looks like is the place lorries back up to.
+ */
+function Shed(): JSX.Element {
+  return (
+    <>
+      <path d="M2.6 9.4 12 5l9.4 4.4v1.5H2.6Z" />
+      <rect x="4.2" y="11.6" width="15.6" height="8.4" rx="1" />
+      <rect x="8.4" y="14" width="7.2" height="6" fill="#fff" opacity="0.5" />
+      <g fill="#fff" opacity="0.28">
+        <rect x="8.4" y="15.6" width="7.2" height="0.9" />
+        <rect x="8.4" y="17.6" width="7.2" height="0.9" />
+      </g>
+    </>
+  );
+}
+
 const BY_ID: Record<string, () => JSX.Element> = {
   'dairy-farm': Churn,
   'arable-farm': Wheat,
@@ -241,6 +279,8 @@ const BY_ID: Record<string, () => JSX.Element> = {
   'livestock-farm': Beast,
   abattoir: Cleaver,
   'village-shop': Shop,
+  brewery: Copper,
+  'distribution-centre': Shed,
   yard: Lorry,
   track: Track,
   pick: Pick,

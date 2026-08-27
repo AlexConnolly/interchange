@@ -39,7 +39,8 @@ import { Icon } from './Icons.tsx';
 import { Owned, Contracts } from './Owned.tsx';
 import { Market } from './Market.tsx';
 import { Land } from './Land.tsx';
-import { PLOT } from '@interchange/render';
+import { PLOT, type RGB } from '@interchange/render';
+
 import { Status } from './Status.tsx';
 import { Driver } from './Driver.tsx';
 import { Place, type PlaceActions } from './Place.tsx';
@@ -427,17 +428,42 @@ export function App(): JSX.Element {
    * you need on screen while choosing where a road goes is *the district*, and a
    * dialogue over the top of it is the one thing that cannot help.
    */
-  const [tool, setTool] = useState<'none' | 'lay' | 'lift' | 'land'>('none');
+  const [tool, setTool] = useState<'none' | 'lay' | 'lift' | 'land' | 'place'>('none');
+  /*
+   * Which page of the build tray is showing.
+   *
+   * Two levels, because the tray now holds two unrelated kinds of building and a
+   * single flat row of everything would be eleven buttons wide and mean nothing.
+   * `cats` is the choice between them; `roads` and `works` are the things
+   * themselves. Closed is closed.
+   *
+   * Kept apart from `tool` on purpose: the tray is *where you are in the
+   * interface* and the tool is *what is in your hand*, and they change at
+   * different moments. Going back to the categories should not silently drop the
+   * lorry you were about to place, and closing the tray should.
+   */
+  const [buildAt, setBuildAt] = useState<'closed' | 'cats' | 'roads' | 'works'>('closed');
+  /** Which business is in hand, as an index into the industry content. */
+  const [placeDef, setPlaceDef] = useState(-1);
   // So the tray can animate out rather than vanish, the same way panels do.
   /* Whether the *road tray* is up, which is not the same as whether a tool is in
      hand: the land tool has its own panel and no tray. */
-  const [, toolLeaving] = useLeaving(tool, tool === 'lay' || tool === 'lift', 150);
+  /* Whether the build tray is up. It is its own thing now rather than a
+     consequence of holding a tool: you can have the tray open and nothing in
+     hand, which is what the category page *is*. */
+  const [, trayLeaving] = useLeaving(buildAt, buildAt !== 'closed', 150);
   const buildingRef = useRef(false);
   buildingRef.current = building;
-  const toolRef = useRef<'none' | 'lay' | 'lift' | 'land'>('none');
+  const toolRef = useRef<'none' | 'lay' | 'lift' | 'land' | 'place'>('none');
+  /** The business in hand, for the frame loop and the click handler. */
+  const placeDefRef = useRef(-1);
+  /** Which page the tray is on, for the keyboard and right-click handlers. */
+  const buildRef = useRef<'closed' | 'cats' | 'roads' | 'works'>('closed');
   /** The tile under the pointer while a road tool is in hand, or -1. */
   const hoverRef = useRef(-1);
   toolRef.current = tool;
+  placeDefRef.current = placeDef;
+  buildRef.current = buildAt;
   /**
    * How fast the day runs. One, two or four.
    *
@@ -1852,6 +1878,7 @@ export function App(): JSX.Element {
        * client has been bitten by twice.
        */
       hoverRef.current = toolRef.current === 'lay' || toolRef.current === 'lift'
+        || toolRef.current === 'place'
         ? renderer.pick(e.clientX, e.clientY, src)
         : -1;
 
@@ -1919,6 +1946,33 @@ export function App(): JSX.Element {
         const dz = Math.floor(at / DISTRICT) - cz;
         const d = dx * dx + dz * dz;
         if (d < bestD) { bestD = d; found = i; }
+      }
+      if (toolRef.current === 'place') {
+        /*
+         * Building one. The preview and this call ask the *same* question of the
+         * simulation, which is what stops a green square from refusing when
+         * pressed.
+         */
+        const def = placeDefRef.current;
+        const r = def >= 0
+          ? world.placeSite(def, tile)
+          : { ok: false, reason: 'Nothing chosen.', site: -1 };
+        if (r.ok) {
+          // The footprint is now a building site, so whatever the scatter had
+          // standing there goes - same rule as laying a track through a hedge.
+          for (const t of world.footprintTiles(def, tile)) clearScatterAt(t);
+          setNote('');
+          bumpRef.current();
+          setPanel({ k: 'place', site: r.site });
+        } else {
+          setNote(r.reason);
+        }
+        return;
+      }
+      if (toolRef.current === 'land') {
+        // The land panel owns the map while it is up: it lays its own catcher
+        // over the district and the price chips are the only targets.
+        return;
       }
       if (toolRef.current !== 'none') {
         /*
@@ -2057,8 +2111,20 @@ export function App(): JSX.Element {
        * level on the way out, and would leave you still holding the tool behind
        * the menu.
        */
+      /*
+       * Escape steps *out one level* rather than straight to the menu, because
+       * that is what "out of what I am in" means when there are levels: put the
+       * thing in your hand down, then go back to the categories, then shut the
+       * tray, then pause. A key that skipped from holding a creamery to the pause
+       * menu would leave you still holding it behind the veil.
+       */
       if (toolRef.current !== 'none') {
         setTool('none');
+        setNote('');
+        return;
+      }
+      if (buildRef.current !== 'closed') {
+        setBuildAt(buildRef.current === 'cats' ? 'closed' : 'cats');
         setNote('');
         return;
       }
@@ -2076,9 +2142,10 @@ export function App(): JSX.Element {
      * a right-click on the page behaves as the page normally would.
      */
     const onContext = (e: MouseEvent): void => {
-      if (toolRef.current === 'none') return;
+      if (toolRef.current === 'none' && buildRef.current === 'closed') return;
       e.preventDefault();
       setTool('none');
+      setBuildAt('closed');
       setNote('');
     };
     window.addEventListener('contextmenu', onContext);
@@ -2633,6 +2700,37 @@ export function App(): JSX.Element {
             wash: ok ? PLOT.yesWash : PLOT.noWash,
             edge: ok ? PLOT.yesEdge : PLOT.noEdge,
           }], src);
+        } else if (held === 'place' && placeDefRef.current >= 0) {
+          /*
+           * Placing a business: your own ground in blue, and the footprint under
+           * the cursor in green or red.
+           *
+           * Two regions rather than one, and they answer different questions. The
+           * blue is *where you could put something* - the whole of your land, so
+           * the answer to "have I anywhere for this" is on screen before you go
+           * hunting for it. The square is *what would happen here*, at the exact
+           * size of the building, which is the only honest preview: a one-tile
+           * marker for a three-tile works would be a promise the click could not
+           * keep.
+           *
+           * The owned ground is recomputed every frame, which sounds wasteful and
+           * is not - it is a walk over the parcels you hold, and it means buying a
+           * field mid-placement lights it up immediately.
+           */
+          const owned = world.landOwnedTiles();
+          const regions: { tiles: readonly number[]; wash: RGB; edge: RGB }[] = [];
+          if (owned.length > 0) {
+            regions.push({ tiles: owned, wash: PLOT.ownWash, edge: PLOT.ownEdge });
+          }
+          if (hover >= 0) {
+            const ok = world.canPlaceSite(world.player, placeDefRef.current, hover).ok;
+            regions.push({
+              tiles: world.footprintTiles(placeDefRef.current, hover),
+              wash: ok ? PLOT.yesWash : PLOT.noWash,
+              edge: ok ? PLOT.yesEdge : PLOT.noEdge,
+            });
+          }
+          renderer.showPlots(regions, src);
         } else if (held !== 'land') {
           renderer.showPlots([], src);
         }
@@ -2850,7 +2948,21 @@ export function App(): JSX.Element {
   return (
     <div
       className={`app${panelLeaving ? ' panel-leaving' : ''}`
-        + `${pauseLeaving ? ' pause-leaving' : ''}`}
+        + `${pauseLeaving ? ' pause-leaving' : ''}`
+        /*
+         * A tool in hand means the map is the tool's, and *nothing* on it is
+         * selectable. The canvas handler has always said so - "a tool that
+         * sometimes opened a farm instead of laying a road would be a tool
+         * nobody trusted" - and it could not enforce it, because the map markers
+         * are DOM buttons floating over the canvas and take their clicks before
+         * the canvas ever sees them. Measured: with a creamery in hand, a click
+         * meant for a field opened the yard whose marker happened to be under the
+         * pointer.
+         *
+         * On the root rather than on the markers, because the same is true of
+         * every anchored thing over the district and will be true of the next one.
+         */
+        + `${tool === 'none' ? '' : ' tool-held'}`}
     >
       <canvas ref={canvasRef} className="world" />
       {live && (
@@ -2964,59 +3076,118 @@ export function App(): JSX.Element {
         />
       )}
 
-      {(tool === 'lay' || tool === 'lift' || toolLeaving) && (
+      {(buildAt !== 'closed' || trayLeaving) && (
         /*
-         * The tools, in a tray that rises out of the dock.
+         * The build tray: one row above the dock, two pages deep.
          *
-         * Mounted only for the tools it holds, which it was not: the condition
-         * was `tool !== 'none'`, and the land tool is a tool. So opening Land put
-         * an invisible road tray on screen — invisible because the class below
-         * animates it out, present because nothing unmounted it — sitting at
-         * `bottom: 84px; left: 50%`, which is exactly where the land confirmation
-         * panel is. Its ✕ landed on top of "Buy it". Clicking Buy pressed the
-         * close button instead: the tool shut, the panel vanished, no land
-         * changed hands and the field was still for sale. "I just clicked buy on
-         * land and it did nothing."
+         * It was a road tray and nothing else, and roads turned out to be one kind
+         * of building among two. Rather than a second dock item for businesses -
+         * the dock is a budget, not a list - the tray grew a page: press Build and
+         * you choose *what sort* of thing, press that and the same row fills with
+         * the things themselves, with a chevron back to the choice.
          *
-         * Two elements at identical coordinates is the sort of thing that reads
-         * as fine in the source and is invisible in a screenshot, because the
-         * thing on top has nothing to draw.
+         * One row rather than a nested menu because the row is already the right
+         * shape: it is the dock having grown, same glass, same corner radius, same
+         * icon-over-label buttons. Going a level deeper should look like the row
+         * turning a page, which is what the slide does.
          *
-         * It was two text buttons, a sentence and a "Done" in a wide cream
-         * strip — a dialog wearing a toolbar's clothes, and it looked nothing
-         * like the dock two inches below it that does exactly the same job.
-         * Same glass, same corner radius, same icon-over-label buttons, so
-         * pressing Roads reads as the dock *growing a row* rather than as
-         * another piece of furniture arriving.
-         *
-         * And no "Done", because there was never anything to be done with. A
-         * mode you are in until you say otherwise ends the way modes end: an
-         * ✕, Escape, or a right-click on the district — the last being the one
-         * people reach for first, and the only one that needs no aiming.
+         * And no "Done", because there was never anything to be done with. A mode
+         * you are in until you say otherwise ends the way modes end: an X, Escape,
+         * or a right-click on the district - the last being the one people reach
+         * for first, and the only one that needs no aiming.
          */
-        <div className={`tools${tool === 'lay' || tool === 'lift' ? '' : ' tools-leaving'}`}>
-          <button
-            className={`tool-btn ${tool === 'lay' ? 'on' : ''}`}
-            onClick={() => { setTool('lay'); setNote(''); }}
-            title="Lay a mud track on your own land, joining an existing road"
-          >
-            <Icon id="track" size={20} />
-            <span>Track</span>
-          </button>
-          <button
-            className={`tool-btn ${tool === 'lift' ? 'on' : ''}`}
-            onClick={() => { setTool('lift'); setNote(''); }}
-            title="Take up a track you laid"
-          >
-            <Icon id="pick" size={20} />
-            <span>Remove</span>
-          </button>
+        <div className={`tools${buildAt === 'closed' ? ' tools-leaving' : ''}`}>
+          {buildAt !== 'cats' && (
+            /* Back to the categories. On the left, because that is where back is,
+               and it leaves whatever is in hand alone: changing your mind about
+               which page you are reading is not changing your mind about the
+               creamery. */
+            <button
+              className="tool-back"
+              onClick={() => setBuildAt('cats')}
+              aria-label="Back to what you can build"
+              title="Back"
+            >&lsaquo;</button>
+          )}
+          {/*
+            * Keyed by the page, so React replaces the row rather than editing it
+            * and the slide runs. Without the key the same DOM element would have
+            * its children swapped, the animation would not restart, and the page
+            * would change with no motion at all.
+            */}
+          <div className={`tool-page page-${buildAt}`} key={buildAt}>
+            {buildAt === 'cats' && (
+              <>
+                <button
+                  className={`tool-btn ${tool === 'lay' || tool === 'lift' ? 'on' : ''}`}
+                  onClick={() => { setBuildAt('roads'); setTool('lay'); setNote(''); }}
+                  title="Lay and lift farm tracks on your own land"
+                >
+                  <Icon id="track" size={20} />
+                  <span>Roads</span>
+                </button>
+                <button
+                  className={`tool-btn ${tool === 'place' ? 'on' : ''}`}
+                  onClick={() => { setBuildAt('works'); setTool('none'); setNote(''); }}
+                  title="Build a business on land you own"
+                >
+                  <Icon id="creamery" size={20} />
+                  <span>Business</span>
+                </button>
+              </>
+            )}
+            {buildAt === 'roads' && (
+              <>
+                <button
+                  className={`tool-btn ${tool === 'lay' ? 'on' : ''}`}
+                  onClick={() => { setTool('lay'); setNote(''); }}
+                  title="Lay a mud track on your own land, joining an existing road"
+                >
+                  <Icon id="track" size={20} />
+                  <span>Track</span>
+                </button>
+                <button
+                  className={`tool-btn ${tool === 'lift' ? 'on' : ''}`}
+                  onClick={() => { setTool('lift'); setNote(''); }}
+                  title="Take up a track you laid"
+                >
+                  <Icon id="pick" size={20} />
+                  <span>Remove</span>
+                </button>
+              </>
+            )}
+            {buildAt === 'works' && live && (
+              /*
+               * Every business, and the row scrolls rather than wrapping.
+               *
+               * Sixteen of them will not fit across the district and a grid of
+               * sixteen tiles would be a catalogue rather than a tool row. A strip
+               * that scrolls keeps the tray one row high, which is what makes it
+               * read as the dock having grown rather than as a panel arriving.
+               */
+              live.world.content.industries.map((def, i) => (
+                <button
+                  key={def.id}
+                  className={`tool-btn ${tool === 'place' && placeDef === i ? 'on' : ''}`}
+                  onClick={() => {
+                    setPlaceDef(i);
+                    setTool('place');
+                    setNote('');
+                  }}
+                  title={`${def.name} - ${def.footprint} by ${def.footprint} tiles`}
+                >
+                  <Icon id={def.id} size={20} />
+                  <span>{def.name}</span>
+                </button>
+              ))
+            )}
+          </div>
           <span className="tool-rule" />
           <button
             className="tool-x"
-            onClick={() => { setTool('none'); setNote(''); }}
-            aria-label="Put the tool down"
-            title="Put the tool down (Esc, or right-click)"
+            onClick={() => { setBuildAt('closed'); setTool('none'); setNote(''); }}
+            aria-label="Close the build tray"
+            title="Close (Esc, or right-click)"
           >&times;</button>
         </div>
       )}
@@ -3125,42 +3296,54 @@ export function App(): JSX.Element {
                 setPanel({ k: 'none' });
                 setBuilding(false);
                 setNote('');
+                // The build tray goes with it, for the same reason Build puts the
+                // land tool down: one mode at a time.
+                setBuildAt('closed');
                 setTool(tool === 'land' ? 'none' : 'land');
               },
             },
             /*
-             * Roads, which is a *tool* rather than a screen.
+             * Build, which is a *tool* rather than a screen.
              *
              * The one dock item that does not open a panel over the district,
-             * because what you need on screen while deciding where a road goes is
-             * the district. Pressing it puts marks on every tile you may work on
-             * and turns the map into the interface; pressing it again puts the map
-             * back. That is also why it can afford a permanent slot where "build a
-             * depot" could not: a depot is three clicks in a whole game, and a
-             * road tool is something you come back to every time you buy a field.
+             * because what you need on screen while deciding where a thing goes is
+             * the place it is going. It was "Roads" and it held one kind of
+             * building; it holds two now, and the tray it opens is where the
+             * choosing happens rather than here - the dock is a budget of eight
+             * controls, and spending two of them on "roads" and "businesses"
+             * separately would be spending them on the same idea twice.
              */
-            {
-              key: 'roads',
-              label: 'Roads',
-              icon: 'terminal',
-              // Not `tool !== 'none'`: the land tool is also a tool, and lighting
-              // Roads up while somebody is buying a field says the wrong thing.
-              on: tool === 'lay' || tool === 'lift',
+            {              key: 'build',
+              label: 'Build',
+              icon: 'track',
+              // The tray being open, not a tool being in hand: you can be on the
+              // category page with nothing selected and the dock should still show
+              // where you are.
+              on: buildAt !== 'closed',
               onClick: () => {
                 setPanel({ k: 'none' });
                 setBuilding(false);
                 setNote('');
                 /*
-                 * Switch to the road tool, or off if it is already in hand.
-                 *
-                 * It used to read `tool === 'none' ? 'lay' : 'none'`, which was
-                 * right while roads were the only tool and became a bug the moment
-                 * land arrived: pressing Roads with the land tool in hand took the
-                 * "already busy" branch and turned *everything* off, so the dock
-                 * went dark and nothing was selected. A dock button should always
-                 * be able to say "this one now".
+                 * Open on the categories, or shut. A dock button should always be
+                 * able to say "this one now" - the version of this that read
+                 * `tool === 'none' ? ... : 'none'` turned *everything* off when
+                 * pressed with another tool in hand, and the dock went dark.
                  */
-                setTool(tool === 'lay' || tool === 'lift' ? 'none' : 'lay');
+                if (buildAt === 'closed') {
+                  setBuildAt('cats');
+                  /*
+                   * And nothing in hand, because the category page *is* nothing in
+                   * hand. Without this, pressing Build while buying land opened the
+                   * tray on top of the land panel and left the land tool live -
+                   * two tools at once, and the map taking clicks for the wrong
+                   * one. A control that changes mode has to end every other mode.
+                   */
+                  setTool('none');
+                } else {
+                  setBuildAt('closed');
+                  setTool('none');
+                }
               },
             },
             /*

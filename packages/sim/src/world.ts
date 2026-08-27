@@ -11,6 +11,7 @@
 
 import {
   ACCEL, AUTHORITY, CELLS_PER_TILE, Control, DIR_BIT, DIR_DX, DIR_DY,
+  SITE_LEVEL_PER_TILE,
   DIR_OPPOSITE, FLOW_WINDOW, HASH_INTERVAL, MAX_COMPANIES, MAX_VEHICLES,
   MAX_NODES, MODE_COUNT, MODE_NAMES, Mode, PATH_LATENCY_TICKS, SPEED_STEPS, START_YEAR,
   TICKS_PER_DAY, TICKS_PER_YEAR, DAYS_PER_MONTH, DAYS_PER_YEAR, ECONOMY_SCALE, ECOMMERCE_ERA, ECOMMERCE_SHIFT, LOAD_PATIENCE_DAYS, LOAD_PATIENCE_SHARE, CONTAINER_ERA, CONTAINER_TRANSFER_GAIN, PUBLIC_STANDARD, ENTRANT_CAPITAL, DAYS_PER_WEEK,
@@ -683,6 +684,25 @@ export class World {
     // `contractPerHour`: it is an A* the interface asks for dozens of times a
     // second, and it is only valid until one of those two changes.
     this.perHourCache.clear();
+    /*
+     * Where each site is reached from, and whether it is reached at all.
+     *
+     * Here rather than at founding, because it is a fact about the *road network*
+     * and the road network changes: a works you built in the middle of your own
+     * field starts working the moment you lay the track to it, and stops if you
+     * take the track up. `rebuild` is called on every road change, so putting it
+     * here means nothing else has to remember to ask.
+     *
+     * The site's own tile is tried first, which is what keeps every generated
+     * business exactly where it was - measured, all twenty-one of them stand on a
+     * road tile, because worldgen puts them there. Only a site the player placed
+     * off-road ever falls through to the search.
+     */
+    for (let s = 0; s < this.sites.count; s++) {
+      const found = this.accessRoadFor(this.sites.def[s], this.sites.tile[s]);
+      this.siteAccessTile[s] = found === NONE ? this.sites.tile[s] : found;
+      this.sites.stranded[s] = found === NONE ? 1 : 0;
+    }
     // Anywhere a service can stop has to be a graph node on every mode that
     // reaches it, or a siding laid past a colliery is traced straight through
     // and the colliery is invisible to the railway.
@@ -3540,6 +3560,286 @@ export class World {
    * town is not, and that is what stops the player buying their way into the
    * middle of the district on the first afternoon.
    */
+  /**
+   * How many tiles across a business is.
+   *
+   * The content has carried this since the beginning and nothing used it for
+   * anything but drawing. It is the placement unit now: "the footprint of it
+   * should be equal to the size of the business footprint", which is the honest
+   * rule - a distribution centre is four tiles across and should need four tiles
+   * of your land, not the single square a village shop needs.
+   */
+  footprintOf(defIndex: number): number {
+    return Math.max(1, this.content.industries[defIndex]?.footprint ?? 1);
+  }
+
+  /**
+   * The tiles a business would stand on if its north-west corner were here.
+   *
+   * Corner-anchored rather than centred, because an even footprint has no centre
+   * tile and a rule that works for three and lies for four is worse than one
+   * rule. The tile under the cursor is the corner and the square grows down and
+   * right of it - which also keeps the preview honest, since the player is
+   * pointing at a tile that will certainly be part of it.
+   */
+  footprintTiles(defIndex: number, tile: number): number[] {
+    const size = this.config.size;
+    const n = this.footprintOf(defIndex);
+    const x0 = tile % size;
+    const y0 = (tile / size) | 0;
+    const out: number[] = [];
+    for (let dy = 0; dy < n; dy++) {
+      for (let dx = 0; dx < n; dx++) {
+        const x = x0 + dx;
+        const y = y0 + dy;
+        if (x >= size || y >= size) continue;
+        out.push(y * size + x);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * A road tile this business can be served from, or NONE.
+   *
+   * Its own tiles first, then the ring around them. A lorry does not need the
+   * road to run *through* the yard - pulling up outside is how a delivery works -
+   * so a track laid along one edge of the footprint counts as access, and that is
+   * the cheapest thing a player can do to start a stranded works.
+   *
+   * Scanned in tile order so the answer is the same every time it is asked. Two
+   * roads beside a works and an arbitrary choice between them would move a graph
+   * node about between rebuilds for no reason.
+   */
+  accessRoadFor(defIndex: number, tile: number): number {
+    const size = this.config.size;
+    const layer = this.layers[Mode.Road];
+    const own = this.footprintTiles(defIndex, tile);
+    for (const t of own) if (layer.cls[t] !== NO_WAY) return t;
+    const inside = new Set(own);
+    let best = NONE;
+    for (const t of own) {
+      const x = t % size;
+      const y = (t / size) | 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+          const n = ny * size + nx;
+          if (inside.has(n)) continue;
+          if (layer.cls[n] === NO_WAY) continue;
+          if (best === NONE || n < best) best = n;
+        }
+      }
+    }
+    return best;
+  }
+
+  /** Has this business a road it can work from? */
+  siteStranded(site: number): boolean {
+    return site >= 0 && site < this.sites.count && this.sites.stranded[site] === 1;
+  }
+
+  /**
+   * What it costs to build a business here, rather than buy one somewhere else.
+   *
+   * The rule this has to satisfy is that "land plus building should always cost
+   * roughly the same" as buying the equivalent going concern - otherwise one of
+   * the two routes is simply the right answer and the other is decoration.
+   *
+   * So the price is not a share of the business. It is the whole going-concern
+   * value of one *here*, minus the worth of the ground it stands on, because you
+   * bought that ground yourself and paid the land price for it. Build the building
+   * and buy the field and you have spent, near enough, what the works down the
+   * lane would have cost you.
+   *
+   * A flat share was the first attempt and it does not hold across the range: at
+   * 78% a dairy farm came out level with buying one and a creamery came out a
+   * fifth cheaper, because the field costs the same few thousand either way and a
+   * fifth of a creamery is a great deal more than a fifth of a farm. Taking the
+   * ground out instead scales correctly by construction.
+   *
+   * It lands *slightly* above buying rather than slightly below, and that is
+   * deliberate. You have to buy a whole field to put a village shop on one tile
+   * of it, so building tends to cost a little more - which is the right way for
+   * the error to fall. "The big value in building is having it exactly where you
+   * want it", and a player should be paying for that rather than saving by it.
+   *
+   * `going` is not in the product: what you build is new, and a new works is by
+   * definition a fed one. The density multiplier is the same shape `priceOf` and
+   * `landPriceOf` use, so building at the town gate costs what land at the town
+   * gate costs.
+   */
+  foundPriceAt(defIndex: number, tile: number): number {
+    const def = this.content.industries[defIndex];
+    if (!def) return 0;
+    const size = this.config.size;
+    const x = tile % size;
+    const y = (tile / size) | 0;
+    let nearest = 1e9;
+    for (let t = 0; t < this.towns.count; t++) {
+      const dx = this.towns.x[t] - x;
+      const dy = this.towns.y[t] - y;
+      const d = Math.sqrt(dx * dx + dy * dy)
+        / Math.max(1, Math.sqrt(this.towns.population[t] / 400));
+      if (d < nearest) nearest = d;
+    }
+    const full = def.foundCost * (1 + Math.max(0, 1 - nearest / 30)) * SITE_PRICE_SCALE;
+
+    // The ground under it, at the same rate the land market charges for a field
+    // in the same place. Not the whole field: only the part the works covers.
+    const n = this.footprintOf(defIndex);
+    const town = 1
+      + Math.max(0, 1 - nearest / LAND_TOWN_REACH) * (LAND_TOWN_PREMIUM - 1);
+    const ground = LAND_PER_TILE * n * n * town;
+
+    /*
+     * And a floor, because the subtraction must not be allowed to make anything
+     * nearly free. A one-tile shop at the town gate is the case that gets close:
+     * cheap to found, dear ground. Half is well clear of it and still leaves the
+     * ground deduction doing the work everywhere it matters.
+     */
+    return Math.round(Math.max(full * 0.5, full - ground));
+  }
+
+  /**
+   * May this company build this business here?
+   *
+   * Everything the placement preview needs, in one answer, because the preview
+   * and the click must not be able to disagree - a green square that refuses when
+   * pressed is worse than no preview at all.
+   *
+   * The rules, in the order a player meets them: it goes on land you own, all of
+   * it; the ground has to be dry and level enough; nothing may already be there;
+   * an extraction industry still needs its deposit; and you have to be able to
+   * pay. Road access is deliberately *not* on the list - it is a condition of
+   * working, not of building, and there is a warning for it.
+   */
+  canPlaceSite(
+    company: number, defIndex: number, tile: number,
+  ): { ok: boolean; reason: string; price: number } {
+    const def = this.content.industries[defIndex];
+    const price = this.foundPriceAt(defIndex, tile);
+    const no = (reason: string): { ok: boolean; reason: string; price: number } => (
+      { ok: false, reason, price }
+    );
+    if (!def) return no('No such business.');
+    if (tile < 0 || tile >= this.terrain.height.length) return no('Off the map.');
+
+    const want = this.footprintTiles(defIndex, tile);
+    const n = this.footprintOf(defIndex);
+    if (want.length !== n * n) return no('It would hang off the edge of the map.');
+
+    const owned = this.ownedParcels(company);
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const t of want) {
+      if (this.terrain.height[t] <= 0) return no('Part of that is water.');
+      /*
+       * Land, and *only* land - `canBuildOn` also says yes to any road tile,
+       * which is right for laying a track along a lane and wrong for putting a
+       * creamery on top of one.
+       */
+      if (this.layers[Mode.Road].cls[t] !== NO_WAY) return no('There is a road across it.');
+      if (!owned.has(this.terrain.fields.parcel[t])) return no('You do not own that ground.');
+      if (this.built.has(t)) return no('Somebody lives there.');
+      lo = Math.min(lo, this.terrain.height[t]);
+      hi = Math.max(hi, this.terrain.height[t]);
+    }
+    /*
+     * Level enough to stand on, measured across the whole footprint.
+     *
+     * The obvious thing was `TileFlag.Buildable`, and it is wrong for this: it is
+     * the town generator's own flag and it is *narrow* - measured, 791 of the
+     * 3,194 enclosed field tiles carry it, and three of the twenty-one generated
+     * businesses stand on ground that does not. Using it would have refused three
+     * quarters of a player's own field for being too steep, on ground the game
+     * itself is happy to build farms on.
+     *
+     * So the honest test is the one the physical problem suggests: a works needs a
+     * level pad, and what makes a pad impossible is the *drop across it*, which
+     * scales with how big the building is. `SITE_LEVEL_PER_TILE` is set from the
+     * measured distribution - it admits about three quarters of in-field positions
+     * at every footprint size, and comfortably covers where worldgen puts things.
+     */
+    if (hi - lo > SITE_LEVEL_PER_TILE * n) return no('The ground is too steep.');
+
+    /*
+     * Nothing already standing on it, and not jammed against something that is.
+     * A works needs a way in, and two of them sharing a wall have none - so the
+     * test is against every existing footprint grown by a tile.
+     */
+    const inside = new Set(want);
+    for (let s = 0; s < this.sites.count; s++) {
+      if (this.sites.state[s] === SiteState.Dead) continue;
+      for (const t of this.footprintTiles(this.sites.def[s], this.sites.tile[s])) {
+        const tx = t % this.config.size;
+        const ty = (t / this.config.size) | 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = tx + dx;
+            const ny = ty + dy;
+            if (nx < 0 || ny < 0 || nx >= this.config.size || ny >= this.config.size) continue;
+            if (inside.has(ny * this.config.size + nx)) return no('Too close to another works.');
+          }
+        }
+      }
+    }
+    for (let y = 0; y < this.yards.count; y++) {
+      if (inside.has(this.yards.tile[y])) return no('Your yard is there.');
+    }
+
+    if (def.deposit > 0) {
+      let onIt = false;
+      for (const t of want) if (this.terrain.deposit[t] === def.deposit) onIt = true;
+      if (!onIt) {
+        const names = DEPOSIT_NAMES[def.deposit] ?? 'the right ground';
+        return no(`A ${def.name.toLowerCase()} needs ${names}. There is none here.`);
+      }
+    }
+
+    if (this.companies.cash[company] < price) return no('Not enough in the bank.');
+    return { ok: true, reason: '', price };
+  }
+
+  /**
+   * Build one. Takes the money, puts it on the map, and leaves it stranded if
+   * that is what you asked for.
+   */
+  placeSite(
+    defIndex: number, tile: number,
+  ): { ok: boolean; reason: string; site: number } {
+    const verdict = this.canPlaceSite(this.player, defIndex, tile);
+    if (!verdict.ok) return { ok: false, reason: verdict.reason, site: NONE };
+    const def = this.content.industries[defIndex];
+    const size = this.config.size;
+    const site = this.sites.alloc(defIndex, tile % size, (tile / size) | 0, tile, this.player);
+    if (site === NONE) return { ok: false, reason: 'No room left in the register.', site: NONE };
+
+    this.sites.extraction[site] = def.kind === 'extraction' ? 1 : 0;
+    this.sites.built[site] = this.year;
+    this.sites.modernity[site] = 100;
+    this.sites.richness[site] = 40 + (this.terrain.deposit[tile] > 0 ? 40 : 20);
+    this.sites.cycle[site] = def.recipe.period;
+    const cargoCount = this.content.cargo.length;
+    for (const [id, amount] of Object.entries(def.recipe.inputs)) {
+      const ci = this.content.cargoIndex.get(id);
+      if (ci !== undefined) this.sites.capacity[site * cargoCount + ci] = amount * 30;
+    }
+    for (const [id, amount] of Object.entries(def.recipe.outputs)) {
+      const ci = this.content.cargoIndex.get(id);
+      if (ci !== undefined) this.sites.capacity[site * cargoCount + ci] = amount * 40;
+    }
+    this.companies.post(this.player, Line.Construction, verdict.price);
+    this.landRevision++;
+    // Which sets the access tile and the stranded flag, so a works built away
+    // from the lane knows it is cut off before anybody looks at it.
+    this.rebuild();
+    this.refreshInfluence();
+    return { ok: true, reason: '', site };
+  }
+
   priceOf(site: number): number {
     const def = this.content.industries[this.sites.def[site]];
     let nearest = 1e9;
@@ -5074,6 +5374,14 @@ export class World {
   }[] {
     const out: { vehicle: number; yard: number; deadTiles: number; suitable: boolean }[] = [];
     if (from === NONE || from < 0 || from >= this.sites.count) return out;
+    /*
+     * Nothing can be arranged at a works with no road, which is the "all
+     * contracts freeze" half of the road-access rule. An empty list here is what
+     * the interface turns into its own empty state, and the panel's own alarm
+     * says why - so the refusal arrives as an explanation rather than as a lorry
+     * that never sets off.
+     */
+    if (this.sites.stranded[from] === 1) return out;
     const handling = this.content.cargo[cargo]?.handling;
 
     for (let v = 0; v < this.vehicles.count; v++) {

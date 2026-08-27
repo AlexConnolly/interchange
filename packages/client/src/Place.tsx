@@ -310,6 +310,28 @@ export function Place({
       </div>
 
       <div className={`bubble-body${came ? ' slide-back' : ''}`}>
+        {/*
+          * Cut off from the road, above everything, on every tab.
+          *
+          * Above the tabs' content rather than inside the About tab, because it is
+          * not a fact about the business - it is the reason nothing on any of the
+          * other tabs is happening. A player who opens In, sees a contract listed
+          * and no lorry moving needs the explanation *there*, and the alternative
+          * is repeating it three times.
+          *
+          * It says what to do rather than what is wrong. "No road access" is a
+          * diagnosis; "lay a track to it" is the fix, and the fix is one tool away.
+          */}
+        {world.siteStranded(site) && (
+          <div className="alarm">
+            <span className="alarm-mark">!</span>
+            <span className="grow">
+              <b>No road to it.</b>
+              {' Nothing is running here: no work, no deliveries, no production.'}
+              {' Lay a track to the works and it starts again.'}
+            </span>
+          </div>
+        )}
         {tab === 'about' && (
           <About world={world} site={site} mine={mine} verdict={verdict} actions={actions} />
         )}

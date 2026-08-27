@@ -41,6 +41,8 @@ interface Marked {
   id: string;
   name: string;
   mine: boolean;
+  /** No road to work from: everything here has stopped. */
+  cut: boolean;
   work: boolean;
   /** Where it is in the world. The frame loop turns this into pixels. */
   x: number;
@@ -81,13 +83,13 @@ export function Markers({
       const size = world.terrain.size;
       const put = (
         key: string, site: number, yard: number, id: string, name: string,
-        tile: number, mine: boolean, work: boolean,
+        tile: number, mine: boolean, work: boolean, cut = false,
       ): void => {
         // The world point, not the screen point. Projecting it is the frame
         // loop's job now, which is the only way a marker and the camera under it
         // can agree — see `anchor.ts`.
         out.push({
-          key, site, yard, id, name, mine, work,
+          key, site, yard, id, name, mine, work, cut,
           x: (tile % size) + 0.5,
           y: world.terrain.height[tile],
           z: Math.floor(tile / size) + 0.5,
@@ -100,7 +102,8 @@ export function Markers({
         if (tile < 0 || !world.influence.usable(tile)) continue;
         const def = C.industries[world.sites.def[s]];
         put(`s${s}`, s, -1, def.id, def.name, tile,
-            world.sites.owner[s] === world.player, working.has(s));
+            world.sites.owner[s] === world.player, working.has(s),
+            world.siteStranded(s));
       }
       for (let y = 0; y < world.yards.count; y++) {
         if (world.yards.owner[y] !== world.player) continue;
@@ -119,10 +122,19 @@ export function Markers({
           className={`mark ${m.mine ? 'mine' : ''} ${m.work ? 'working' : ''}`}
           {...anchorAt(m.x, m.y, m.z)}
           onClick={() => (m.yard >= 0 ? onOpenYard(m.yard) : onOpenSite(m.site))}
-          title={m.name}
+          title={m.cut ? `${m.name} - no road, nothing is running` : m.name}
         >
           <span className="mark-face"><Icon id={m.id} /></span>
-          {m.work && <span className="mark-dot" />}
+          {/*
+            * Cut off, and it takes the shoulder rather than sharing it with the
+            * work dot: a works with no road is not working, so the two can never
+            * both be true and there is no arrangement to negotiate.
+            *
+            * Above the marker rather than inside it, and in the one colour
+            * nothing else on the map uses, because this is the only state a
+            * business can be in that the player has to *do* something about.
+            */}
+          {m.cut ? <span className="mark-warn">!</span> : m.work && <span className="mark-dot" />}
           <span className="mark-tail" />
         </button>
       ))}

@@ -347,3 +347,19 @@ export const CHARACTER_COUNT = 5;
  * emptying, so it is a floor rather than a target — see world.startingCapital.
  */
 export const ENTRANT_CAPITAL = 1.8;
+
+/**
+ * How much fall a building's footprint may span, per tile of its width.
+ *
+ * In raw heightmap units, which is what `terrain.height` holds. A works needs a
+ * level pad and a big works needs a bigger one, so the allowance scales with the
+ * footprint rather than being one number for a village shop and a distribution
+ * centre alike.
+ *
+ * Twenty-four comes from the district rather than from taste: measured over every
+ * in-field position on seed 1985, the median fall across a three-tile footprint is
+ * 48 units and the upper quartile is 77, so `24 * n` admits roughly three quarters
+ * of the positions a player might want at every size. Every generated business but
+ * three sits under 40.
+ */
+export const SITE_LEVEL_PER_TILE = 24;
