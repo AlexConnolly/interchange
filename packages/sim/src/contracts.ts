@@ -59,6 +59,19 @@ export class ContractBoard {
    *  player needs. */
   readonly delivered = new Int32Array(MAX_CONTRACT_OFFERS);
   readonly offeredTick = new Int32Array(MAX_CONTRACT_OFFERS);
+  /**
+   * What this contract has actually paid, in pence, since it was taken on.
+   *
+   * The rate per tonne was the only money on a contract, and a rate is a promise
+   * rather than a result: two jobs at the same rate pay differently because one
+   * is a longer round trip, one has a lorry that keeps waiting at a full yard,
+   * and one was taken three weeks earlier. "How much you've made so far" is the
+   * question a haulier asks about work in hand, and nothing in the game could
+   * answer it.
+   */
+  readonly earned = new Int32Array(MAX_CONTRACT_OFFERS);
+  /** The tick it was taken on, so what it earns can be read per day. */
+  readonly tookTick = new Int32Array(MAX_CONTRACT_OFFERS);
 
   private free: number[] = [];
 
@@ -230,6 +243,8 @@ export function offerContracts(
         board.pay[id] = ctx.rate(spare.cargo, distance);
         board.service[id] = NONE;
         board.delivered[id] = 0;
+        board.earned[id] = 0;
+        board.tookTick[id] = 0;
         board.offeredTick[id] = ctx.tick;
         made++;
       }

@@ -1,11 +1,15 @@
 /**
- * What you own, and what you could own. And every contract you are running.
+ * What you own, and what you could own.
  *
- * Two screens, one file, because they are the same shape: a list of things,
- * where clicking one closes the list and takes you there. That last part is the
- * whole design of both. "When you click on an individual business, it's gonna
- * take you there, it's gonna close that window" — a list that only tells you a
- * thing exists is a worse map than the map.
+ * Two tabs, one file, because they are the same shape: a list of things, where
+ * clicking one closes the list and takes you there. That last part is the whole
+ * design of both. "When you click on an individual business, it's gonna take you
+ * there, it's gonna close that window" — a list that only tells you a thing
+ * exists is a worse map than the map.
+ *
+ * The contract board used to live here too and has moved to `Contracts.tsx`,
+ * because it stopped being the same shape: a contract row leads to a *decision*
+ * — which lorry, or give it back — rather than to a place on the map.
  *
  * They replace the Yard button, which was a single hard-coded yard and does not
  * survive owning more than one of anything. Nothing on either screen is a
@@ -13,11 +17,10 @@
  */
 
 import { useState, type JSX } from 'react';
-import { type World, ContractState } from '@interchange/sim';
+import { type World } from '@interchange/sim';
 import { content } from '@interchange/data';
-import { money, Carriers } from './Markers.tsx';
-import { BodyIcon, Icon } from './Icons.tsx';
-import { perHour } from './Place.tsx';
+import { money } from './Markers.tsx';
+import { Icon } from './Icons.tsx';
 
 const C = content();
 
@@ -156,225 +159,6 @@ export function Owned({
         {tab === 'sale' && sale.length === 0 && (
           <div className="why">Nothing within reach is for sale.</div>
         )}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Every contract you are running, in one place.
- *
- * There was no way to see them: a contract lived on the place that offered it,
- * so once you had five you had to remember which five farms to click. This is
- * the answer to "there's no contracts on [the dock], I don't know why you didn't
- * put contracts on".
- *
- * Ordered running-first, because an idle contract is a problem — work you have
- * taken on and put nobody on — and a problem belongs at the top.
- */
-export function Contracts({
-  world, onGoSite, onGoDriver, onClose,
-}: {
-  world: World;
-  onGoSite: (site: number) => void;
-  onGoDriver: (vehicle: number) => void;
-  onClose: () => void;
-}): JSX.Element {
-  const b = world.contractBoard;
-  /*
-   * Everything on the board, not only what has been taken.
-   *
-   * This used to list the contracts you were already running and nothing else,
-   * which made it a progress report rather than a place to find work — "shouldn't
-   * it show you all contracts?", and it should: the only way to see an offer was
-   * to spot a blue dot on the map and click the business under it, which means
-   * the board a haulier actually works from did not exist in the game.
-   *
-   * Offers now sit in the same list as the jobs in hand, because they are the
-   * same question asked at different times.
-   */
-  const rows: {
-    id: number; offered: boolean; running: boolean; vehicle: number; away: number;
-    /** A free lorry of the right sort, right now — so this can be said yes to. */
-    ready: string | null;
-    /** You own the right sort of lorry at all, free or not. */
-    ownsKind: boolean;
-  }[] = [];
-
-  /*
-   * Where "local" is measured from: your yard.
-   *
-   * Not the camera, which is where you happen to be looking, and not the middle
-   * of the district, which is nowhere. A haulier's near work is near the depot
-   * the lorries sleep at, and that is the only anchor in the game that means
-   * anything to the cost of a job.
-   */
-  let homeX = 0;
-  let homeZ = 0;
-  for (let y = 0; y < world.yards.count; y++) {
-    if (world.yards.owner[y] !== world.player) continue;
-    homeX = world.yards.x[y];
-    homeZ = world.yards.y[y];
-    break;
-  }
-
-  for (let i = 0; i < b.count; i++) {
-    const state = b.state[i];
-    const offered = state === ContractState.Offered;
-    if (!offered && state !== ContractState.Running && state !== ContractState.Idle) continue;
-    if (b.from[i] < 0 || b.to[i] < 0) continue;
-    let vehicle = -1;
-    if (!offered) {
-      for (let v = 0; v < world.vehicles.count; v++) {
-        if (world.vehicles.alive[v] && world.vehicles.service[v] === b.service[i]) {
-          vehicle = v;
-          break;
-        }
-      }
-    }
-    const away = Math.hypot(
-      world.sites.x[b.from[i]] - homeX, world.sites.y[b.from[i]] - homeZ,
-    );
-    /*
-     * Can this actually be said yes to, today, with what is in the yard?
-     *
-     * "Why isn't it obvious which contracts I can commit to with the vehicles I
-     * have?" It was not, and the row was answering a different question: it named
-     * the *body the job needs* — "Tipper", "Chilled box" — and left the reader to
-     * remember what they owned and whether any of it was free. That is the one
-     * piece of arithmetic the game already knows and the player does not.
-     *
-     * Three states, not two, and the third is the one that makes the list useful.
-     * `driversFor` only returns vehicles with no service on them, so a suitable
-     * hit there means a lorry is standing in a yard able to start now.
-     * `fleetCanCarry` asks the weaker question — do you own that sort at all —
-     * and the gap between the two answers is "your tipper is out on a job", which
-     * is a completely different situation from "you have no tipper". One is wait
-     * ten minutes; the other is buy a lorry.
-     */
-    let ready: string | null = null;
-    let ownsKind = false;
-    if (offered) {
-      ownsKind = world.fleetCanCarry(b.cargo[i]);
-      const free = world.driversFor(i).find((d) => d.suitable);
-      if (free) ready = C.vehicles[world.vehicles.type[free.vehicle]].name;
-    }
-    rows.push({ id: i, offered, running: vehicle >= 0, vehicle, away, ready, ownsKind });
-  }
-
-  /*
-   * Anything you could act on, nearest first; then the jobs already running.
-   *
-   * Two keys and the order of them is the whole design. An offer you have not
-   * taken and a contract with no lorry on it are both *work waiting*, and they
-   * belong at the top whatever else is true. Below that, distance from the yard,
-   * because of two jobs you could equally take the near one is the better one
-   * and no other fact on the row settles it.
-   */
-  rows.sort((x, y) => {
-    const ax = x.offered || !x.running ? 0 : 1;
-    const ay = y.offered || !y.running ? 0 : 1;
-    if (ax !== ay) return ax - ay;
-    /*
-     * Among the work waiting, the ones you can start beat the ones you cannot.
-     *
-     * A third key, above distance, because "near" is only worth reading once
-     * "possible" has been settled: an offer four tiles away that needs a tanker
-     * you do not own is further from being done than one across the district you
-     * have a free lorry for.
-     */
-    if (ax === 0) {
-      const cx = x.ready ? 0 : x.ownsKind ? 1 : 2;
-      const cy = y.ready ? 0 : y.ownsKind ? 1 : 2;
-      if (cx !== cy) return cx - cy;
-    }
-    return x.away - y.away;
-  });
-  const waiting = rows.filter((r) => r.offered || !r.running).length;
-  const canStart = rows.filter((r) => r.ready !== null).length;
-
-  return (
-    <div className="bubble fixed">
-      <div className="sheet-head">
-        <span className="sheet-icon"><Icon id="terminal" size={24} /></span>
-        <div className="grow">
-          <div className="sheet-title">Contracts</div>
-          <div className="sheet-sub">
-            {rows.length === 0 ? 'Nothing on the board'
-              : waiting === 0 ? `${rows.length} on the go, all covered`
-                : canStart === 0 ? `${waiting} waiting, none you can start`
-                  : `${canStart} you can start of ${waiting} waiting`}
-          </div>
-        </div>
-        <button className="x" onClick={onClose} aria-label="Close">×</button>
-      </div>
-      <div className="bubble-body">
-        {rows.length === 0 && (
-          <div className="why">
-            No work going. Offers appear as businesses fill their yards.
-          </div>
-        )}
-        {rows.map((r) => {
-          const cargo = C.cargo[b.cargo[r.id]];
-          const from = C.industries[world.sites.def[b.from[r.id]]];
-          const to = C.industries[world.sites.def[b.to[r.id]]];
-          return (
-            <button
-              key={r.id}
-              className={`job${r.ready !== null ? ' ready' : ''}`
-                + `${r.offered && r.ready === null ? ' blocked' : ''}`}
-              onClick={() => (r.vehicle >= 0
-                ? onGoDriver(r.vehicle)
-                : onGoSite(b.from[r.id]))}
-              title={r.offered ? 'Open the business to take it on' : undefined}
-            >
-              <span className="job-line">
-                <span className="swatch" style={{ background: cargo.colour }} />
-                <span className="grow">{from.name} → {to.name}</span>
-                {/*
-                  * Per hour when we can work out an hour, per tonne when we
-                  * cannot.
-                  *
-                  * A rate per tonne is not comparable between two offers — a
-                  * short run in a van and a long run in an artic can pay the
-                  * same per tonne and differ fourfold in what they are worth —
-                  * and comparing offers is the entire purpose of this list. The
-                  * place panel has shown £/hour for a while; the board that a
-                  * haulier actually works from was still showing the figure you
-                  * cannot act on.
-                  *
-                  * Falls back to the tonne rate when nothing in the fleet can
-                  * carry it, because an hourly figure for a lorry you do not own
-                  * is a number about a hypothesis.
-                  */}
-                {(() => {
-                  const hourly = perHour(world, r.id);
-                  return hourly > 0
-                    ? <span className="pay">{money(hourly)}<i>/hr</i></span>
-                    : <span className="pay">{money(b.pay[r.id])}<i>/t</i></span>;
-                })()}
-              </span>
-              <span
-                className={`needs${r.running ? '' : r.ready !== null ? ' can' : ' cannot'}`}
-              >
-                <BodyIcon handling={cargo.handling} />
-                {/*
-                  * What the pill says depends on what you can do about it, and
-                  * naming the actual lorry is the point: "Refrigerated van free"
-                  * is an instruction, where "Chilled box" was a specification.
-                  */}
-                {r.running
-                  ? `${C.vehicles[world.vehicles.type[r.vehicle]].name} · ${b.delivered[r.id]} loads`
-                  : r.ready !== null ? r.ready
-                    : <Carriers handling={cargo.handling} size={17} />}
-                {r.offered && r.ready !== null && <b>free — take it</b>}
-                {r.offered && r.ready === null && r.ownsKind && <b>yours are all out</b>}
-                {r.offered && r.ready === null && !r.ownsKind && <b>none in your fleet</b>}
-                {!r.offered && !r.running && <b>nobody on it</b>}
-              </span>
-            </button>
-          );
-        })}
       </div>
     </div>
   );

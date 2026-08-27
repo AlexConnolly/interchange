@@ -68,7 +68,7 @@ different one, and they route around water and towns rather than through them.
 
 ---
 
-## 6. Contracts: two tabs, and a real breakdown behind each row
+## ~~6. Contracts: two tabs, and a real breakdown behind each row~~ — done
 
 **What.** The contracts screen is one flat list and answers almost nothing. It
 should be two tabs.
@@ -89,6 +89,13 @@ the run rather than guessed.
 ---
 
 ## Standing rules, for anything on this list
+
+- **Nothing whose visibility matters may be animated through opacity.** Third time
+  this bit: the build tray sat invisible for half a second after opening, and the
+  contract page rendered its header with a completely blank body under it while the
+  DOM was correct. A CSS animation advances on *frames*, and the frame clock here
+  belongs to a WebGL scene that can drop to a few a second. Entrances have no fill
+  mode, exits keep `both`, and entrances slide rather than fade.
 
 - **Models come from the pipeline.** `art/` and Blender, never hand-written
   geometry.

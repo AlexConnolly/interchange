@@ -1905,17 +1905,28 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
  * decoration must never be able to decide where anything sits.
  */
 .slide-in { animation: slide-from-right 190ms cubic-bezier(0.22, 1, 0.36, 1); }
+/* Transform only — the third place in this client where a fade from zero has hidden
+   a whole panel, and this one hid the contract page's entire body: the header sat
+   there with nothing under it, while the DOM was complete and correct.
+
+   A CSS animation advances on frames, and the frame clock here belongs to a WebGL
+   scene that can drop to a few a second. So an entrance that fades in from zero is
+   invisible for as long as the animation has not finished, and this client cannot
+   promise that it finishes. The rule, now stated three times over: entrances have
+   no fill mode, exits keep `both`, and *nothing whose visibility matters may be
+   animated through opacity*. Slide, which is wrong-looking for a moment at worst
+   rather than absent. */
 @keyframes slide-from-right {
-  from { opacity: 0; transform: translateX(26%); }
-  to { opacity: 1; transform: translateX(0); }
+  from { transform: translateX(26%); }
+  to { transform: translateX(0); }
 }
 
 /* And the pane behind it goes the other way, so a back press reads as reversing
    rather than as a second forward step. */
 .slide-back { animation: slide-from-left 190ms cubic-bezier(0.22, 1, 0.36, 1); }
 @keyframes slide-from-left {
-  from { opacity: 0; transform: translateX(-26%); }
-  to { opacity: 1; transform: translateX(0); }
+  from { transform: translateX(-26%); }
+  to { transform: translateX(0); }
 }
 
 /* The bubble clips its pages, or a sliding one is briefly visible outside the
@@ -2035,6 +2046,50 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   font-weight: 800;
   line-height: 1;
 }
+
+/* The four figures on a contract's page.
+ *
+ * A grid rather than a sentence, because they are read together and compared with
+ * each other: a column of label-over-figure can be scanned down, where the same
+ * facts in prose have to be read. Two across, because four in a row at this panel
+ * width would set the figures too small to be the loudest thing in the cell — and
+ * they are what the page is for. */
+.ledger {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  margin: 0 0 12px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.06);
+}
+.ledger-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 10px 9px;
+  background: rgba(255, 255, 255, 0.66);
+}
+.ledger-cell i {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+.ledger-cell b {
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Giving a contract back. Not red: the work goes back on the board rather than
+   being destroyed, and red would promise a consequence that is not there. */
+.btn.give {
+  border-color: rgba(160, 96, 24, 0.45);
+  color: #8a5a2a;
+}
+.btn.give:hover { background: rgba(240, 166, 60, 0.16); }
 
 /* A heading with something on the right of it: the section title, and the
    constraint that applies to the whole section. */

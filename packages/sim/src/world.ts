@@ -1992,6 +1992,27 @@ export class World {
       && this.sites.owner[target] === company;
     const pence = own ? 0 : Math.round(rate * tonnes);
     if (!own) this.companies.post(company, Line.Haulage, pence);
+    /*
+     * And against the contract, if this load was run under one.
+     *
+     * Here rather than in the contract's own bookkeeping because this is the only
+     * place that knows what the load was actually worth: the rate depends on the
+     * distance the lorry really covered, which nothing upstream can predict. The
+     * service on the vehicle is the link - a contract *is* a service underneath -
+     * so the lookup is a scan of the board, which is a few dozen entries.
+     */
+    if (pence > 0) {
+      const svc = this.vehicles.service[vehicle];
+      if (svc !== NONE) {
+        const cb = this.contractBoard;
+        for (let i = 0; i < cb.count; i++) {
+          if (cb.service[i] === svc && cb.state[i] !== ContractState.Closed) {
+            cb.earned[i] += pence;
+            break;
+          }
+        }
+      }
+    }
     if (company === this.player && !isTown && target >= 0) {
       /*
        * Arrivals are journalled even at nothing.
@@ -5369,6 +5390,68 @@ export class World {
    * keyed to a piece of paperwork that does not exist. Both callers want the
    * identical list in the identical order, so there is one of it.
    */
+  /**
+   * What a contract has paid you, and what that is per day.
+   *
+   * Two figures rather than one, because they answer different questions and a
+   * haulier asks both: the total is "was taking this worth it", and the daily
+   * rate is "is it worth keeping a lorry on it". A young contract with one good
+   * load behind it has a wonderful daily rate and has earned almost nothing; an
+   * old one that has quietly stopped moving has a fine total and a daily rate
+   * falling every day. Either figure alone flatters a job the other condemns.
+   *
+   * Against the *game* calendar rather than real minutes, because that is the
+   * unit everything else the player reads is in - a week's rent, a month's upkeep
+   * - and mixing the two would make the numbers uncomparable.
+   *
+   * Floored at one day, so a contract taken this morning does not report the
+   * earnings of a fortnight.
+   */
+  contractEarned(id: number): { total: number; perDay: number; days: number } {
+    const b = this.contractBoard;
+    if (id < 0 || id >= b.count) return { total: 0, perDay: 0, days: 0 };
+    const total = b.earned[id];
+    const took = b.tookTick[id];
+    if (took <= 0) return { total, perDay: 0, days: 0 };
+    const days = Math.max(1, (this.tick - took) / TICKS_PER_DAY);
+    return { total, perDay: Math.round(total / days), days };
+  }
+
+  /**
+   * Give a contract back.
+   *
+   * The lorry comes off it and the contract returns to the *board* rather than
+   * closing, because the work still wants doing: the farm still wants its milk
+   * moved, and somebody's lorry - yours, later - can still do it. Nothing is
+   * charged. A penalty would be the right rule in a game about reputation, and
+   * this one has the planning board for that; making every experiment expensive
+   * is how a player stops experimenting.
+   */
+  cancelContract(id: number): { ok: boolean; reason: string } {
+    const b = this.contractBoard;
+    if (id < 0 || id >= b.count) return { ok: false, reason: 'No such contract.' };
+    if (b.state[id] === ContractState.Closed) {
+      return { ok: false, reason: 'That one has finished.' };
+    }
+    if (b.state[id] === ContractState.Offered) {
+      return { ok: false, reason: 'You have not taken it on.' };
+    }
+    const svc = b.service[id];
+    if (svc !== NONE) {
+      for (let v = 0; v < this.vehicles.count; v++) {
+        if (this.vehicles.alive[v] && this.vehicles.service[v] === svc) {
+          this.vehicles.service[v] = NONE;
+        }
+      }
+      this.endRun(svc);
+    }
+    b.service[id] = NONE;
+    b.state[id] = ContractState.Offered;
+    b.earned[id] = 0;
+    b.tookTick[id] = 0;
+    return { ok: true, reason: '' };
+  }
+
   driversForRun(from: number, cargo: number): {
     vehicle: number; yard: number; deadTiles: number; suitable: boolean;
   }[] {
@@ -5610,6 +5693,7 @@ export class World {
       && this.vehicles.service[vehicle] === NONE) {
       this.assignVehicle(vehicle, svc, company);
       b.state[id] = ContractState.Running;
+      if (b.tookTick[id] === 0) b.tookTick[id] = this.tick;
     } else {
       for (let v = 0; v < this.vehicles.count; v++) {
         if (!this.vehicles.alive[v]) continue;

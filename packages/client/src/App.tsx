@@ -36,7 +36,8 @@ import { Fleet, Upgrades, Yard } from './Fleet.tsx';
 import { Planning } from './Planning.tsx';
 import { Dock } from './Dock.tsx';
 import { Icon } from './Icons.tsx';
-import { Owned, Contracts } from './Owned.tsx';
+import { Owned } from './Owned.tsx';
+import { Contracts } from './Contracts.tsx';
 import { Market } from './Market.tsx';
 import { Land } from './Land.tsx';
 import { powerLines, SPAN } from './powerlines.ts';
@@ -3272,6 +3273,18 @@ export function App(): JSX.Element {
             setPanel({ k: 'place', site });
           }}
           onGoDriver={(vehicle) => setPanel({ k: 'driver', vehicle })}
+          onTake={(contract, vehicle) => {
+            if (live.world.acceptContract(contract, live.world.player, vehicle)) {
+              setNote('');
+              bump();
+            } else {
+              setNote('That could not be taken on.');
+            }
+          }}
+          onCancel={(contract) => {
+            const r = live.world.cancelContract(contract);
+            if (r.ok) { setNote(''); bump(); } else setNote(r.reason);
+          }}
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
