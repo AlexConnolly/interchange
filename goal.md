@@ -102,6 +102,28 @@ photographable.
 
 ---
 
+## ~~8. An advisor, as an inbox~~ — done
+
+**What.** A tutorial that arrives as post rather than as a modal. A button beside
+the money with a dot on it when something is unread; a toast out of the button
+when a letter lands, showing who wrote and one trimmed line; a page of letters
+behind it. The game can send one at any time.
+
+**The point.** Nothing in this game is urgent, so a modal that stops the world to
+explain the market is interrupting somebody who was enjoying themselves to tell
+them a thing they would have found out anyway — but not explaining the planning
+board means most people never find rung seven. A letter waits. It is still there
+in ten minutes when you have run out of things to do.
+
+**Who it is from.** Somebody, not the game. The first is from Tom Ashbury, who
+left you the yard. A tip signed by a name is a tip you can be pleased to get; the
+same words in a grey box are homework.
+
+**Done when.** Letters fire once, on a predicate over the world, so they arrive
+*because of what you did*. Verified end to end and unit-tested.
+
+---
+
 ## Standing rules, for anything on this list
 
 - **Nothing whose visibility matters may be animated through opacity.** Third time

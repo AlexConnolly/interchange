@@ -51,7 +51,7 @@ function clockTime(fraction: number): string {
 }
 
 export function Status({
-  cash, date, dayFraction, speed, onSpeed, onMenu,
+  cash, date, dayFraction, speed, onSpeed, onMenu, inbox,
 }: {
   cash: number;
   date: string;
@@ -59,9 +59,19 @@ export function Status({
   speed: number;
   onSpeed: (speed: number) => void;
   onMenu: () => void;
+  /**
+   * The inbox, and its toast, dropped in beside the money.
+   *
+   * Passed in rather than built here because it has state of its own — unread
+   * letters, a notice on a timer — and the readout has none and should keep none.
+   * What this file owns is *where* it goes: next to the purse, because that corner
+   * is where the two things you glance at without being asked already live.
+   */
+  inbox?: JSX.Element;
 }): JSX.Element {
   return (
     <>
+      <div className="corner">
       <div className="purse">
         {/* A bank, drawn rather than written. The one figure that never needs a
             label: nothing else in the game is in pounds. */}
@@ -73,6 +83,8 @@ export function Status({
           <rect x="2" y="19.4" width="20" height="2.4" rx="0.8" />
         </svg>
         <span className="purse-sum">{money(cash)}</span>
+      </div>
+        {inbox}
       </div>
 
       {/*

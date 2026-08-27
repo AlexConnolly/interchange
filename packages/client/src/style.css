@@ -1500,7 +1500,8 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .clock,
 .dock,
 .tools,
-.cog {
+.cog,
+.inbox {
   background: rgba(14, 17, 15, 0.22);
   border: 1px solid rgba(255, 255, 255, 0.09);
   box-shadow: 0 3px 16px rgba(10, 16, 12, 0.20);
@@ -1516,7 +1517,8 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .clock:hover,
 .dock:hover,
 .tools:hover,
-.cog:hover {
+.cog:hover,
+.inbox:hover {
   background: rgba(12, 15, 13, 0.72);
   border-color: rgba(255, 255, 255, 0.22);
   box-shadow: 0 6px 24px rgba(8, 14, 10, 0.34);
@@ -2046,6 +2048,184 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   font-weight: 800;
   line-height: 1;
 }
+
+/* ------------------------------------------------------ the inbox
+
+   A tutorial that arrives as post: a button by the money, a toast when something
+   lands, and a page of letters. See `advisor.ts` for why letters rather than a
+   tutorial, and `Inbox.tsx` for why opening the inbox does not mark it all read. */
+
+/* The money and the inbox, as one group.
+ *
+ * `.hud` is a space-between row, so a third child would have pushed the clock into
+ * the middle of the frame. The two left-hand things are a *pair* and now say so. */
+.corner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  /* The toast hangs off the button and must be allowed out of the group. */
+  position: relative;
+}
+
+/* The button. Same glass as everything permanent, same size as the cog: it is a
+   thing you press occasionally and never a thing you should have to find. */
+.inbox {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 12px;
+  cursor: pointer;
+  pointer-events: auto;
+  backdrop-filter: blur(10px);
+}
+.inbox.on { background: #f4c95d; border-color: #f4c95d; color: #4a3c14; }
+
+/* A dot, not a number. Whether there is post is the question; how much is not.
+   Gold, because that is what this game means by "yours" in the interface — and it
+   is the same gold the dock lights up with, so the eye already knows it. */
+.inbox-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f4c95d;
+  box-shadow: 0 0 0 2px rgba(14, 17, 15, 0.55);
+}
+/* The same mark in a list row, where there is no dark panel to ring it against. */
+.inbox-dot.still {
+  position: static;
+  flex: 0 0 8px;
+  align-self: center;
+  box-shadow: none;
+}
+
+/* The notice that slides out of the button.
+ *
+ * Below it and to the left, so it grows into the empty top of the frame rather
+ * than over the clock. Cream rather than glass: it carries words you are meant to
+ * read, and that is the line this interface draws between furniture and paper. */
+.toast {
+  position: absolute;
+  top: 42px;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 290px;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 13px;
+  background: rgba(247, 243, 234, 0.97);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 26px rgba(30, 40, 30, 0.26);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+  /* Out of the button: down and a little wider. Transform only, and by now for a
+     well-known reason — a fade from zero in this client is a thing that sometimes
+     never finishes. */
+  animation: toast-out 260ms cubic-bezier(0.2, 1.3, 0.4, 1);
+  transform-origin: 22px -8px;
+}
+@keyframes toast-out {
+  from { transform: scale(0.7) translateY(-10px); }
+  to { transform: scale(1) translateY(0); }
+}
+.toast:hover { background: #fffdf7; }
+.toast-from { display: block; font-size: 12.5px; font-weight: 700; }
+/* One line, and it is `trim` in `advisor.ts` that cuts it — at a word, so a
+   preview ends in a word rather than in the middle of one. This only has to stop
+   a long word from pushing the card wider. */
+.toast-line {
+  display: block;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A sender: head and shoulders on a tinted disc, with their initial behind it.
+ *
+ * No portraits. Four named characters would need a fifth drawing for the fifth,
+ * where a colour and a letter scale to as many as the post ever wants — and at
+ * twenty pixels a face is three grey smudges anyway. What the eye is doing here is
+ * recognising *which of them* it is, and colour does that better than likeness. */
+.who {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.10);
+}
+.who i {
+  position: absolute;
+  font-style: normal;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.30);
+  /* Behind the silhouette rather than beside it: the initial is there to tell two
+     senders of the same tint apart, not to be read. */
+  z-index: -1;
+}
+
+/* A letter in the list. */
+.post {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 5px;
+  padding: 9px 11px;
+  border: 1px solid var(--edge);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.7);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.post:hover { background: #fff; border-color: #d9a72e; }
+/* Unread. A tint rather than bold text, because bold on three lines of a card is
+   shouting and this only has to say "this one first". */
+.post.fresh { background: rgba(244, 201, 93, 0.13); border-color: rgba(200, 150, 40, 0.30); }
+.post-head { display: flex; align-items: baseline; gap: 6px; }
+.post-from { font-size: 12.5px; font-weight: 700; }
+.post-when { font-size: 10px; color: var(--ink-dim); }
+.post-subject { display: block; font-size: 12px; margin-top: 1px; }
+.post-line {
+  display: block;
+  font-size: 10.5px;
+  line-height: 1.3;
+  color: var(--ink-dim);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* And the letter itself, set to be read: a subject, then paragraphs with air
+   between them. The one place in this interface with a real measure. */
+.letter-subject {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 2px 0 8px;
+}
+.letter-para {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink);
+}
+.letter-para:last-child { margin-bottom: 2px; }
 
 /* ---------------------------------------------------- the opening
 

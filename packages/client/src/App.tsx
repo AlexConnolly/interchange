@@ -42,6 +42,8 @@ import { Market } from './Market.tsx';
 import { Land } from './Land.tsx';
 import { powerLines, SPAN, WIRE_H } from './powerlines.ts';
 import { introAt, INTRO_LENGTH, INTRO_ACROSS, type Intro } from './intro.ts';
+import { Advisor, type Letter } from './advisor.ts';
+import { Inbox, InboxButton, Toast } from './Inbox.tsx';
 import { PLOT, groundHeightAt, type RGB } from '@interchange/render';
 
 import { Status } from './Status.tsx';
@@ -271,6 +273,7 @@ type Panel =
   | { k: 'upgrades'; vehicle: number }
   | { k: 'owned' }
   | { k: 'contracts' }
+  | { k: 'inbox' }
   | { k: 'market' };
 
 /**
@@ -472,6 +475,19 @@ export function App(): JSX.Element {
   const introDone = useRef(false);
   /** The cloud layer, whose opacity the frame loop drives directly. */
   const skyRef = useRef<HTMLDivElement | null>(null);
+
+  /*
+   * The advisor, and it lives in a ref because it is not a value — it is a thing
+   * that accumulates. Its `letters` array is mutated in place, so React is told
+   * about changes by a counter rather than by identity: a new array every time a
+   * tip fired would be a copy of the whole inbox for no reason.
+   */
+  const advisor = useRef(new Advisor());
+  /** Bumped whenever the inbox changes, purely to make React look again. */
+  const [post, setPost] = useState(0);
+  /** The letter currently sliding out of the button, if any. */
+  const [toast, setToast] = useState<Letter | null>(null);
+  const toastTimer = useRef(0);
   /*
    * And the last values pushed into state, so the frame loop can tell whether
    * anything actually changed. Without it the loop would call `setIntro` sixty
@@ -2498,6 +2514,17 @@ export function App(): JSX.Element {
        * fast one. A slow machine simply sees fewer frames of the descent, which is
        * the correct thing for it to lose.
        */
+      /*
+       * The toast, taken away on the wall clock.
+       *
+       * Not a `setTimeout`, because the game can be paused and a notice that
+       * expired behind a pause menu is a notice nobody saw. Checked here, where
+       * time only passes when the frame loop is running.
+       */
+      if (toastTimer.current > 0 && now > toastTimer.current) {
+        toastTimer.current = 0;
+        setToast(null);
+      }
       if (introClock < INTRO_LENGTH || holding) {
         if (introStart < 0) introStart = now;
         introClock = holding ? heldAt : (now - introStart) / 1000;
@@ -3210,6 +3237,51 @@ export function App(): JSX.Element {
           if (world.vehicles.alive[v] && world.vehicles.company[v] === world.player
             && world.vehicles.service[v] === -1) free++;
         }
+        /*
+         * Has anything arrived? Asked on the hud tick — four times a second —
+         * rather than every frame, because a letter that turns up a quarter of a
+         * second late is a letter that turned up on time, and the predicates walk
+         * the fleet and the sites.
+         */
+        {
+          let stranded = false;
+          let holding = false;
+          let places = 0;
+          const cargoes = world.content.cargo.length;
+          for (let i = 0; i < world.sites.count; i++) {
+            if (world.sites.owner[i] !== world.player) continue;
+            places++;
+            if (world.siteStranded(i)) stranded = true;
+            for (let c = 0; c < cargoes; c++) {
+              if (world.sites.stock[i * cargoes + c] > 8) holding = true;
+            }
+          }
+          let fleet = 0;
+          for (let v = 0; v < world.vehicles.count; v++) {
+            if (world.vehicles.alive[v] && world.vehicles.company[v] === world.player) fleet++;
+          }
+          const fresh = advisor.current.check({
+            tick: world.tick,
+            fleet,
+            places,
+            fields: world.landOwned().length,
+            delivered: world.companies.delivered[world.player],
+            cash: world.companies.cash[world.player],
+            boardOpen: world.planningOpen(),
+            stranded,
+            holdingStock: holding,
+          });
+          if (fresh.length > 0) {
+            setPost((n) => n + 1);
+            /*
+             * The last of them gets the toast. More than one letter arriving in the
+             * same quarter-second is possible and stacking notices for it would be
+             * a pile-up over the money; the inbox has the rest and the dot says so.
+             */
+            setToast(fresh[fresh.length - 1]);
+            toastTimer.current = performance.now() + 7000;
+          }
+        }
         setHud({
           date: world.dateString(),
           vehicles: n,
@@ -3410,6 +3482,14 @@ export function App(): JSX.Element {
           }}
           onBuild={() => { setBuilding(true); setNote(''); setPanel({ k: 'none' }); }}
           onClose={() => setPanel({ k: 'none' })}
+        />
+      )}
+      {live && showPanel && shownPanel.k === 'inbox' && (
+        <Inbox
+          advisor={advisor.current}
+          tick={live.world.tick}
+          ticksPerDay={TICKS_PER_DAY}
+          onClose={() => { setPost((n) => n + 1); setPanel({ k: 'none' }); }}
         />
       )}
       {live && showPanel && shownPanel.k === 'contracts' && (
@@ -3654,6 +3734,36 @@ export function App(): JSX.Element {
             speed={speed}
             onSpeed={setSpeed}
             onMenu={() => { void sound.start(); setPaused(true); }}
+            inbox={(
+              <>
+                <InboxButton
+                  unread={advisor.current.unread}
+                  on={panel.k === 'inbox'}
+                  onClick={() => {
+                    setToast(null);
+                    toastTimer.current = 0;
+                    setPanel(panel.k === 'inbox' ? { k: 'none' } : { k: 'inbox' });
+                  }}
+                />
+                {/*
+                  * The toast hangs off the button rather than floating on its own,
+                  * which is what makes it read as coming *out of* the inbox — and
+                  * is why it is passed in here rather than rendered beside the hud.
+                  */}
+                {toast && panel.k !== 'inbox' && (
+                  <Toast
+                    letter={toast}
+                    onOpen={() => {
+                      advisor.current.markRead(toast.id);
+                      setToast(null);
+                      toastTimer.current = 0;
+                      setPost((n) => n + 1);
+                      setPanel({ k: 'inbox' });
+                    }}
+                  />
+                )}
+              </>
+            )}
           />
         )}
       </div>
