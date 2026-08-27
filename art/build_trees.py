@@ -39,6 +39,13 @@ CONIFER_LIT = (0.255, 0.408, 0.286, 1)
 AUTUMN = (0.545, 0.404, 0.180, 1)
 AUTUMN_LIT = (0.667, 0.514, 0.235, 1)
 BARE = (0.365, 0.310, 0.259, 1)
+# The twig mass, a step lighter and greyer than the limbs it sits over.
+#
+# A bare crown in life is lighter than the branches inside it, because you are
+# looking at ten thousand twigs with sky between them rather than at solid wood.
+# One shade is the whole of that effect at this size, and without it the tree is a
+# single flat silhouette with no depth in it at all.
+BARE_TWIG = (0.412, 0.365, 0.325, 1)
 
 
 def trunk(name, r, h, lean=0.0):
@@ -143,21 +150,85 @@ def autumn():
 
 
 def bare():
-    """No canopy at all: a winter skeleton, and a dead elm in July.
+    """A winter skeleton, and a dead elm in July.
 
-    Three forked limbs off a bole. Cheap, and it is the only tree here whose
-    shape says what month it is.
+    This was a bole and three straight cylinders, and it read as exactly that:
+    "trees without leaves look horrific". Three sticks in a tripod is not a tree,
+    and for a quarter of the year it is the most numerous object on screen, so it
+    sets the tone of the whole picture.
+
+    What a bare tree looks like at forty pixels is two things at once: a few
+    strong limbs you can pick out, and above them a soft grey *mass* of twigs with
+    no individual parts at all. Modelling twigs is out of the question - a tree is
+    drawn a thousand times a frame - so the mass is built the way the summer canopy
+    is, from flattened icospheres at subdivision zero in a winter grey-brown. It is
+    the leafy-lobe trick with the leaves taken out, which is fitting, because that
+    is what winter is.
+
+    And the limbs fork. One generation of forking is the whole difference between a
+    stick and a branch: a limb that splits has a direction, and a limb that does
+    not is a spoke.
+
+    ## The budget decided the shape
+
+    First attempt came out at 300 triangles against a budget of 140, with five
+    primaries, ten forks and four lobes - the pipeline's own report caught it,
+    which is what the report is for. Cutting it was not a compromise but a
+    clarification: what actually earns its triangles here is the *twig mass* and
+    the *forking*, not the count of limbs. Four primaries with one fork each and
+    two lobes reads better than five bare spokes did, at less than half the cost of
+    the version that was too dear.
     """
-    p = trunk('bare_bole', 0.026, 0.34, lean=0.03)
-    m = lib.material('bare_limb', BARE, rough=0.9)
-    for i, (ang, tilt, ln) in enumerate([
-        (0.4, 0.55, 0.22), (2.5, 0.62, 0.19), (4.4, 0.48, 0.20),
+    p = trunk('bare_bole', 0.030, 0.30, lean=0.04)
+    limb = lib.material('bare_limb', BARE, rough=0.9)
+
+    # Four primaries, unevenly spaced. Even spacing round the bole is part of what
+    # made the old one read as a diagram of a tree rather than as a tree.
+    for i, (ang, tilt, ln, base) in enumerate([
+        (0.35, 0.64, 0.21, 0.285),
+        (1.75, 0.48, 0.24, 0.310),
+        (3.20, 0.68, 0.19, 0.270),
+        (4.85, 0.54, 0.22, 0.300),
     ]):
-        o = lib.cyl('bare_limb%d' % i, 0.014, 0.006, ln,
-                    loc=(math.cos(ang) * 0.05, math.sin(ang) * 0.05, 0.40),
+        cx = math.cos(ang) * 0.035
+        cy = math.sin(ang) * 0.035
+        o = lib.cyl('bare_limb%d' % i, 0.017, 0.008, ln,
+                    loc=(cx, cy, base),
                     rot=(math.sin(ang) * tilt, math.cos(ang) * tilt, 0),
-                    segments=5)
-        o.data.materials.append(m)
+                    segments=4)
+        o.data.materials.append(limb)
+        p.append(o)
+
+        # Where that primary ends up, so the fork starts from the tip rather than
+        # from a guess. `cyl` is drawn about its own midpoint, so the tip is half a
+        # length further along the limb's own tilt.
+        reach = ln
+        tipx = cx + math.cos(ang) * math.sin(tilt) * reach
+        tipy = cy + math.sin(ang) * math.sin(tilt) * reach
+        tipz = base + math.cos(tilt) * reach * 0.5
+        a2 = ang + (0.40 if i % 2 == 0 else -0.44)
+        t2 = tilt * 0.70
+        o = lib.cyl('bare_fork%d' % i, 0.009, 0.004, ln * 0.60,
+                    loc=(tipx, tipy, tipz),
+                    rot=(math.sin(a2) * t2, math.cos(a2) * t2, 0),
+                    segments=3)
+        o.data.materials.append(limb)
+        p.append(o)
+
+    # And the twig mass, which is the part that makes it a tree.
+    #
+    # Wide and flattened, sitting over the fork tips, in a grey-brown a shade
+    # lighter than the limbs so the silhouette has depth instead of being one flat
+    # shape. Two lobes rather than one, because the overlap is what gives the
+    # outline its notches - the same reason the summer canopy is never a sphere.
+    twig = lib.material('bare_twig', BARE_TWIG, rough=0.95)
+    for i, (x, y, z, r, flat) in enumerate([
+        (0.010, -0.005, 0.455, 0.134, 0.46),
+        (-0.052, 0.048, 0.402, 0.096, 0.52),
+    ]):
+        o = lib.sphere('bare_twigs%d' % i, r, loc=(x, y, z), subdiv=0,
+                       scale=(1.0, 0.94, flat))
+        o.data.materials.append(twig)
         p.append(o)
     return p
 

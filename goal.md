@@ -5,7 +5,7 @@ neither of us has to remember. Struck through when finished, with the commit.
 
 ---
 
-## 1. Bare trees look horrific
+## ~~1. Bare trees look horrific~~ — done
 
 **What.** Winter trees — the ones drawn without leaves — read as a mess of pink
 sticks rather than as bare trees. They are the most numerous single object in the
@@ -17,7 +17,7 @@ countryside.
 
 ---
 
-## 2. Tractors drive through water
+## ~~2. Tractors drive through water~~ — done
 
 **What.** The ambient farm machinery ignores water and drives across becks and
 ponds. Reported twice now.
@@ -28,7 +28,7 @@ looking at a screenshot.
 
 ---
 
-## 3. Zoom should move toward the pointer
+## ~~3. Zoom should move toward the pointer~~ — done
 
 **What.** The wheel zooms about the centre of the screen, so zooming in on
 something means zoom, drag, zoom, drag. Every map in the world zooms toward the
@@ -40,7 +40,7 @@ camera is orthographic and pinned to a fixed elevation.
 
 ---
 
-## 4. A placed business does not draw
+## ~~4. A placed business does not draw~~ — done
 
 **What.** Building one reports success, takes the money and puts a marker with
 the right icon on the map — and no building appears. A bug in the feature just
