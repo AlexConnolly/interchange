@@ -65,6 +65,25 @@ const EXTENT = 260;
 const FROM_ACROSS = 38;
 const TO_ACROSS = 66;
 
+/**
+ * And the zoom it stops working at.
+ *
+ * The deck is a flat 260-unit plane at a fixed height, sized on the assumption
+ * that the view never exceeds the seventy tiles the wheel stops at — "this covers
+ * it several times over and never needs to be resized", which was true for as long
+ * as nothing could ask for more.
+ *
+ * The opening asks for a hundred and thirty-two. At that range the plane does not
+ * reach the corners of the frustum and what arrives on screen is its own straight
+ * edge: a solid band across the middle of the picture. Reported, fairly, as "you
+ * put a blue square over the screen".
+ *
+ * So it simply stops. A ceiling rather than a resize, because a deck that big
+ * would be a lot of transparent fragments for a view nothing plays at, and the one
+ * thing that *does* go out that far brings its own cloud.
+ */
+const CEILING = 78;
+
 /** The most it will ever hide. "Almost not see it", not "not see it". */
 const MOST = 0.82;
 
@@ -79,16 +98,6 @@ export interface Clouds {
     camX: number, camZ: number, tilesAcross: number,
     drift: readonly [number, number], haze: readonly [number, number, number],
     night: number, level: number,
-    /**
-     * The opening's veil, 1 down to 0, which overrides coverage entirely.
-     *
-     * The deck's own coverage is a function of zoom, and at the top of the intro's
-     * descent that already reads as full — but "already reads as full" is not the
-     * same as "is opaque", and the first three seconds have to hide a district that
-     * is still loading. So the veil takes over the amount rather than adding to it,
-     * and the deck goes back to the weather's own answer the moment it is zero.
-     */
-    veil?: number,
   ): void;
   dispose(): void;
 }
@@ -237,12 +246,11 @@ void main() {
   const shade = new Color();
 
   return {
-    update(camX, camZ, tilesAcross, drift, haze, night, level, veil = 0): void {
+    update(camX, camZ, tilesAcross, drift, haze, night, level): void {
       const zoom = (tilesAcross - FROM_ACROSS) / (TO_ACROSS - FROM_ACROSS);
-      const amount = Math.max(
-        Math.max(0, Math.min(1, zoom)) * MOST * level,
-        Math.max(0, Math.min(1, veil)),
-      );
+      const amount = tilesAcross > CEILING
+        ? 0
+        : Math.max(0, Math.min(1, zoom)) * MOST * level;
       if (amount <= 0.002) {
         mesh.visible = false;
         return;

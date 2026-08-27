@@ -2053,43 +2053,123 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
    See `intro.ts` for the timings and why they are fixed rather than tied to how
    long loading actually takes. */
 
+/* The cloud you come down through.
+ *
+ * Screen space, and that is the whole point of it. The first version of this drove
+ * the renderer's own cloud deck — a 260-unit plane in ground space, sized for the
+ * seventy tiles the wheel stops at — and at a hundred and thirty-two tiles out that
+ * plane does not reach the corners of the frustum, so what arrived on screen was a
+ * clipped rectangle floating in the middle of the picture. A layer that is the
+ * viewport cannot be the wrong size and cannot be seen past, which is what being
+ * *inside* a cloud means.
+ *
+ * `opacity` is written from the frame loop and is the one thing here that is not
+ * decorative: it is the veil coming off. The exception to the no-opacity rule is
+ * deliberate and safe, because nothing is animating it — a number is being set
+ * sixty times a second by code that knows what it wants. */
+.sky {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /* The overcast under the masses. Bright where the light comes from and heavier
+     below, which is what gives a white-out any sense of up — and darker at the
+     bottom than the first attempt, which was so pale it read as a blank page
+     rather than as weather. Cloud seen from inside is grey, not white. */
+  background:
+    radial-gradient(130% 90% at 50% -18%, #ffffff 0%, #eef1f5 38%, #cdd6e0 78%, #bcc7d4 100%);
+}
+
+/* Three drifting layers of soft mass.
+ *
+ * Each is a handful of large, very soft radial gradients — cloud has no edges, so
+ * every stop runs to transparent well inside its own radius. Different sizes and
+ * different speeds, because parallax between layers is the only thing at this cost
+ * that reads as *volume* rather than as a texture. */
+.sky span {
+  position: absolute;
+  inset: -40%;
+  display: block;
+}
+.sky-a {
+  background:
+    radial-gradient(38% 30% at 22% 34%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0) 70%),
+    radial-gradient(46% 34% at 74% 22%, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0) 72%),
+    radial-gradient(40% 30% at 52% 74%, rgba(246,248,251,0.92) 0%, rgba(246,248,251,0) 70%);
+  animation: sky-drift-a 42s linear infinite;
+}
+/* The middle layer carries the *shading* rather than more white. A cloud you are
+   inside is lit from one side and dark on the other, and without some grey in here
+   the whole thing is a white rectangle with pale white shapes on it. */
+.sky-b {
+  background:
+    radial-gradient(36% 28% at 62% 58%, rgba(160,175,192,0.34) 0%, rgba(160,175,192,0) 70%),
+    radial-gradient(44% 32% at 14% 80%, rgba(140,158,178,0.30) 0%, rgba(140,158,178,0) 72%),
+    radial-gradient(32% 26% at 88% 30%, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0) 70%),
+    radial-gradient(30% 24% at 40% 14%, rgba(255,255,255,0.80) 0%, rgba(255,255,255,0) 70%);
+  animation: sky-drift-b 31s linear infinite;
+}
+/* The nearest layer, and the one that sells falling through: bigger, softer, and
+   scaled up over the descent so it passes the camera rather than sliding by. */
+.sky-c {
+  background:
+    radial-gradient(58% 44% at 34% 62%, rgba(255,255,255,0.66) 0%, rgba(255,255,255,0) 66%),
+    radial-gradient(52% 40% at 78% 40%, rgba(240,245,250,0.62) 0%, rgba(240,245,250,0) 68%);
+  animation: sky-pass 10s cubic-bezier(0.4, 0, 0.7, 1) forwards;
+}
+@keyframes sky-drift-a {
+  from { transform: translate3d(-3%, -1%, 0) scale(1.04); }
+  to { transform: translate3d(3%, 1%, 0) scale(1.04); }
+}
+@keyframes sky-drift-b {
+  from { transform: translate3d(4%, 2%, 0) scale(1.08); }
+  to { transform: translate3d(-4%, -2%, 0) scale(1.08); }
+}
+/* Runs once, over the whole opening, and keeps its end state — an *exit*, so
+   `forwards` is right here where it would be wrong on an entrance. */
+@keyframes sky-pass {
+  from { transform: scale(1) translateY(0); }
+  to { transform: scale(2.6) translateY(14%); }
+}
+
 /* "Loading game...", centred over the cloud.
  *
- * No panel behind it. For the first four seconds the screen is a white-out, so a
- * card would be a box drawn on a blank page — the words are enough, and the dots
- * are what says the thing is alive. */
-.loading {
+ * `.say`, not `.loading`: that name was already taken by the survey screen, whose
+ * blue full-bleed background this quietly inherited — see the note in App.tsx.
+ *
+ * No panel behind it. For the first seconds the screen is cloud, so a card would
+ * be a box drawn on the weather; the words are enough and the dots are what says
+ * the thing is alive. */
+.say {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
+  inset: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 3px;
-  transform: translateY(-50%);
   pointer-events: none;
-  color: #5c6470;
+  color: #5f6773;
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  text-shadow: 0 1px 12px rgba(255, 255, 255, 0.8);
+  text-shadow: 0 1px 14px rgba(255, 255, 255, 0.9);
 }
-.loading-dots { display: inline-flex; gap: 3px; align-items: flex-end; }
-.loading-dots i {
+.say-dots { display: inline-flex; gap: 3px; align-items: flex-end; padding-bottom: 3px; }
+.say-dots i {
   width: 3px;
   height: 3px;
   border-radius: 50%;
   background: currentColor;
-  animation: loading-bob 1.05s ease-in-out infinite;
+  animation: say-bob 1.05s ease-in-out infinite;
 }
-/* Staggered, so it reads as a wave rather than as three things flashing. */
-.loading-dots i:nth-child(2) { animation-delay: 0.14s; }
-.loading-dots i:nth-child(3) { animation-delay: 0.28s; }
-/* Opacity *is* the content here — a dot that is invisible for part of its cycle
-   is the whole effect — so this is the one animation in the file allowed to use
-   it. It also loops, so a dropped frame costs a beat rather than the element. */
-@keyframes loading-bob {
+/* Staggered, so it reads as a wave rather than three things flashing. */
+.say-dots i:nth-child(2) { animation-delay: 0.14s; }
+.say-dots i:nth-child(3) { animation-delay: 0.28s; }
+/* Opacity *is* the content here — a dot invisible for part of its cycle is the
+   whole effect — so this is the one animation in the file allowed to use it. It
+   also loops, so a dropped frame costs a beat rather than the element. */
+@keyframes say-bob {
   0%, 100% { opacity: 0.25; transform: translateY(0); }
   50% { opacity: 1; transform: translateY(-3px); }
 }

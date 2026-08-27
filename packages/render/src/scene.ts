@@ -1003,20 +1003,6 @@ export class Renderer {
   /** How overcast it is, 0..1. Read by the client for the sky. */
   cloud = 0.5;
 
-  /**
-   * How much of the opening's cloud is still in front of everything, 1 down to 0.
-   *
-   * The intro's veil, and it lives on the renderer rather than in the DOM because
-   * the thing it has to hide is the *scene*: a translucent sheet in the interface
-   * layer would sit over the interface too, and the whole point of the last three
-   * seconds is that the furniture slides in over clear country.
-   *
-   * It drives the existing cloud deck to full and the haze with it, which is why
-   * this is nine lines rather than a new render pass. The deck is already a screen
-   * of cloud drawn above the district; being *inside* it is what the top of the
-   * descent is, and the deck is at its most convincing exactly there.
-   */
-  introVeil = 0;
   /** How hard it is coming down, 0..1. Read by the client for the sound. */
   rain = 0;
   /** True when what is falling is snow. Winter turns rain into snow. */
@@ -2223,22 +2209,10 @@ export class Renderer {
      * the frame that is purely for looking at, so it is the first thing a
      * machine that is struggling should stop drawing.
      */
-    /*
-     * The deck, and the opening rides it.
-     *
-     * `introVeil` forces the coverage to full and holds the drawing on even at
-     * reduced detail: the descent is the one moment where the cloud is not
-     * decoration but the subject, so a machine that would otherwise skip it has to
-     * draw it anyway. It goes back to the weather's own coverage the moment the
-     * veil reaches zero, with nothing to reset.
-     */
     this.clouds.update(
       this.camX, this.camZ, this.tilesAcross,
-      CLOUD_DRIFT.value,
-      this.mood.haze,
-      this.night,
-      this.introVeil > 0.01 ? 1 : (this.vfx === 'high' ? 1 : 0),
-      this.introVeil,
+      CLOUD_DRIFT.value, this.mood.haze, this.night,
+      this.vfx === 'high' ? 1 : 0,
     );
 
     if (this.vfx === 'off' || !this.composed) {

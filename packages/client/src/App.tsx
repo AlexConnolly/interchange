@@ -470,6 +470,8 @@ export function App(): JSX.Element {
   );
   /** The same, for the handlers, which must not close over a stale copy. */
   const introDone = useRef(false);
+  /** The cloud layer, whose opacity the frame loop drives directly. */
+  const skyRef = useRef<HTMLDivElement | null>(null);
   /*
    * And the last values pushed into state, so the frame loop can tell whether
    * anything actually changed. Without it the loop would call `setIntro` sixty
@@ -1815,6 +1817,19 @@ export function App(): JSX.Element {
      * anything automated.
      */
     const wantsIntro = params.get('intro') !== '0';
+    /*
+     * `?introAt=3.5` holds the opening at one instant, which is the only way to
+     * photograph it.
+     *
+     * The same family as `?time` and `?day`: a hook that exists because the thing
+     * it freezes cannot otherwise be checked. A headless browser on software GL
+     * runs this scene at about three frames a second, and a screenshot takes
+     * several seconds to capture — so every attempt to shoot a ten-second sequence
+     * by waiting and firing arrived somewhere else entirely, which is how a solid
+     * band across the middle of the picture went out the door.
+     */
+    const heldAt = Number(params.get('introAt'));
+    const holding = params.has('introAt') && Number.isFinite(heldAt);
     let introClock = wantsIntro ? 0 : INTRO_LENGTH;
     /** The frame timestamp the opening began on. -1 until the first frame. */
     let introStart = -1;
@@ -2483,13 +2498,30 @@ export function App(): JSX.Element {
        * fast one. A slow machine simply sees fewer frames of the descent, which is
        * the correct thing for it to lose.
        */
-      if (introClock < INTRO_LENGTH) {
+      if (introClock < INTRO_LENGTH || holding) {
         if (introStart < 0) introStart = now;
-        introClock = (now - introStart) / 1000;
+        introClock = holding ? heldAt : (now - introStart) / 1000;
         const at = introAt(introClock, openingAcross);
         renderer.tilesAcross = at.across;
-        renderer.introVeil = at.veil;
         fit();
+        /*
+         * The cloud, written straight to the element's style.
+         *
+         * Not through React, because it changes every frame and this is a
+         * ten-second animation; and not through the renderer's own cloud deck,
+         * which is what the first attempt did and was simply the wrong mechanism.
+         * That deck is a 260-unit plane in *ground space* — sized for the seventy
+         * tiles the wheel stops at — so at a hundred and thirty-two tiles out it
+         * came out as a clipped rectangle floating in the middle of the frame:
+         * "you put a blue square over the screen? it doesn't even fit."
+         *
+         * A screen-space layer cannot be clipped, cannot be the wrong size, and
+         * cannot be looked past. Which is what "you are inside the cloud" needs to
+         * be: not an object in the world, but the whole view.
+         */
+        if (skyRef.current) {
+          skyRef.current.style.opacity = String(at.veil);
+        }
         if (at.label !== introRef.current.label
           || at.ui !== introRef.current.ui
           || at.done !== introRef.current.done) {
@@ -3581,10 +3613,36 @@ export function App(): JSX.Element {
         * is shaped this way. It leaves before the descent ends, so the last thing
         * you see before the interface arrives is only countryside.
         */}
+      {/*
+        * The cloud you come down through.
+        *
+        * Six soft masses over a flat overcast, drifting at different speeds and
+        * scales, which is the cheapest thing that reads as depth: a single wash is
+        * a grey screen, and two layers moving at one speed is a grey screen with a
+        * pattern on it. Behind the loading text and in front of everything else.
+        */}
+      {!intro.done && (
+        <div className="sky" ref={skyRef}>
+          <span className="sky-a" />
+          <span className="sky-b" />
+          <span className="sky-c" />
+        </div>
+      )}
       {intro.label && (
-        <div className="loading">
-          <span className="loading-word">Loading game</span>
-          <span className="loading-dots"><i /><i /><i /></span>
+        /*
+         * `say` rather than `loading`, and the rename is the bug fix.
+         *
+         * There is already a `.loading` — the survey screen, a full-bleed blue
+         * page shown before the world exists — and this reused the class name.
+         * The old rule's `background: #bcd0e0` and `bottom: 0` survived, because a
+         * later rule only overrides the properties it actually names: so the words
+         * arrived wearing a solid blue rectangle half the height of the frame,
+         * sitting on top of the cloud. "You put a blue square over the screen?"
+         * Quite. It was the old loading screen, in the wrong shape.
+         */
+        <div className="say">
+          <span>Loading game</span>
+          <span className="say-dots"><i /><i /><i /></span>
         </div>
       )}
       <div className={`hud${intro.ui && !intro.done ? ' hud-in' : ''}`}>
