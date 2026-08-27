@@ -268,6 +268,25 @@ export interface RenderSource extends GroundSource, RoadSource {
    * relaid whenever influence grows, the trees never move at all.
    */
   scatterCount: number;
+  /**
+   * Pitch, in radians, for a scattered thing that has to *reach* something.
+   *
+   * Zero for everything that grows out of the ground, which is nearly all of it:
+   * a tree does not tilt to meet anything. It exists for the power-line spans,
+   * and it exists because a rigid horizontal mesh cannot join two poles standing
+   * on different ground — "the poles don't even connect, too, lol" — and the
+   * district is not flat.
+   */
+  sPitch: Float32Array;
+  /**
+   * Stretch along the thing's own length, for the same reason.
+   *
+   * A span is modelled exactly one pole-gap long, and the distance between two
+   * crossarms is that gap only when the two poles are level. Over a dip it is
+   * longer. One number fixes it, and it is a *stretch* rather than a scale
+   * because the wire must get longer without getting thicker.
+   */
+  sStretch: Float32Array;
   sx: Float32Array;
   sz: Float32Array;
   sModel: Uint8Array;
@@ -1521,17 +1540,26 @@ export class Renderer {
       const x = src.sx[i];
       const z = src.sz[i];
       this.tmp.position.set(x, groundHeightAt(src, x, z), z);
-      this.tmp.rotation.set(0, src.sRot[i] * Math.PI * 2, 0);
+      /*
+       * Yaw then pitch, and the order matters: `rotation` is applied XYZ, so a
+       * pitch written into X would be taken *before* the yaw and would tilt the
+       * span north rather than along its own run. Euler order 'YXZ' turns it the
+       * right way round — swing to face the next pole, then lift the far end.
+       */
+      this.tmp.rotation.order = 'YXZ';
+      this.tmp.rotation.set(src.sPitch[i], src.sRot[i] * Math.PI * 2, 0);
       const k = src.sScale[i];
-      this.tmp.scale.set(k, k, k);
+      this.tmp.scale.set(k * src.sStretch[i], k, k);
       this.tmp.updateMatrix();
       const at = counts[mi]++;
       batch.setMatrixAt(at, this.tmp.matrix);
       this.scatterLamps[mi]?.setMatrixAt(at, this.tmp.matrix);
     }
-    // Everything else in this file uses an unscaled `tmp`, so put it back or a
-    // building drawn after a tree comes out tree-sized.
+    // Everything else in this file uses an unscaled `tmp` on the default euler
+    // order, so put both back or a building drawn after a tree comes out
+    // tree-sized and facing the wrong way.
     this.tmp.scale.set(1, 1, 1);
+    this.tmp.rotation.order = 'XYZ';
 
     for (let mi = 0; mi < this.scatterBatches.length; mi++) {
       const batch = this.scatterBatches[mi];

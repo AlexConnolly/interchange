@@ -39,7 +39,8 @@ import { Icon } from './Icons.tsx';
 import { Owned, Contracts } from './Owned.tsx';
 import { Market } from './Market.tsx';
 import { Land } from './Land.tsx';
-import { PLOT, type RGB } from '@interchange/render';
+import { powerLines, SPAN } from './powerlines.ts';
+import { PLOT, HEIGHT_TO_WORLD, type RGB } from '@interchange/render';
 
 import { Status } from './Status.tsx';
 import { Driver } from './Driver.tsx';
@@ -134,6 +135,10 @@ const PROP_MODELS = [
   'prop_bale_round', 'prop_bale_wrapped', 'prop_bale_stack',
   'prop_stook', 'prop_sheep', 'prop_cattle', 'prop_muck', 'prop_trough',
   'prop_lamp_post',
+  // The grid, which passes through the district on its way somewhere else. Two
+  // models because a span of wire is a fixed mesh exactly one pole-gap long -
+  // see `powerlines.ts` for why the layout must never vary its step.
+  'prop_pole', 'prop_span',
   // The yard props. Everything above stands in a field; everything from here
   // stands *at a business*, and exists to answer what the place is.
   'prop_log_stack', 'prop_timber_stack', 'prop_stone_heap', 'prop_sacks',
@@ -145,6 +150,10 @@ const PROP_MODELS = [
 
 /** Index of the lamp post within `PROP_MODELS`. It is placed by its own rule. */
 const PROP_LAMP = 8;
+
+/** The grid. Both placed by the power-line layout rather than scattered. */
+const PROP_POLE = PROP_MODELS.indexOf('prop_pole');
+const PROP_SPAN = PROP_MODELS.indexOf('prop_span');
 
 /** The spring pair, placed by their own rule and gone for nine months. */
 const PROP_DAFFODILS = PROP_MODELS.indexOf('prop_daffodils');
@@ -702,6 +711,8 @@ export function App(): JSX.Element {
       pRot: new Float32Array(320),
       pLamp: new Float32Array(320 * 3),
       scatterCount: 0,
+      sPitch: new Float32Array(SCATTER_MAX),
+      sStretch: new Float32Array(SCATTER_MAX).fill(1),
       sx: new Float32Array(SCATTER_MAX),
       sz: new Float32Array(SCATTER_MAX),
       sModel: new Uint8Array(SCATTER_MAX),
@@ -1049,6 +1060,10 @@ export function App(): JSX.Element {
      */
     interface Scattered {
       x: number; z: number; model: number; rot: number; scale: number;
+      /** Tilt along its own length, for a wire that has to reach the next pole. */
+      pitch?: number;
+      /** And how much longer it has to be to get there. */
+      stretch?: number;
       /** When it is there at all. Absent means always. */
       season?: (f: { leaf: number; spring: number; autumn: number }) => boolean;
     }
@@ -1061,6 +1076,57 @@ export function App(): JSX.Element {
      * unlike a window it has nothing else near it to borrow light from.
      */
     const lampPosts: { x: number; z: number }[] = [];
+
+    /*
+     * The grid, laid out before anything else that stands in a field.
+     *
+     * First because it has right of way. A power line is surveyed across country
+     * and everything else was put in afterwards - so the poles choose their
+     * ground and the trees, bales and troughs below simply avoid whatever is
+     * already claimed. Doing it the other way round would give a line that jinks
+     * round a hay bale, which is not how the electricity board works.
+     */
+    const poles = powerLines({
+      size: DISTRICT,
+      height: (t) => world.terrain.height[t] ?? -1,
+      builtUp: (x, z) => {
+        // Round settlements rather than through them. A distribution line does
+        // cross a village in life, but it crosses it along the street, and the
+        // street is where every other piece of furniture in this game already is.
+        for (let t = 0; t < world.towns.count; t++) {
+          const dx = world.towns.x[t] - x;
+          const dz = world.towns.y[t] - z;
+          if (dx * dx + dz * dz < 100) return true;
+        }
+        /*
+         * And round the buildings, which the first version did not do: a line
+         * ran straight through a farmhouse roof. Towns were the only thing it
+         * avoided, and a farm is not in a town — that is rather the point of a
+         * farm.
+         *
+         * A four-tile berth, because a business is up to four tiles across and
+         * the wires have to clear the yard rather than the tile the marker sits
+         * on.
+         */
+        for (let i = 0; i < world.sites.count; i++) {
+          const dx = world.sites.x[i] - x;
+          const dz = world.sites.y[i] - z;
+          if (dx * dx + dz * dz < 20) return true;
+        }
+        for (let y = 0; y < world.yards.count; y++) {
+          const dx = world.yards.x[y] - x;
+          const dz = world.yards.y[y] - z;
+          if (dx * dx + dz * dz < 16) return true;
+        }
+        return false;
+      },
+    }, world.config.seed);
+    /** Tiles the grid has taken, so nothing else is scattered onto a pole. */
+    const poleTiles = new Set<number>();
+    for (const q of poles) {
+      poleTiles.add(Math.floor(q.z) * DISTRICT + Math.floor(q.x));
+    }
+
     {
       const parcel = world.terrain.fields.parcel;
       const crop = world.terrain.fields.crop;
@@ -1165,6 +1231,12 @@ export function App(): JSX.Element {
           const t = z * DISTRICT + x;
           if (wet(t)) continue;
           if (roadClass[t] >= 0) continue;
+          /*
+           * And not on a pole. The grid was surveyed first — see the layout above
+           * — so it has right of way, and a tree growing through a crossarm is the
+           * one way this could look worse than having no lines at all.
+           */
+          if (poleTiles.has(t)) continue;
           const wood = isWood(crop[t]);
           /*
            * How many trees stand on this tile.
@@ -1388,6 +1460,83 @@ export function App(): JSX.Element {
         }
         if (road < 0 || bestD > 25) continue;
         workable.push({ parcel: p2, ...b, road, entryX, entryZ });
+      }
+    }
+
+    /*
+     * And the grid into the scatter, one pole and one span each.
+     *
+     * Appended after the trees so a pole is never hidden inside a copse, and
+     * pushed as ordinary scattered things because that is exactly what they are:
+     * fixed geometry, one transform each, drawn by the same instanced batch as a
+     * hay bale. Nothing in the renderer has to learn that power lines exist.
+     *
+     * The span rotates to the run and the pole does not. A pole is symmetrical
+     * about its own crossarm only if the arm is square to the wires - which it is,
+     * by construction in `pole()` - so the pole *does* need the rotation too, or
+     * every crossarm in the district would face north.
+     */
+    for (const q of poles) {
+      /*
+       * `TREE_MODELS.length +` is not optional, and leaving it off is a silent
+       * bug rather than a loud one. Trees and props share one scatter layer and
+       * one index space: props start where the trees end. Written without the
+       * offset, `PROP_POLE` (9) addressed a *tree* slot, which lands on
+       * `prop_stook` — so the district got a line of corn stooks marching across
+       * it from edge to edge and no power lines at all. Nothing threw, and a stook
+       * in a field looks like a stook in a field.
+       */
+      /*
+       * The renderer's yaw runs the other way round from a world bearing.
+       *
+       * A Y-rotation of theta sends +X to `(cos theta, 0, -sin theta)` — the Z is
+       * negated — so pointing a model along a world direction `(dx, dz)` wants
+       * `theta = atan2(-dz, dx)`, which is minus the bearing. The same quarter-turn
+       * family of mistakes that once drew every lorry in the game broadside to its
+       * own direction of travel, and here it silently mirrored every span in Z so
+       * the wires set off away from the pole they were supposed to reach.
+       *
+       * `run` stays a plain world bearing, because that is what is testable and
+       * what the layout means; the conversion lives here, next to the renderer
+       * that needs it.
+       */
+      const yaw = q.run < 0 ? 0 : (1 - q.run) % 1;
+      trees.push({
+        x: q.x,
+        z: q.z,
+        model: TREE_MODELS.length + PROP_POLE,
+        rot: yaw,
+        scale: 1,
+      });
+      if (q.run >= 0 && q.toX !== undefined && q.toZ !== undefined) {
+        /*
+         * And the wire is aimed at the far crossarm rather than laid flat.
+         *
+         * Both poles stand on their own ground, and the district is not flat, so
+         * the far end of a level span hangs in the air above or below the pole it
+         * is meant to reach. The pitch is the angle to the other crossarm and the
+         * stretch is how much longer the wire has to be to get there — computed
+         * here because this is the only place that knows both ground heights.
+         */
+        const ay = world.terrain.height[
+          Math.min(DISTRICT * DISTRICT - 1, Math.max(0,
+            Math.floor(q.z) * DISTRICT + Math.floor(q.x)))
+        ];
+        const by = world.terrain.height[
+          Math.min(DISTRICT * DISTRICT - 1, Math.max(0,
+            Math.floor(q.toZ) * DISTRICT + Math.floor(q.toX)))
+        ];
+        const rise = HEIGHT_TO_WORLD(by) - HEIGHT_TO_WORLD(ay);
+        const flat = Math.hypot(q.toX - q.x, q.toZ - q.z);
+        trees.push({
+          x: q.x,
+          z: q.z,
+          model: TREE_MODELS.length + PROP_SPAN,
+          rot: yaw,
+          scale: 1,
+          pitch: Math.atan2(rise, flat),
+          stretch: Math.hypot(flat, rise) / SPAN,
+        });
       }
     }
 
@@ -2614,6 +2763,13 @@ export function App(): JSX.Element {
         src.sSheds[sn] = q.model < BROADLEAF_MODELS ? 1 : 0;
         src.sRot[sn] = q.rot;
         src.sScale[sn] = q.scale;
+        /*
+         * Only a span ever sets these, and it has to, because a wire is the one
+         * scattered thing whose job is to *reach* something rather than to stand
+         * where it is put. Everything else takes the flat defaults.
+         */
+        src.sPitch[sn] = q.pitch ?? 0;
+        src.sStretch[sn] = q.stretch ?? 1;
         sn++;
       }
       src.scatterCount = sn;

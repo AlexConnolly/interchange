@@ -51,7 +51,7 @@ immediately, and is still there after a reload of the scene.
 
 ---
 
-## 5. Power lines
+## ~~5. Power lines~~ — done
 
 **What.** Old-school single-pole timber power lines, the American kind: one wooden
 pole, a crossarm, wires strung between. Running **across** the district and

@@ -483,8 +483,116 @@ def blossom():
     return made
 
 
+# ---------------------------------------------------------------- power lines
+#
+# The American kind, deliberately: one timber pole, a crossarm, wires strung
+# between. Not a lattice pylon. A steel pylon is a landmark and would dominate a
+# district whose tallest thing is a farmhouse; a wooden pole is *furniture*, and
+# furniture is what the grid should be here. The line crosses the map from edge to
+# edge because the grid comes from somewhere else and goes somewhere else - the
+# district is a place the wires pass through, not a place they serve.
+#
+# Two models, and the split is what makes a run of them possible at all. The
+# renderer draws scatter as instanced geometry: one mesh, many transforms, no
+# per-instance shape. A wire between two arbitrary points needs its own length,
+# which instancing cannot give it. So the *span* is its own model, exactly one
+# pole-gap long, and the layout keeps every step the same length so one span mesh
+# fits every gap in the district at nothing but a rotation.
+#
+# `POLE_SPAN` is that gap, and it is shared with `powerlines.ts`, which is the one
+# number the two halves have to agree on.
+POLE_SPAN = 3.0
+POLE_H = 0.62
+# Where the three wires sit on the crossarm, across the run.
+WIRE_Y = (-0.115, 0.0, 0.115)
+WIRE_Z = POLE_H - 0.045
+TIMBER = (0.435, 0.357, 0.286, 1)
+WIRE = (0.212, 0.196, 0.184, 1)
+INSULATOR = (0.706, 0.741, 0.729, 1)
+
+
+def pole():
+    """One timber pole with a crossarm, standing along the run.
+
+    The run is **+X**, the same convention the lamp post uses for which way it
+    leans, so the client places one by pointing +X at the next pole. The crossarm
+    therefore lies across Y, which is what puts the wires side by side rather than
+    one behind another.
+
+    Taller than a street lamp and shorter than an oak. That ordering is the whole
+    of the scale decision: a power line has to clear the hedges and read across a
+    field, and it must not compete with the trees for the skyline, because the
+    trees are the thing this district is supposed to be about.
+    """
+    made = []
+    made.append(_paint(lib.cyl('pl_pole', 0.027, 0.020, POLE_H,
+                               loc=(0, 0, POLE_H / 2), segments=5),
+                       TIMBER, 'pl_timber', rough=0.9))
+    # The crossarm. Square-sawn, because it is, and it is the one part of this
+    # whose silhouette says "power line" rather than "post".
+    made.append(_paint(lib.box('pl_arm', (0.026, 0.275, 0.020),
+                               loc=(0, 0, POLE_H - 0.028)),
+                       TIMBER, 'pl_timber', rough=0.9))
+    # And a knee brace each side, which is the detail that stops the arm reading
+    # as a plus sign nailed to a stick.
+    for sy in (-1, 1):
+        o = lib.box('pl_brace%d' % (sy > 0), (0.012, 0.070, 0.010),
+                    loc=(0, sy * 0.048, POLE_H - 0.070),
+                    rot=(sy * 0.62, 0, 0))
+        made.append(_paint(o, TIMBER, 'pl_timber', rough=0.9))
+    # Three insulators, pale on purpose: they are the only light-coloured thing on
+    # the pole and they are what makes the arm legible against a dark hedge.
+    for i, y in enumerate(WIRE_Y):
+        made.append(_paint(lib.cyl('pl_ins%d' % i, 0.013, 0.010, 0.026,
+                                   loc=(0, y, POLE_H - 0.005), segments=4),
+                           INSULATOR, 'pl_insulator', rough=0.35))
+    return made
+
+
+def span():
+    """The wires for one pole-gap, sagging, running +X from a pole.
+
+    Three wires, three segments each, and the segments exist only to make the sag
+    a curve rather than a fold. Real conductors sag a good deal more than this at
+    forty metres; a truthful sag at playing zoom reads as slack cable about to be
+    stood on, so it is flattened to a suggestion.
+
+    Deliberately thicker than a wire, and no thicker than the pole. At twenty-two
+    tiles across the screen a truthfully sized conductor is well under a pixel and
+    simply is not there - the same argument as the street lamp's oversized lantern.
+    But the first go overshot in the other direction: at 0.022 the conductors were
+    *thicker than the pole holding them up*, so a run read as three dark planks
+    laid across a field with an occasional stick under them. A wire has to be the
+    thinnest thing in the assembly or it stops being a wire.
+    """
+    made = []
+    mat = lib.material('pl_wire', WIRE, rough=0.55)
+    segs = 3
+    sag = 0.055
+    for i, y in enumerate(WIRE_Y):
+        for k in range(segs):
+            a = k / segs
+            b = (k + 1) / segs
+            # A parabola through the gap, zero at both poles.
+            za = WIRE_Z - sag * 4 * a * (1 - a)
+            zb = WIRE_Z - sag * 4 * b * (1 - b)
+            mx = (a + b) / 2 * POLE_SPAN
+            mz = (za + zb) / 2
+            dx = (b - a) * POLE_SPAN
+            dz = zb - za
+            o = lib.box('pl_wire%d_%d' % (i, k),
+                        (math.hypot(dx, dz), 0.013, 0.012),
+                        loc=(mx, y, mz),
+                        rot=(0, -math.atan2(dz, dx), 0))
+            o.data.materials.append(mat)
+            made.append(o)
+    return made
+
+
 BUILDS = [
     ('prop_lamp_post', lamp_post),
+    ('prop_pole', pole),
+    ('prop_span', span),
     ('prop_bale_round', bale_round),
     ('prop_bale_wrapped', bale_wrapped),
     ('prop_bale_stack', bale_stack),
