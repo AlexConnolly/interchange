@@ -34,6 +34,7 @@ function district(worked?: Set<number>, job: 'plough' | 'combine' = 'plough'): F
     farms: () => [{ tile: t(4, 10), x: 4.5, z: 10.5 }],
     fields: () => [FIELD],
     usable: () => true,
+    dry: () => true,
     // Out along the lane, and back the same way.
     route: (from) => (from === t(4, 10) ? [...LANE] : [...LANE].reverse()),
     work: (tile) => { worked?.add(tile); },
@@ -166,6 +167,8 @@ describe('a tractor at a junction', () => {
         farms: () => [{ tile: t(4, 10), x: 4.5, z: 10.5 }],
         fields: () => [FIELD],
         usable: () => true,
+      dry: () => true,
+        dry: () => true,
         route: (from) => (from === t(4, 10) ? [...LANE] : [...LANE].reverse()),
         work: () => {},
         needsWork: () => true,
@@ -269,6 +272,7 @@ describe('two machines never share a field', () => {
       farms: () => [{ tile: t(4, 10), x: 4.5, z: 10.5 }],
       fields: () => fields,
       usable: () => true,
+      dry: () => true,
       route: (from) => (from === t(4, 10) ? [...laneLong] : [...laneLong].reverse()),
       work: () => {},
       needsWork: () => true,
@@ -398,5 +402,88 @@ describe('the working day', () => {
     const finished = home(Infinity);
     expect(finished).toBeLessThan(Infinity);
     expect(knockedOff).toBeLessThan(finished);
+  });
+});
+
+/*
+ * Water.
+ *
+ * "Tractors still go through the water lol" — reported twice, and the cause was
+ * that nothing ever asked. `usable` is the fog of war and says yes to a beck you
+ * can see; there was no question in the interface that meant "is this dry".
+ *
+ * The test is on the *rectangle* rather than the parcel, because that is what a
+ * tractor drives: furrows across the bounding box. A stream cut across one corner
+ * of the box is ground the machine will cross even if the stream belongs to a
+ * different parcel.
+ */
+describe('tractors and water', () => {
+  /** The same one-lane district, with a beck down x = 15 through the field. */
+  function district(beckAt: number) {
+    const wet = new Set<number>();
+    for (let z = 0; z < SIZE; z++) wet.add(t(beckAt, z));
+    const world = {
+      size: SIZE,
+      farms: () => [{ tile: t(4, 10), x: 4.5, z: 10.5 }],
+      fields: () => [FIELD],
+      usable: () => true,
+      dry: (tile: number) => !wet.has(tile),
+      route: (from: number) => (from === t(4, 10) ? [...LANE] : [...LANE].reverse()),
+      work: () => {},
+      needsWork: () => true,
+      rank: () => 1,
+      job: () => 'plough' as const,
+    };
+    return { world, wet };
+  }
+
+  /** Every tile any machine stands on over a long run. */
+  function visited(world: ConstructorParameters<typeof Farmwork>[0]): Set<number> {
+    const farm = new Farmwork(world);
+    const cap = 64;
+    const vx = new Float32Array(cap);
+    const vz = new Float32Array(cap);
+    const vh = new Float32Array(cap);
+    const vl = new Uint8Array(cap);
+    const vm = new Uint8Array(cap);
+    const vi = new Int32Array(cap);
+    const seen = new Set<number>();
+    for (let s = 0; s < 30 * 400; s++) {
+      const n = farm.step(1 / 30, MACHINES, 0, vx, vz, vh, vl, vm, vi);
+      for (let i = 0; i < n; i++) {
+        const x = Math.floor(vx[i]);
+        const z = Math.floor(vz[i]);
+        if (x < 0 || z < 0 || x >= SIZE || z >= SIZE) continue;
+        seen.add(z * SIZE + x);
+      }
+    }
+    return seen;
+  }
+
+  it('never drives on a wet tile', () => {
+    const { world, wet } = district(15);
+    for (const tile of visited(world)) {
+      expect(wet.has(tile), `tile ${tile % SIZE},${Math.floor(tile / SIZE)}`).toBe(false);
+    }
+  });
+
+  it('drove that field before the beck was there, so the test means something', () => {
+    /*
+     * The other half, and the half that makes the first one worth having. A rule
+     * that refuses every field would also pass "never drives on a wet tile", and
+     * would be a tractor bug of a different kind.
+     */
+    const dryWorld = {
+      ...district(15).world,
+      dry: () => true,
+    };
+    const seen = visited(dryWorld);
+    let inField = 0;
+    for (const tile of seen) {
+      const x = tile % SIZE;
+      const z = Math.floor(tile / SIZE);
+      if (x >= FIELD.x0 && x <= FIELD.x1 && z >= FIELD.z0 && z <= FIELD.z1) inField++;
+    }
+    expect(inField).toBeGreaterThan(6);
   });
 });

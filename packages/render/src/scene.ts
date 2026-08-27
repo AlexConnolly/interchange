@@ -2464,6 +2464,26 @@ export class Renderer {
   }
 
   /** Which tile the pointer is over, by intersecting the ground plane. */
+  /**
+   * The world point under a screen point, unrounded.
+   *
+   * `pick` answers "which tile", which is what a click wants. Zooming wants the
+   * *point*, because keeping a tile under the cursor while the scale changes would
+   * snap the camera to tile boundaries and make a smooth wheel judder. Same
+   * unproject, one fewer floor.
+   */
+  pickPoint(screenX: number, screenY: number): { x: number; z: number } | null {
+    const w = this.renderer.domElement.clientWidth;
+    const h = this.renderer.domElement.clientHeight;
+    const ndcX = (screenX / w) * 2 - 1;
+    const ndcY = -((screenY / h) * 2 - 1);
+    this.tmpVec.set(ndcX, ndcY, -1).unproject(this.camera);
+    const dir = this.camera.getWorldDirection(this.tmpDir);
+    if (Math.abs(dir.y) < 1e-6) return null;
+    const t = (this.camY - this.tmpVec.y) / dir.y;
+    return { x: this.tmpVec.x + dir.x * t, z: this.tmpVec.z + dir.z * t };
+  }
+
   pick(screenX: number, screenY: number, src: RenderSource): number {
     const w = this.renderer.domElement.clientWidth;
     const h = this.renderer.domElement.clientHeight;

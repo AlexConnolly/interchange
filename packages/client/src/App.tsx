@@ -943,6 +943,15 @@ export function App(): JSX.Element {
       if (arms <= 1) yardTiles.add(tile);
       fillYard(tile, world.content.industries[world.sites.def[i]].id);
     }
+    /*
+     * How many businesses the district came with.
+     *
+     * `placed` is built once, here, and anything founded during play is therefore
+     * not in it. The frame loop draws the rest by index, and this is the line
+     * between the two - one number rather than a per-site test, because "was it
+     * here when the world was made" is exactly what the index means.
+     */
+    const bornWith = world.sites.count;
 
     /*
      * And the village.
@@ -1395,6 +1404,9 @@ export function App(): JSX.Element {
     const farmwork = new Farmwork({
       size: DISTRICT,
       usable: (t) => world.influence.usable(t),
+      // Dry land, which `usable` was never asking about: it is the fog of war.
+      // Tractors forded becks for as long as those two questions were one.
+      dry: (t) => t >= 0 && t < DISTRICT * DISTRICT && world.terrain.height[t] > 0,
       route: (from, to) => world.roadRoute(from, to),
       work: (tile) => world.workField(tile),
       needsWork: (tile) => world.fieldNeedsWork(tile),
@@ -2031,10 +2043,42 @@ export function App(): JSX.Element {
     };
     const wheel = (e: WheelEvent): void => {
       e.preventDefault();
-      const next = renderer.tilesAcross * (e.deltaY > 0 ? 1.12 : 1 / 1.12);
+      const was = renderer.tilesAcross;
+      const next = was * (e.deltaY > 0 ? 1.12 : 1 / 1.12);
       // Bounded so a lorry never becomes unreadable, which is the number the
       // whole scale question resolves to.
       renderer.tilesAcross = Math.max(14, Math.min(70, next));
+      /*
+       * And it zooms toward the pointer, not toward the middle of the screen.
+       *
+       * Zooming about the centre means every approach to something is zoom, drag,
+       * zoom, drag - "when someone zooms it should be somewhat towards the mouse's
+       * current position too, no?" - and every map anybody has used for twenty
+       * years works the other way.
+       *
+       * The maths is one line and exact for this camera. The view is orthographic
+       * at a fixed elevation, so screen offsets from the centre scale linearly
+       * with `tilesAcross`: if the scale changes by k, the point under the cursor
+       * stays under the cursor when the camera centre moves to
+       * `W + k * (C - W)`. No iteration, no easing, no drift.
+       *
+       * Clamped afterwards, which does mean the anchor slips at the edges of the
+       * district - and it should. The alternative is letting the camera leave the
+       * map to honour the pointer, and a view of the void is worse than a zoom
+       * that pulls slightly off target in the last few tiles.
+       */
+      const k = renderer.tilesAcross / was;
+      if (k !== 1) {
+        const at = renderer.pickPoint(e.clientX, e.clientY);
+        if (at) {
+          const inset = renderer.tilesAcross * 0.3;
+          const hold = (v: number): number => Math.max(
+            inset, Math.min(DISTRICT - inset, v),
+          );
+          renderer.camX = hold(at.x + (renderer.camX - at.x) * k);
+          renderer.camZ = hold(at.z + (renderer.camZ - at.z) * k);
+        }
+      }
       fit();
     };
     /*
@@ -2432,26 +2476,48 @@ export function App(): JSX.Element {
        * bookkeeping. Never fogged: a yard you own is always visible to you.
        */
       /*
-       * Businesses founded during play, which is depots.
+       * Everything founded during play, which is depots *and* built businesses.
        *
-       * `placed` was built once at startup and a depot appears later, so it
-       * would have no building at all — the classic shape of this bug, and the
-       * same one that left the player's own yard invisible. Sites are scanned
-       * each frame rather than appended on purchase because reading the world is
-       * cheap at this size and cannot get out of step.
+       * This read `if (!world.isDepot(i)) continue;`, and the comment above it
+       * named the bug it was fixing: "`placed` was built once at startup and a
+       * depot appears later, so it would have no building at all — the classic
+       * shape of this bug". Then building businesses arrived and walked into the
+       * identical trap one category wider. A creamery you built took your money,
+       * got a marker with the right icon, and drew nothing: "it says they're
+       * placed, with icon, then nothing?"
+       *
+       * The lesson is that the test was about the wrong thing. Whether a site is
+       * a depot has no bearing on whether the startup pass saw it; whether it
+       * existed at startup does, and that is what the index says. So the test is
+       * now the honest one, and the next kind of building cannot be forgotten
+       * because there is nothing left to remember.
+       *
+       * Scanned each frame rather than appended on purchase because reading the
+       * world is cheap at this size and cannot get out of step - which is the
+       * same reasoning that was already right here.
        */
-      for (let i = 0; i < world.sites.count && pn < src.px.length; i++) {
-        if (world.sites.owner[i] !== world.player) continue;
-        if (!world.isDepot(i)) continue;
-        const tile = world.siteAccessTile[i];
+      for (let i = bornWith; i < world.sites.count && pn < src.px.length; i++) {
+        const tile = world.sites.tile[i];
         if (tile < 0) continue;
-        const at = offRoad(tile, world.sites.x[i], world.sites.y[i]);
-        src.px[pn] = at.x;
-        src.pz[pn] = at.z;
+        if (world.sites.owner[i] !== world.player && !world.influence.usable(tile)) continue;
+        /*
+         * On its own footprint, not off a road.
+         *
+         * A generated business is placed by frontage - pushed off the lane it
+         * stands on - because that is what makes a village look like a village.
+         * One you built is placed by *you*, on a square you were shown in green,
+         * and it belongs in the middle of that square. Anything else moves the
+         * building away from the ground the player just bought and paid to build
+         * on, which they would rightly read as a bug.
+         */
+        const n = world.footprintOf(world.sites.def[i]);
+        src.px[pn] = (tile % DISTRICT) + n / 2;
+        src.pz[pn] = Math.floor(tile / DISTRICT) + n / 2;
         src.pModel[pn] = world.sites.def[i];
-        src.pRot[pn] = at.rot;
+        // Square to the world. A works on your own land has no street to face.
+        src.pRot[pn] = ((tile * 2654435761) % 4) * 0.25;
         claimYard(tile);
-        // A depot runs at night. That is what a depot is for.
+        // Lit, because it is yours and you need to find it in the dark.
         src.pLamp[pn * 3] = 1;
         src.pLamp[pn * 3 + 1] = 0.80;
         src.pLamp[pn * 3 + 2] = 0.50;
