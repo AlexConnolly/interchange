@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   createWorld, Crop, Mode, NO_WAY, TICKS_PER_DAY, TileFlag, facilitiesFor,
+  saveState, restoreState, DAYS_PER_MONTH,
   foliage, isWood, type World,
 } from '@interchange/sim';
 import { loadContent } from '@interchange/data';
@@ -42,6 +43,10 @@ import { Market } from './Market.tsx';
 import { Land } from './Land.tsx';
 import { powerLines, SPAN, WIRE_H } from './powerlines.ts';
 import { isStream, isWet } from './water.ts';
+import { Menu, SaveList, type MenuPage } from './Menu.tsx';
+import {
+  listSaves, writeSave, deleteSave, newId, AUTO_ID, type SaveSlot,
+} from './saves.ts';
 import { introAt, INTRO_LENGTH, INTRO_ACROSS, type Intro } from './intro.ts';
 import { Advisor, type Letter } from './advisor.ts';
 import { Inbox, InboxButton, Toast } from './Inbox.tsx';
@@ -461,6 +466,86 @@ export function App(): JSX.Element {
   /** Which business is in hand, as an index into the industry content. */
   const [placeDef, setPlaceDef] = useState(-1);
   /*
+   * What the page is doing: sitting in the menu, or running a world.
+   *
+   * The game used to begin the moment the page loaded, which cannot survive saves
+   * existing — there has to be a moment before the world is made where you can
+   * choose not to make a new one. So this is the thing the setup effect depends on,
+   * and `null` means "no world yet".
+   *
+   * A `load` carries the slot rather than a flag, because the world has to be
+   * *restored into* as it is created; there is no point in the sequence where a
+   * generated world is handed over and patched afterwards without the opening
+   * sequence having already run over the top of the save.
+   */
+  const [boot, setBoot] = useState<
+    { kind: 'new' } | { kind: 'load'; slot: SaveSlot } | null
+  >(null);
+  const [menuPage, setMenuPage] = useState<MenuPage>('main');
+  /** Which save list the pause menu is showing, if any. */
+  const [saving, setSaving] = useState(false);
+  const [saveNote, setSaveNote] = useState('');
+
+  /**
+   * Write the world into a slot.
+   *
+   * The facts for the name are gathered here rather than in `saves.ts`, because
+   * this is the only place that has a World — and the naming is a *presentation*
+   * decision that belongs with the storage. Two halves, each where it can see what
+   * it needs.
+   */
+  const putSave = useCallback((id: string, auto: boolean): boolean => {
+    if (!live) return false;
+    const w = live.world;
+    let fleet = 0;
+    for (let v = 0; v < w.vehicles.count; v++) {
+      if (w.vehicles.alive[v] && w.vehicles.company[v] === w.player) fleet++;
+    }
+    let places = 0;
+    for (let i = 0; i < w.sites.count; i++) {
+      if (w.sites.owner[i] === w.player) places++;
+    }
+    /*
+     * The season, off the world's own `month` rather than recomputed.
+     *
+     * The first version did its own arithmetic on the day count and said "Summer"
+     * over a clock reading March — because it rounded into the quarter rather than
+     * flooring, and because it assumed the year began at the season rather than in
+     * January. Two mistakes to make where the World already has a `month` getter
+     * doing it correctly for the date display.
+     *
+     * Months 2, 3 and 4 are spring: March, April, May. That is the one thing the
+     * mapping has to get right, and it is the one thing a reader can check.
+     */
+    const season = Math.floor((((w.month - 2) % 12) + 12) % 12 / 3);
+    /*
+     * The company, or the yard it works out of.
+     *
+     * Worldgen names the player's company "Your company", which is the right thing
+     * on a heads-up display and a useless thing at the top of a save list — every
+     * save would be called the same. The yard has a real name, so a save is named
+     * after the place rather than after a placeholder.
+     */
+    let firm = w.companies.names[w.player] ?? '';
+    if (firm === '' || firm === 'Your company') {
+      let yardName = '';
+      for (let y = 0; y < w.yards.count; y++) {
+        if (w.yards.owner[y] === w.player) { yardName = w.yards.names[y] ?? ''; break; }
+      }
+      firm = yardName.replace(/ Yard$/, ' Haulage') || 'Haulage';
+    }
+    const out = writeSave(id, saveState(w), {
+      company: firm,
+      year: w.year,
+      season,
+      cash: w.companies.cash[w.player],
+      fleet,
+      places,
+    }, advisor.current.saved(), auto);
+    if (!out.ok) setSaveNote(out.reason);
+    return out.ok;
+  }, [live]);
+  /*
    * The opening, which is a picture rather than a mode.
    *
    * Only the three things React has to know about are state: whether to say we
@@ -476,6 +561,8 @@ export function App(): JSX.Element {
   const introDone = useRef(false);
   /** The cloud layer, whose opacity the frame loop drives directly. */
   const skyRef = useRef<HTMLDivElement | null>(null);
+  /** The frame loop needs to autosave and cannot see the callback directly. */
+  const autoSave = useRef<() => void>(() => {});
 
   /*
    * The advisor, and it lives in a ref because it is not a value — it is a thing
@@ -517,6 +604,7 @@ export function App(): JSX.Element {
   toolRef.current = tool;
   placeDefRef.current = placeDef;
   introDone.current = intro.done;
+  autoSave.current = () => { putSave(AUTO_ID, true); };
   buildRef.current = buildAt;
   /**
    * How fast the day runs. One, two or four.
@@ -638,6 +726,8 @@ export function App(): JSX.Element {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    // Nothing to build while the menu is up. The effect re-runs when it is not.
+    if (!boot) return;
 
     /*
      * Where in the day the game opens, overridable from the address bar.
@@ -665,9 +755,14 @@ export function App(): JSX.Element {
      *
      * So the balance argument has to be won somewhere other than here.
      */
-    const world = createWorld({
-      seed: 1985, size: DISTRICT, townCount: 3, companyCount: 1,
-    });
+    /*
+     * A load takes its seed from the file, because the terrain is a pure function
+     * of it — the save carries no heightmap and rebuilding the wrong district would
+     * put every road and every field somewhere else.
+     */
+    const world = createWorld(boot.kind === 'load'
+      ? boot.slot.state.config
+      : { seed: 1985, size: DISTRICT, townCount: 3, companyCount: 1 });
     world.dayOffset = dayOffset;
     /*
      * Start in spring, not on the first of January.
@@ -1725,7 +1820,41 @@ export function App(): JSX.Element {
      * it is what starts the loop. The truck starts at the nearest site to the
      * yard because there is no yard yet — step three gives it one.
      */
-    {
+    /*
+     * The opening sequence — a yard, a van, and the first job — happens only for a
+     * new game.
+     *
+     * A load has all of that in it already, and running this over the top would
+     * found a *second* yard and buy a *second* van on top of whatever the player
+     * had. Which is the shape of the bug: the save would restore perfectly and the
+     * game would then hand you a present you did not ask for and could not
+     * explain.
+     */
+    if (boot.kind === 'load') {
+      /*
+       * Restored here, before anything reads the world.
+       *
+       * After `createWorld` because the terrain has to exist — the save has no
+       * heightmap in it, only the seed — and before the camera, the scatter and the
+       * frame loop, all of which take their answers from the world as they find it.
+       * A restore after any of those is a restore into a client that has already
+       * decided where the trees are.
+       */
+      restoreState(world, boot.slot.state);
+      /*
+       * And the post, which is client state and so is not in `state.ts`.
+       *
+       * Only the *ids* — which letters have arrived, and which have been read. The
+       * bodies live in `POST` and putting them in every save file would be a copy
+       * of the game's own text going stale the moment a word of it changed. So a
+       * loaded inbox is rebuilt from the ids against the current text, which also
+       * means a rewritten letter reads correctly in an old save.
+       *
+       * Without this, every load would deliver Tom Ashbury's handover letter
+       * again — the sort of small wrongness that makes a save feel fake.
+       */
+      advisor.current.restore(boot.slot.post.had, boot.slot.post.read, world.tick);
+    } else {
       /*
        * These places were working before you arrived.
        *
@@ -1856,6 +1985,12 @@ export function App(): JSX.Element {
     let introClock = wantsIntro ? 0 : INTRO_LENGTH;
     /** The frame timestamp the opening began on. -1 until the first frame. */
     let introStart = -1;
+    /*
+     * The last game-month an autosave was written for. Starts at -1 and the first
+     * crossing only *records* the month rather than saving, so loading a game does
+     * not immediately overwrite the autosave with a copy of itself.
+     */
+    let lastAuto = -1;
     if (wantsIntro) renderer.tilesAcross = INTRO_ACROSS;
     else setIntro({ label: false, ui: true, done: true });
 
@@ -2528,6 +2663,25 @@ export function App(): JSX.Element {
        * expired behind a pause menu is a notice nobody saw. Checked here, where
        * time only passes when the frame loop is running.
        */
+      /*
+       * The autosave: once a game-month, into its own slot.
+       *
+       * On the *game* clock rather than a real timer, so it fires at the same
+       * points in a game however fast it is being run — and so a player who sits
+       * paused for an hour does not accumulate a dozen identical saves.
+       *
+       * Its own slot, which manual saves never touch. A browser tab is easy to
+       * close by accident and this game is played in long sittings; the whole point
+       * is to make that survivable, and it would not be if it could quietly replace
+       * something the player had chosen to keep.
+       */
+      if (introDone.current) {
+        const month = Math.floor(world.tick / (TICKS_PER_DAY * DAYS_PER_MONTH));
+        if (month > lastAuto) {
+          if (lastAuto >= 0) autoSave.current();
+          lastAuto = month;
+        }
+      }
       if (toastTimer.current > 0 && now > toastTimer.current) {
         toastTimer.current = 0;
         setToast(null);
@@ -3410,7 +3564,20 @@ export function App(): JSX.Element {
       window.removeEventListener('keydown', wake);
       renderer.dispose();
     };
-  }, []);
+    /*
+     * `boot` is the dependency, and it is the whole of the menu working.
+     *
+     * This was `[]` — run once, on mount — which was right when the game began the
+     * instant the page loaded. With a menu in front of it the effect now returns
+     * early with no world, and an empty dependency list means it never runs again:
+     * pressing New game hid the menu and left the survey screen up for ever.
+     *
+     * Nothing else belongs in here. Every other value the effect reads is either a
+     * ref or a `useCallback`, deliberately, because a re-run tears down the WebGL
+     * context and rebuilds the district — which is correct for starting a game and
+     * catastrophic for changing the sound volume.
+     */
+  }, [boot]);
 
   return (
     <div
@@ -3709,11 +3876,73 @@ export function App(): JSX.Element {
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
+      {/*
+        * The menu, instead of the game rather than over it.
+        *
+        * The canvas is still mounted behind — it has to be, or the setup effect has
+        * no element to attach to — but it is blank until a world exists, and the
+        * menu is opaque. That is simpler than tearing the canvas down and putting it
+        * back, and it means starting a game is one state change rather than a
+        * remount race.
+        */}
+      {!boot && menuPage && (
+        <Menu
+          page={menuPage}
+          onPage={setMenuPage}
+          onNew={() => { setMenuPage(null); setBoot({ kind: 'new' }); }}
+          onLoad={(slot) => { setMenuPage(null); setBoot({ kind: 'load', slot }); }}
+          settings={(
+            <Settings
+              options={options}
+              onChange={setOptions}
+              onResume={() => setMenuPage('main')}
+              inline
+            />
+          )}
+        />
+      )}
       {(paused || pauseLeaving) && (
         <Settings
           options={options}
           onChange={setOptions}
-          onResume={() => setPaused(false)}
+          onResume={() => { setPaused(false); setSaving(false); setSaveNote(''); }}
+          /*
+           * Saving lives in the pause menu because that is where the cog goes, and
+           * the cog is what the player reaches for. "Click cog, save game, bosh."
+           */
+          saves={saving ? (
+            <SaveList
+              slots={listSaves().filter((sl) => !sl.auto)}
+              onPick={(sl) => {
+                if (putSave(sl.id, false)) {
+                  setSaving(false);
+                  setPaused(false);
+                }
+              }}
+              onDelete={(sl) => { deleteSave(sl.id); setSaveNote(''); }}
+              newRow={() => {
+                if (putSave(newId(), false)) {
+                  setSaving(false);
+                  setPaused(false);
+                }
+              }}
+            />
+          ) : undefined}
+          note={saveNote}
+          onSave={() => { setSaveNote(''); setSaving(true); }}
+          onQuit={() => {
+            /*
+             * Back to the menu, and the world goes with it. `boot` to null unmounts
+             * the setup effect, whose cleanup disposes the renderer — so there is
+             * no second WebGL context left holding a district nobody can see.
+             */
+            setPaused(false);
+            setSaving(false);
+            setLive(null);
+            setReady(false);
+            setBoot(null);
+            setMenuPage('main');
+          }}
         />
       )}
       {/*

@@ -5895,6 +5895,18 @@ export class World {
   }
 
   /**
+   * Which tiles somebody lives on, so a save can carry them.
+   *
+   * They come *in* from the client — the village is laid out there — so they are
+   * the one piece of state the simulation holds without being able to regenerate
+   * it. Everything else in a save is either derived from the seed or produced by
+   * the sim itself; this crossed the boundary and therefore has to cross back.
+   */
+  buildingTiles(): Iterable<number> {
+    return this.built;
+  }
+
+  /**
    * Build the land register, once the fields have stopped moving.
    *
    * Called at the end of world generation. It cannot be done in the constructor

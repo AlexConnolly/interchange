@@ -140,23 +140,59 @@ function Slider({
 }
 
 export function Settings({
-  options, onChange, onResume,
+  options, onChange, onResume, inline = false, saves, note, onSave, onQuit,
 }: {
   options: Options;
   onChange: (o: Options) => void;
   onResume: () => void;
+  /**
+   * Without the veil and without the Paused heading, for the main menu.
+   *
+   * The same options panel serves both places, because there is one set of options
+   * and two of anything is two things to keep in step. What differs is only the
+   * frame around it: in game it is a card over a paused district, and in the menu
+   * it is a page of a menu.
+   */
+  inline?: boolean;
+  /** The save list, when the player has asked to save. */
+  saves?: JSX.Element;
+  /** Anything that went wrong writing one. */
+  note?: string;
+  onSave?: () => void;
+  onQuit?: () => void;
 }): JSX.Element {
   const set = (patch: Partial<Options>): void => onChange({ ...options, ...patch });
 
   return (
-    <div className="pause-veil" onClick={onResume}>
+    <div
+      className={inline ? 'pause-inline' : 'pause-veil'}
+      onClick={inline ? undefined : onResume}
+    >
       {/* Stop a click inside the card from reaching the veil and closing it,
           which is the oldest bug in modal dialogs. */}
-      <div className="pause" onClick={(e) => e.stopPropagation()}>
-        <div className="pause-head">
-          <h2>Paused</h2>
-          <span>The district is waiting</span>
-        </div>
+      <div
+        className={`pause${inline ? ' bare' : ''}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {!inline && (
+          <div className="pause-head">
+            <h2>Paused</h2>
+            <span>The district is waiting</span>
+          </div>
+        )}
+        {/*
+          * Saving, at the top, because it is the reason most people are here.
+          *
+          * The list replaces the options rather than sitting above them — a page
+          * turn, the same as everywhere else in this interface, and it keeps the
+          * card one screen tall on a laptop.
+          */}
+        {saves !== undefined && (
+          <div className="opt-group">
+            <h3>Save game</h3>
+            {saves}
+          </div>
+        )}
 
         <div className="opt-group">
           <h3>Sound</h3>
@@ -205,7 +241,23 @@ export function Settings({
           </Row>
         </div>
 
-        <button className="pause-resume primary" onClick={onResume}>Resume</button>
+        {note !== undefined && note !== '' && <div className="why">{note}</div>}
+        <div className="pause-row">
+          {onSave && saves === undefined && (
+            <button className="pause-resume" onClick={onSave}>Save game</button>
+          )}
+          {onQuit && (
+            /*
+             * "Main menu" rather than "Quit", because that is what it does — and
+             * because a button labelled Quit in a browser tab is a promise nothing
+             * can keep.
+             */
+            <button className="pause-resume" onClick={onQuit}>Main menu</button>
+          )}
+          {!inline && (
+            <button className="pause-resume primary" onClick={onResume}>Resume</button>
+          )}
+        </div>
         <p className="pause-foot">Esc to close</p>
       </div>
     </div>

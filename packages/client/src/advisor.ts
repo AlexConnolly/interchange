@@ -274,6 +274,41 @@ export class Advisor {
     this.read.add(id);
   }
 
+  /**
+   * Put a saved inbox back: which letters had arrived, and which were read.
+   *
+   * Rebuilt from ids against the *current* `POST` rather than from saved bodies,
+   * so a letter whose wording has been improved since the save reads correctly —
+   * and so a save file is not a copy of the game's text. An id that no longer
+   * exists in `POST` is simply dropped: a letter that has been deleted from the
+   * game should not come back as an empty card.
+   *
+   * `at` is the tick the world is at, not the tick the letter arrived. The arrival
+   * time is not worth a place in the save — "3 months ago" on a letter you read
+   * before you saved is not information anybody acts on — and dating them all to
+   * the load keeps the list in a sensible order without pretending to a precision
+   * it does not have.
+   */
+  restore(had: readonly string[], read: readonly string[], at: number): void {
+    this.letters.length = 0;
+    this.had.clear();
+    this.read.clear();
+    for (const id of had) {
+      this.had.add(id);
+      const tip = POST.find((t) => t.id === id);
+      if (!tip) continue;
+      const { when, ...rest } = tip;
+      void when;
+      this.letters.push({ ...rest, at });
+    }
+    for (const id of read) this.read.add(id);
+  }
+
+  /** What a save needs: the ids, and nothing else. */
+  saved(): { had: string[]; read: string[] } {
+    return { had: [...this.had], read: [...this.read] };
+  }
+
   /*
    * There is deliberately no `markAllRead`. It was written, went unused, and is
    * gone — which is the right end for it: the dot means "there is something here

@@ -124,6 +124,27 @@ same words in a grey box are homework.
 
 ---
 
+## ~~9. Saving, and a main menu~~ — done
+
+**What.** A main menu — New game, Load game, Settings, Exit — and saving from the
+cog. Saves list out of localStorage, auto-named from where you were in the game.
+Autosave every game-month into its own slot. The intro plays on load as well as on
+new.
+
+**The format is a state dump, not a replay.** There was already a save system and
+it did not work: it saves a *command log* and reloads by replaying it, which
+depends on every player action going through the command queue, and none of them
+do — `buyLand`, `placeSite`, `layTrackAt`, `acceptContract`, `cancelContract`,
+`sellOnMarket`, `buyPlace` and `foundYard` have zero pushes between them. A replay
+would rebuild the district as generated with the player having done nothing.
+
+**Generic, walked rather than named.** A hand-written serialiser is a list of what
+somebody remembered, and the failure is silent: a field added to a table next month
+loads a world subtly unlike the one saved. So it walks the tables, and `stateHash`
+plus a round-trip test is what makes that trustworthy.
+
+---
+
 ## Standing rules, for anything on this list
 
 - **Nothing whose visibility matters may be animated through opacity.** Third time

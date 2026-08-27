@@ -2058,6 +2058,147 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   line-height: 1;
 }
 
+/* ------------------------------------------------- the main menu
+
+   The page opens here now, because saves mean there has to be a moment before the
+   world is made where you can choose not to make a new one. Opaque over the blank
+   canvas rather than instead of it: the setup effect needs an element to attach
+   to, and one state change is simpler than a remount. */
+.menu {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  padding: 24px;
+  overflow-y: auto;
+  /* The same sky the opening descends through, held still. A menu on a photograph
+     of the game would be a menu you cannot read; a menu on its weather is a menu
+     that belongs to it. */
+  background:
+    radial-gradient(130% 90% at 50% -18%, #ffffff 0%, #eef1f5 38%, #cdd6e0 78%, #bcc7d4 100%);
+  color: var(--ink);
+}
+.menu-head { text-align: center; }
+.menu-head h1 {
+  margin: 0;
+  font-size: 42px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.menu-head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+
+.menu-list { display: flex; flex-direction: column; gap: 8px; width: 300px; }
+.menu-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 11px 14px;
+  border: 1px solid var(--edge);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.menu-item:hover:not(:disabled) { background: #fff; border-color: #d9a72e; }
+/* Disabled means "there is nothing to load", which the sub-line says in words.
+   Half opacity and a default cursor, not a grey slab. */
+.menu-item:disabled { opacity: 0.5; cursor: default; }
+.menu-label { font-size: 15px; font-weight: 700; }
+.menu-sub { font-size: 11px; color: var(--ink-dim); }
+
+/* A page of the menu: load, or settings. Wider than the list, because a save row
+   carries three lines of information and the options carry sliders. */
+.menu-panel {
+  width: min(440px, 92vw);
+  padding: 14px 16px 16px;
+  border-radius: 14px;
+  background: rgba(247, 243, 234, 0.97);
+  box-shadow: 0 10px 34px rgba(30, 40, 30, 0.22);
+}
+.menu-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.menu-back {
+  border: 0;
+  background: none;
+  padding: 2px 4px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+.menu-back:hover { color: var(--ink); }
+
+/* The save slots, used by the menu's Load and the pause menu's Save alike. */
+.slots { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow-y: auto; }
+.slot-row { display: flex; align-items: stretch; gap: 6px; }
+.slot {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--edge);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.7);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.slot:hover { background: #fff; border-color: #d9a72e; }
+.slot.fresh { align-items: center; color: #8a5a2a; }
+.slot-name { font-size: 13px; font-weight: 700; display: flex; align-items: baseline; gap: 7px; }
+/* The autosave says so on its face, so a player never mistakes it for one of
+   their own and is never surprised when it moves. */
+.slot-name em {
+  font-style: normal;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.07);
+  color: var(--ink-dim);
+}
+.slot-where { font-size: 11px; color: var(--ink); }
+.slot-when { font-size: 10px; color: var(--ink-dim); }
+.slot-bin {
+  flex: 0 0 30px;
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.5);
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+.slot-bin:hover { background: rgba(200, 70, 60, 0.12); border-color: rgba(180, 60, 50, 0.4); color: #a33; }
+
+/* The options panel without its veil, for the menu. */
+.pause-inline { display: block; }
+.pause.bare {
+  box-shadow: none;
+  background: none;
+  padding: 0;
+  max-width: none;
+}
+.pause-row { display: flex; gap: 8px; margin-top: 12px; }
+.pause-row .pause-resume { flex: 1 1 auto; }
+
 /* ------------------------------------------------------ the inbox
 
    A tutorial that arrives as post: a button by the money, a toast when something

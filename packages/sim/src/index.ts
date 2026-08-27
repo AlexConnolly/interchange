@@ -25,6 +25,7 @@ export * from './worldgen.ts';
 export * from './construction.ts';
 export * from './junction.ts';
 export * from './snapshot.ts';
+export * from './state.ts';
 export * from './fittings.ts';
 export * from './planning.ts';
 
