@@ -41,6 +41,7 @@ import { Contracts } from './Contracts.tsx';
 import { Market } from './Market.tsx';
 import { Land } from './Land.tsx';
 import { powerLines, SPAN, WIRE_H } from './powerlines.ts';
+import { isStream, isWet } from './water.ts';
 import { introAt, INTRO_LENGTH, INTRO_ACROSS, type Intro } from './intro.ts';
 import { Advisor, type Letter } from './advisor.ts';
 import { Inbox, InboxButton, Toast } from './Inbox.tsx';
@@ -726,8 +727,9 @@ export function App(): JSX.Element {
        * water shows either side of the parapets, which is the whole of how a
        * bridge is drawn — see `buildRoads`.
        */
-      isStream: (t) => (world.terrain.flags[t] & TileFlag.River) !== 0
-        && world.terrain.height[t] > 0,
+      // See `water.ts`: the same function the tractors ask, so what is drawn as
+      // water and what is driven on cannot disagree again.
+      isStream: (t) => isStream(world.terrain.flags[t], world.terrain.height[t]),
       isYard: (t) => yardTiles.has(t),
       /*
        * Land of yours, both kinds. A parcel that came with a business, and a block
@@ -1616,9 +1618,14 @@ export function App(): JSX.Element {
     const farmwork = new Farmwork({
       size: DISTRICT,
       usable: (t) => world.influence.usable(t),
-      // Dry land, which `usable` was never asking about: it is the fog of war.
-      // Tractors forded becks for as long as those two questions were one.
-      dry: (t) => t >= 0 && t < DISTRICT * DISTRICT && world.terrain.height[t] > 0,
+      /*
+       * Dry land, and it took two goes: the first read `height > 0`, which is sea
+       * level, and a beck round here is a channel cut into ground well above it.
+       * See `water.ts` for the measurement and for why both this and `isStream`
+       * now come out of the same function.
+       */
+      dry: (t) => t >= 0 && t < DISTRICT * DISTRICT
+        && !isWet(world.terrain.flags[t], world.terrain.height[t]),
       route: (from, to) => world.roadRoute(from, to),
       work: (tile) => world.workField(tile),
       needsWork: (tile) => world.fieldNeedsWork(tile),
