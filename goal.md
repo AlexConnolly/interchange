@@ -295,9 +295,18 @@ measures how well you serve, not how big you are. A four-lorry firm doing four t
 the work is regarded the same as the one van; four lorries queued on one milk run
 manage 3.33 loads a day between them and are regarded *less*. Growing is rewarded
 everywhere else in this game; here it is neutral, and what separates a large operator
-from a small one is what they have **built**, which is the local half of the field —
-and that is what keeps the build gates meaningful for the whole game rather than
-until somebody gets rich.
+from a small one is what they have **built**.
+
+**And that bound is measured, not assumed.** Settled approval across fleets of one to
+four on seed 1985: 41.4, 38.6, 43.0 — the spread is the routes getting longer as the
+good ones are taken, not the size. Bigger than four cannot be simulated here because
+the contract board runs out of work, so the ceiling is settled by arithmetic instead:
+the gain is `loadsPerDay × perLoad / fleet` and `loadsPerDay ≤ fleet × loadsPerLorry`,
+so the fleet cancels and the whole thing is bounded by `rest + perLoad ×
+loadsPerLorry / decay` however large the firm. At the best measured productivity that
+bound is 60, and a depot at −22 from 60 is still below the 55 it needs — which is
+what keeps the local build gates biting for the whole game rather than until somebody
+gets rich.
 
 ---
 

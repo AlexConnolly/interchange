@@ -167,6 +167,65 @@ describe('what a load is worth', () => {
   });
 });
 
+describe('however large the firm gets', () => {
+  it('cannot reach the ceiling on haulage alone', () => {
+    /*
+     * The property the whole design rests on, and it is provable rather than
+     * simulable — a sixteen-lorry operator cannot be built on seed 1985 because the
+     * contract board runs out of work at about four, so measuring it directly is not
+     * available.
+     *
+     * The gain per day is `loadsPerDay * PER_LOAD / fleet`, and `loadsPerDay` is at
+     * most `fleet * loadsPerLorry` — so the fleet cancels and the gain is bounded by
+     * `PER_LOAD * loadsPerLorry` whatever the size. Settled approval is therefore
+     * bounded by `rest + PER_LOAD * loadsPerLorry / decay`.
+     *
+     * Measured on seed 1985 across fleets of one to four: 2.11 loads per lorry per
+     * day at best, falling to 1.43 as the good routes are used up. Three is a
+     * generous ceiling for the arithmetic.
+     */
+    const BEST_LOADS_PER_LORRY = 3;
+    const bound = APPROVAL_REST
+      + (noticePerLoad(1) * BEST_LOADS_PER_LORRY) / APPROVAL_DECAY_PER_DAY;
+    expect(bound, 'a haulier can never be universally welcome on lorries alone')
+      .toBeLessThan(100);
+  });
+
+  it('leaves the local gates still biting at that bound', () => {
+    /*
+     * Which is the reason the bound matters. If haulage alone could take a player to
+     * ninety, a depot at minus twenty-two would still leave sixty-eight — above every
+     * threshold in the content — and the local half of the approval field would stop
+     * being a constraint the moment somebody got big.
+     *
+     * At the bound above, a depot's own doorstep is still below what a depot needs,
+     * so a second one never goes beside the first without greens to lift the ground.
+     */
+    const BEST_LOADS_PER_LORRY = 3;
+    const bound = APPROVAL_REST
+      + (noticePerLoad(1) * BEST_LOADS_PER_LORRY) / APPROVAL_DECAY_PER_DAY;
+    const DEPOT_IMPACT = 22;
+    const DEPOT_NEEDS = 55;
+    expect(bound - DEPOT_IMPACT).toBeLessThan(DEPOT_NEEDS);
+  });
+
+  it('settles in the same band for a small fleet as for a larger one', () => {
+    /*
+     * Measured on seed 1985, running each to settlement: one lorry 41.4, three 38.6,
+     * four 43.0. The spread is the routes getting longer as the good ones are taken,
+     * not the size.
+     */
+    const MEASURED = [41.4, 38.6, 43.0];
+    const lo = Math.min(...MEASURED);
+    const hi = Math.max(...MEASURED);
+    expect(hi - lo, 'size barely moves it').toBeLessThan(8);
+    for (const m of MEASURED) {
+      expect(m).toBeGreaterThan(APPROVAL_REST);
+      expect(m).toBeLessThan(60);
+    }
+  });
+});
+
 describe('the decay', () => {
   it('settles where the gain balances it, not at a floor or a ceiling', () => {
     /*
