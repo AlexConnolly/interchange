@@ -955,6 +955,11 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   backdrop-filter: blur(6px);
 }
 .build-hint b { color: #ffb0a0; font-weight: 700; }
+/* The live parish reading, which is information rather than a refusal. Salmon is
+   the colour of "you cannot"; this one is only ever telling you where you stand,
+   including when the answer is yes. */
+.build-hint.quiet { background: rgba(28, 32, 24, 0.66); }
+.build-hint.quiet b { color: #e4dcc6; font-weight: 600; }
 .hud-btn.armed { background: #f4c95d; color: #4a3c14; }
 
 /* The dock. Icons, at the bottom, where the hand is. */
@@ -1019,7 +1024,7 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
  * Money where the eye already goes; the clock on the far side, because it is
  * ambient. Two different kinds of information were sharing a box, and the glass
  * belongs on each of them rather than on the strip that holds them. */
-.purse, .clock {
+.purse, .clock, .mood-dial {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -1114,7 +1119,7 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   backdrop-filter: blur(10px);
 }
 /* The readout does not take clicks, but the button inside it must. */
-.purse, .clock { pointer-events: auto; }
+.purse, .clock, .mood-dial { pointer-events: auto; }
 
 /* ------------------------------------------------------------- pause menu */
 
@@ -1554,6 +1559,7 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 
 .purse,
 .clock,
+.mood-dial,
 .dock,
 .tools,
 .cog,
@@ -1571,6 +1577,7 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 }
 .purse:hover,
 .clock:hover,
+.mood-dial:hover,
 .dock:hover,
 .tools:hover,
 .cog:hover,
@@ -1587,6 +1594,7 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .purse-sum,
 .clock-time,
 .clock-date,
+.mood-num,
 .dock-btn,
 .tool-btn,
 .tool-x,
@@ -2906,4 +2914,114 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   background: none;
   cursor: default;
   pointer-events: auto;
+}
+
+/* ------------------------------------------------------- what the parish thinks
+ *
+ * A face rather than a bar, and the reasoning is in Approval.tsx: a bar says
+ * "fill me", and this is not a thing to be filled. A haulier at thirty and one at
+ * ninety are both playing correctly; the mechanic is about *where* you are
+ * welcome. A face is read in one glance and is honest about being an opinion.
+ */
+.mood-dial {
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+  gap: 7px;
+  padding: 7px 12px 7px 10px;
+}
+.mood-num {
+  font-size: 17px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+/* The five moods, and the colour is the other half of the reading: the face
+   shape carries it at a glance and the tint confirms it without being read. */
+.mood-glad { color: #4f9a63; }
+.mood-warm { color: #6f9a55; }
+.mood-fair { color: #9a9481; }
+.mood-cool { color: #c08a44; }
+.mood-cross { color: #b65340; }
+/* Over the district the furniture goes dark and everything on it inherits — but
+   not the face, which is carrying information in its colour. */
+.mood-dial .mood { color: currentColor; }
+.mood-dial:hover .mood-glad, .mood-dial .mood-glad { color: #7bc48d; }
+.mood-dial:hover .mood-cross, .mood-dial .mood-cross { color: #e08a76; }
+.mood-dial .mood-warm { color: #a3c47f; }
+.mood-dial .mood-fair { color: #cfc9b6; }
+.mood-dial .mood-cool { color: #e6b070; }
+
+/* The panel: the figure at the top, big, then what is behind it. */
+.mood-big {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 6px 0 12px;
+}
+.mood-big-num {
+  font-size: 38px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+/* One reason. The bar on the left is the sign, said twice — position and colour —
+   because a signed number in a list is read as a magnitude first. */
+.why-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.035);
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.why-row:disabled { cursor: default; opacity: 0.85; }
+.why-row:not(:disabled):hover { background: rgba(0, 0, 0, 0.075); }
+.why-bar {
+  width: 3px;
+  align-self: stretch;
+  border-radius: 999px;
+  flex: 0 0 3px;
+}
+.why-bar.up { background: #4f9a63; }
+.why-bar.down { background: #b65340; }
+.why-pts {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.why-pts.up { color: #3f7d4f; }
+.why-pts.down { color: #a5442f; }
+.why-go { opacity: 0.4; font-size: 15px; }
+
+/* A town in the list, which is the row that teaches the mechanic: seeing two
+   towns at different numbers is how a player learns approval is a place. */
+.mood-town {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.035);
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.mood-town:hover { background: rgba(0, 0, 0, 0.075); }
+.mood-town .grow { display: flex; flex-direction: column; min-width: 0; }
+.mood-town-num {
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }

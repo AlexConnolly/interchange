@@ -194,6 +194,74 @@ sixty-two thousand looked like one losing it. The figures have their own line no
 
 ---
 
+## ~~11. Approval: tie actions to impact~~ — done
+
+**The objection.** "I'm a bit iffy with parish. I don't like that it only allows
+you to influence, not do." Approval was a currency — be useful, watch a number
+rise, spend it on permission to widen a lane or on the board agreeing you belong.
+A mechanic whose only output is permission to ask for a favour.
+
+**Turned inside out.** Approval is not spent and not bought. It is a *consequence*
+of what you build and a *gate* on what you build next, and it is **local**.
+
+- Every building carries a signed `approvalImpact` over an `approvalRadius`,
+  summed into a coarse field. Shop +9, green +12, park +16; depot −22, terminal
+  −20, abattoir −20.
+- `approvalNeed` gates placement **where you are standing**. At rest (30) the
+  parish will have a shop, a farm or a green; a creamery wants 35, an abattoir 52,
+  a depot 55.
+- Doing the job stays the baseline: deliveries and stocked shelves lift the
+  district-wide part; the drift pulls it back.
+
+**Its own number, not the amenity penalty**, because pollution and unpopularity
+are different things and the two clearest cases disagree: a quarry is the worst
+amenity penalty in the game and sits where nobody lives; a distribution centre has
+an amenity penalty of 2 and is the most resented building in the parish.
+
+**The move the old design could not express**, measured on seed 1985: creamery
+refused at rest → a £6,000 village green four tiles off → local approval 30.0 to
+37.9 → creamery allowed. Improve a neighbourhood, earn the right to industrialise
+it.
+
+**Gone.** `fundParish`, `levyGain`, `Works`, `propose`, `planningOpen`, the Parish
+tab, and "ask to be counted" — a button costing £9,000 and 22 points of approval,
+bought with the thing it granted. Standing is derived now: a town that thinks well
+enough of you counts you, and stops when you stop deserving it.
+
+**New.** Village green, park and playing field on an `amenity` kind — its own kind
+rather than a terminal with an empty recipe, because half the simulation asks a
+site what it wants and the honest answer for a park is nothing, road access
+included. Models through the Blender pipeline: 264, 628 and 340 tris.
+
+**The dial**, top right beside the clock. A face, not a bar: a bar says "fill me",
+and a haulier at thirty and one at ninety are both playing correctly. Clicking it
+lists what you have built and what each is doing, then the towns one by one —
+which is how a player learns approval is a *place*.
+
+### Bugs the probes and the pictures found
+
+- `raised` landed in `foundIndustry` instead of `placeSite`, so the field was empty
+  everywhere and every impact read as zero. It also has to be player-only, or
+  buying a going concern makes you answer for somebody else's decision.
+- The field summed over integer cell offsets while the reasons list used exact tile
+  distances — a green gave 4.0 to the dial and 3.1 to the explanation of it. Both
+  measure from the cell centre now.
+- Radii of 6–11 tiles are 1.5–2.75 cells on a 4-tile grid: a step, not a gradient.
+  Doubled.
+- `approvalForBuild` is one call, because the gate measures at the footprint centre
+  and anything asking at the cursor asks about the north-west corner — a tile and a
+  half out, enough to show a green preview that refuses the click.
+- **Five even bands put the resting 30 in the fourth one**, so every new game opened
+  with the parish pulling a face at a player who had done nothing. `parish.ts` and
+  its test exist for that alone.
+- The park icon was two crowns over two trunks and read as **two people** at 20px —
+  on the map marker too. It is a tree inside railings now.
+- Placed buildings cleared scatter on their footprint only, so a playing field in a
+  wood came up inside a thicket. The ring goes too, the same ground the
+  "too close to another works" rule already reserves.
+
+---
+
 ## Standing rules, for anything on this list
 
 - **Nothing whose visibility matters may be animated through opacity.** Third time

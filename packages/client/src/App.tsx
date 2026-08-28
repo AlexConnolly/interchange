@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   createWorld, Crop, Mode, NO_WAY, TICKS_PER_DAY, TileFlag, facilitiesFor,
+  APPROVAL_REST,
   saveState, restoreState, DAYS_PER_MONTH,
   foliage, isWood, type World,
 } from '@interchange/sim';
@@ -38,6 +39,7 @@ import { Dock } from './Dock.tsx';
 import { Icon } from './Icons.tsx';
 import { Owned } from './Owned.tsx';
 import { Contracts } from './Contracts.tsx';
+import { Approval, ApprovalDial } from './Approval.tsx';
 import { Market } from './Market.tsx';
 import { Land } from './Land.tsx';
 import { powerLines, SPAN, WIRE_H } from './powerlines.ts';
@@ -274,7 +276,7 @@ type Panel =
   | { k: 'place'; site: number }
   | { k: 'yard'; yard: number }
   | { k: 'vehicles' }
-  | { k: 'planning' }
+  | { k: 'parish' }
   | { k: 'driver'; vehicle: number }
   /** One vehicle, and what can be fitted to it. */
   | { k: 'upgrades'; vehicle: number }
@@ -357,6 +359,15 @@ export function App(): JSX.Element {
   const [hud, setHud] = useState({
     date: '', vehicles: 0, fps: 0, tris: 0, cash: 0, free: 0,
     dayFraction: 0, night: 0, weather: 0,
+    /*
+     * The parish's regard, on the same refresh as the clock and the money.
+     *
+     * On the HUD tick rather than read per frame: `approvalOverall` walks the towns
+     * and samples the field for each, and the figure it produces moves by a
+     * fraction of a point a day. Reading it sixty times a second to render an
+     * integer would be the most wasteful thing on screen.
+     */
+    approval: APPROVAL_REST,
   });
   /*
    * Whether the last HUD refresh brought more money than the one before.
@@ -462,7 +473,9 @@ export function App(): JSX.Element {
    * different moments. Going back to the categories should not silently drop the
    * lorry you were about to place, and closing the tray should.
    */
-  const [buildAt, setBuildAt] = useState<'closed' | 'cats' | 'roads' | 'works'>('closed');
+  const [buildAt, setBuildAt] = useState<
+    'closed' | 'cats' | 'roads' | 'works' | 'parish'
+  >('closed');
   /** Which business is in hand, as an index into the industry content. */
   const [placeDef, setPlaceDef] = useState(-1);
   /*
@@ -610,9 +623,23 @@ export function App(): JSX.Element {
   /** The business in hand, for the frame loop and the click handler. */
   const placeDefRef = useRef(-1);
   /** Which page the tray is on, for the keyboard and right-click handlers. */
-  const buildRef = useRef<'closed' | 'cats' | 'roads' | 'works'>('closed');
+  const buildRef = useRef<'closed' | 'cats' | 'roads' | 'works' | 'parish'>('closed');
   /** The tile under the pointer while a road tool is in hand, or -1. */
   const hoverRef = useRef(-1);
+  /*
+   * What the parish would say about the spot under the cursor, while you hover.
+   *
+   * The red square already knows — it is `canPlaceSite` — but a red square is only
+   * the *verdict*, and approval is the one refusal a player can do something about.
+   * "There is a road across it" needs no explaining; "they want 55 here and you
+   * have 41" is a plan.
+   *
+   * Set from the frame loop, which runs sixty times a second, so it is guarded on
+   * the string actually changing: dragging a footprint across a field would
+   * otherwise re-render the whole interface every frame to write the same words.
+   */
+  const [placeHint, setPlaceHint] = useState('');
+  const placeHintRef = useRef('');
   toolRef.current = tool;
   placeDefRef.current = placeDef;
   introDone.current = intro.done;
@@ -2380,9 +2407,32 @@ export function App(): JSX.Element {
           ? world.placeSite(def, tile)
           : { ok: false, reason: 'Nothing chosen.', site: -1 };
         if (r.ok) {
-          // The footprint is now a building site, so whatever the scatter had
-          // standing there goes - same rule as laying a track through a hedge.
-          for (const t of world.footprintTiles(def, tile)) clearScatterAt(t);
+          /*
+           * The footprint is now a building site, so whatever the scatter had
+           * standing there goes - same rule as laying a track through a hedge.
+           *
+           * And the ring around it, which the first version did not do. A tree is
+           * cleared by the tile its trunk stands in, but its crown is wider than a
+           * tile: put a playing field in a wood and the goalposts came up inside a
+           * thicket, with every neighbouring tree leaning over the pitch. The
+           * placement rule already grows footprints by a tile when it tests whether
+           * two works are too close - a building needs a way in - so the ground
+           * that gets cleared is the same ground.
+           */
+          const clear = new Set<number>();
+          for (const t of world.footprintTiles(def, tile)) {
+            const tx = t % DISTRICT;
+            const tz = Math.floor(t / DISTRICT);
+            for (let dz = -1; dz <= 1; dz++) {
+              for (let dx = -1; dx <= 1; dx++) {
+                const nx = tx + dx;
+                const nz = tz + dz;
+                if (nx < 0 || nz < 0 || nx >= DISTRICT || nz >= DISTRICT) continue;
+                clear.add(nz * DISTRICT + nx);
+              }
+            }
+          }
+          for (const t of clear) clearScatterAt(t);
           setNote('');
           bumpRef.current();
           setPanel({ k: 'place', site: r.site });
@@ -3368,12 +3418,38 @@ export function App(): JSX.Element {
             regions.push({ tiles: owned, wash: PLOT.ownWash, edge: PLOT.ownEdge });
           }
           if (hover >= 0) {
-            const ok = world.canPlaceSite(world.player, placeDefRef.current, hover).ok;
+            const verdict = world.canPlaceSite(world.player, placeDefRef.current, hover);
+            const ok = verdict.ok;
             regions.push({
               tiles: world.footprintTiles(placeDefRef.current, hover),
               wash: ok ? PLOT.yesWash : PLOT.noWash,
               edge: ok ? PLOT.yesEdge : PLOT.noEdge,
             });
+            /*
+             * The parish's view of this spot, whichever way it falls.
+             *
+             * Shown when it is *allowed* as well as when it is not, because the
+             * headroom is the thing being spent: putting the depot here at 57 when
+             * it wants 55 tells you the next one is not going beside it, and that
+             * is a decision made before the click rather than discovered after.
+             */
+            const gate = world.approvalForBuild(placeDefRef.current, hover);
+            const impact = world.content.industries[placeDefRef.current]?.approvalImpact ?? 0;
+            let hint = '';
+            if (!ok && verdict.reason.includes('parish')) {
+              hint = `They want ${gate.need} here. It is ${Math.floor(gate.here)}.`;
+            } else if (ok && gate.need > 0) {
+              hint = `Parish ${Math.floor(gate.here)} of ${gate.need} needed`;
+            } else if (ok && impact > 0) {
+              hint = `Worth +${impact} to the parish round here`;
+            }
+            if (hint !== placeHintRef.current) {
+              placeHintRef.current = hint;
+              setPlaceHint(hint);
+            }
+          } else if (placeHintRef.current !== '') {
+            placeHintRef.current = '';
+            setPlaceHint('');
           }
           renderer.showPlots(regions, src);
         } else if (held !== 'land') {
@@ -3572,6 +3648,7 @@ export function App(): JSX.Element {
           dayFraction: src.dayFraction,
           night: renderer.night,
           weather: renderer.cloud,
+          approval: world.approvalOverall(),
         });
       }
     };
@@ -3829,6 +3906,16 @@ export function App(): JSX.Element {
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
+      {live && showPanel && shownPanel.k === 'parish' && (
+        <Approval
+          world={live.world}
+          onGoSite={(site) => {
+            lookAt(live.world.sites.x[site] + 0.5, live.world.sites.y[site] + 0.5);
+            setPanel({ k: 'place', site });
+          }}
+          onClose={() => setPanel({ k: 'none' })}
+        />
+      )}
       {live && tool === 'land' && (
         <Land
           world={live.world}
@@ -3899,6 +3986,23 @@ export function App(): JSX.Element {
                   <Icon id="creamery" size={20} />
                   <span>Business</span>
                 </button>
+                {/*
+                  * The third category, and the only one that makes you nothing.
+                  *
+                  * A green does not trade, has no contracts and never appears in
+                  * the Business list, so putting it in the same row as a creamery
+                  * would be filing it under the wrong question. What it is *for* is
+                  * the parish, and the parish is the dial at the top of the screen
+                  * — so it is named after the thing it moves.
+                  */}
+                <button
+                  className={`tool-btn ${tool === 'place' ? 'on' : ''}`}
+                  onClick={() => { setBuildAt('parish'); setTool('none'); setNote(''); }}
+                  title="Build something for the parish, on land you own"
+                >
+                  <Icon id="village-green" size={20} />
+                  <span>Parish</span>
+                </button>
               </>
             )}
             {buildAt === 'roads' && (
@@ -3931,19 +4035,49 @@ export function App(): JSX.Element {
                * read as the dock having grown rather than as a panel arriving.
                */
               live.world.content.industries.map((def, i) => (
-                <button
-                  key={def.id}
-                  className={`tool-btn ${tool === 'place' && placeDef === i ? 'on' : ''}`}
-                  onClick={() => {
-                    setPlaceDef(i);
-                    setTool('place');
-                    setNote('');
-                  }}
-                  title={`${def.name} - ${def.footprint} by ${def.footprint} tiles`}
-                >
-                  <Icon id={def.id} size={20} />
-                  <span>{def.name}</span>
-                </button>
+                def.kind === 'amenity' ? null : (
+                  <button
+                    key={def.id}
+                    className={`tool-btn ${tool === 'place' && placeDef === i ? 'on' : ''}`}
+                    onClick={() => {
+                      setPlaceDef(i);
+                      setTool('place');
+                      setNote('');
+                    }}
+                    title={`${def.name} - ${def.footprint} by ${def.footprint} tiles`
+                      + (def.approvalNeed > 0
+                        ? `, and the parish wants ${def.approvalNeed} approval` : '')}
+                  >
+                    <Icon id={def.id} size={20} />
+                    <span>{def.name}</span>
+                  </button>
+                )
+              ))
+            )}
+            {buildAt === 'parish' && live && (
+              /*
+               * The three that give rather than take. Same tool, same preview, same
+               * click — the only thing that makes them a separate page is that a
+               * player looking for a way to be *liked* should not have to read past
+               * fourteen works to find one.
+               */
+              live.world.content.industries.map((def, i) => (
+                def.kind !== 'amenity' ? null : (
+                  <button
+                    key={def.id}
+                    className={`tool-btn ${tool === 'place' && placeDef === i ? 'on' : ''}`}
+                    onClick={() => {
+                      setPlaceDef(i);
+                      setTool('place');
+                      setNote('');
+                    }}
+                    title={`${def.name} - ${def.footprint} by ${def.footprint} tiles,`
+                      + ` and worth ${def.approvalImpact} to the parish round it`}
+                  >
+                    <Icon id={def.id} size={20} />
+                    <span>{def.name}</span>
+                  </button>
+                )
               ))
             )}
           </div>
@@ -3965,6 +4099,18 @@ export function App(): JSX.Element {
         * red square says *whether*, and this says *why not*.
         */}
       {note !== '' && <div className="build-hint"><b>{note}</b></div>}
+      {/*
+        * The live reading, in the refusal's place and only when there is no
+        * refusal to show.
+        *
+        * One pill, not two stacked: they occupy the same slot because they answer
+        * the same question at two moments — what would happen here, and what just
+        * happened when you tried. A refusal you have only just earned outranks a
+        * reading you can get back by moving the mouse.
+        */}
+      {note === '' && placeHint !== '' && tool === 'place' && (
+        <div className="build-hint quiet"><b>{placeHint}</b></div>
+      )}
       {live && showPanel && shownPanel.k === 'market' && (
         <Market
           world={live.world}
@@ -4113,6 +4259,12 @@ export function App(): JSX.Element {
             speed={speed}
             onSpeed={setSpeed}
             onMenu={() => { void sound.start(); setPaused(true); }}
+            dial={(
+              <ApprovalDial
+                approval={hud.approval}
+                onClick={() => setPanel(panel.k === 'parish' ? { k: 'none' } : { k: 'parish' })}
+              />
+            )}
             inbox={(
               <>
                 <InboxButton

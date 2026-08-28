@@ -52,6 +52,16 @@ TIMBER = (0.478, 0.360, 0.243, 1)
 SAWN = (0.741, 0.612, 0.435, 1)
 STONE = (0.667, 0.643, 0.596, 1)
 GRAVEL = (0.596, 0.573, 0.529, 1)
+# The parish's own three, and they are the only greens in this file.
+#
+# Everything else here is a works, and a works is brick, steel and concrete. A
+# green has to read as *not that* from four hundred pixels away, which is a job
+# colour does before shape gets a chance.
+TURF = (0.400, 0.549, 0.286, 1)
+TURF_WORN = (0.510, 0.588, 0.361, 1)
+LEAF = (0.243, 0.420, 0.204, 1)
+PATH = (0.729, 0.690, 0.596, 1)
+RAIL = (0.310, 0.353, 0.322, 1)
 DARK = (0.180, 0.180, 0.196, 1)
 LEAD = (0.400, 0.412, 0.435, 1)
 
@@ -464,6 +474,139 @@ def abattoir():
     return p
 
 
+def _tree(name, at=(0, 0), h=0.30, spread=0.13):
+    """One tree, as two stacked cones on a stem.
+
+    Not the tree from `build_trees.py`: that one is instanced ten thousand times
+    and is budgeted accordingly, where these are a handful inside a model drawn
+    once. Two cones read as a crown at this size and one does not - a single cone
+    is a Christmas tree, which is the wrong tree for an English green.
+    """
+    made = [_paint(lib.cyl(name + '_stem', 0.016, 0.014, h * 0.42,
+                           loc=(at[0], at[1], h * 0.21), segments=6),
+                   TIMBER, name + '_stemmat', rough=0.9)]
+    made.append(_paint(
+        lib.cyl(name + '_c1', spread, spread * 0.62, h * 0.40,
+                loc=(at[0], at[1], h * 0.62), segments=7),
+        LEAF, name + '_leafmat', rough=0.95))
+    made.append(_paint(
+        lib.cyl(name + '_c2', spread * 0.66, spread * 0.10, h * 0.32,
+                loc=(at[0], at[1], h * 0.92), segments=7),
+        LEAF, name + '_leafmat', rough=0.95))
+    return made
+
+
+def _rails(name, w, d, h=0.075, n=5):
+    """Post-and-rail along the two long sides.
+
+    Only two sides. A full enclosure doubles the triangles to draw a fence whose
+    far side the camera cannot see, and the near rail is what says "this ground is
+    kept" - which is the entire job.
+    """
+    made = []
+    for j, sy in enumerate((-1, 1)):
+        made.append(_paint(
+            lib.box('%s_r%d' % (name, j), (w, 0.012, 0.012),
+                    loc=(0, sy * d * 0.5, h)),
+            RAIL, name + '_mat'))
+        for i in range(n):
+            x = -w * 0.5 + w * (i / float(n - 1))
+            made.append(_paint(
+                lib.box('%s_p%d%d' % (name, j, i), (0.018, 0.018, h),
+                        loc=(x, sy * d * 0.5, h / 2)),
+                RAIL, name + '_mat'))
+    return made
+
+
+def village_green():
+    """Turf, a path across it, a few trees and a bench.
+
+    The cheapest thing a player can put up and the one they will put up most, so
+    it has to read at a glance and cost almost nothing to draw. The path is what
+    makes it a green rather than a field: a field is grass nobody crosses.
+    """
+    p = pad('vgp', 1.05, 0.92, body=TURF)
+    # The path, on the diagonal, because a green is crossed corner to corner.
+    p += [_paint(lib.box('vgpath', (1.12, 0.10, 0.008), loc=(0, 0, 0.014),
+                         rot=(0, 0, math.radians(19))), PATH, 'vgpath_mat', rough=0.9)]
+    p += _tree('vgt1', at=(-0.34, 0.26), h=0.34, spread=0.145)
+    p += _tree('vgt2', at=(0.32, -0.24), h=0.27, spread=0.115)
+    p += _tree('vgt3', at=(0.36, 0.28), h=0.23, spread=0.10)
+    # A bench: a seat and two legs, and it is the thing that gives the scale.
+    p += [_paint(lib.box('vgb', (0.15, 0.045, 0.014), loc=(-0.14, -0.28, 0.056)),
+                 SAWN, 'vgb_mat')]
+    for i, x in enumerate((-0.205, -0.075)):
+        p += [_paint(lib.box('vgbl%d' % i, (0.016, 0.045, 0.05),
+                             loc=(x, -0.28, 0.025)), SAWN, 'vgb_mat')]
+    return p
+
+
+def park():
+    """A green with a keeper: railings, a proper walk, a pond and more trees.
+
+    Three tiles where the green is two, and the difference has to be visible or
+    the dearer one is a worse deal that only the numbers know about.
+    """
+    p = pad('pkp', 1.30, 1.14, body=TURF)
+    p += [_paint(lib.box('pkwalk', (1.34, 0.13, 0.008), loc=(0, 0.10, 0.014)),
+                 PATH, 'pkwalk_mat', rough=0.9)]
+    p += [_paint(lib.box('pkwalk2', (0.13, 0.86, 0.008), loc=(-0.22, -0.20, 0.014)),
+                 PATH, 'pkwalk_mat', rough=0.9)]
+    # The pond. Flat, dark, and the one part of a park that is not green.
+    p += [_paint(lib.cyl('pkpond', 0.20, 0.20, 0.010, loc=(0.34, -0.26, 0.014),
+                         segments=10), GLASS, 'pkpond_mat', rough=0.25)]
+    for i, (x, y, h, sp) in enumerate((
+            (-0.46, 0.36, 0.40, 0.17), (-0.10, 0.40, 0.32, 0.14),
+            (0.30, 0.34, 0.36, 0.155), (0.50, 0.02, 0.28, 0.12),
+            (-0.44, -0.30, 0.34, 0.145))):
+        p += _tree('pkt%d' % i, at=(x, y), h=h, spread=sp)
+    p += _rails('pkr', 1.30, 1.14, h=0.085, n=7)
+    # A shelter, so the park has one built thing in it.
+    p += [_paint(lib.box('pksh', (0.20, 0.16, 0.115), loc=(0.06, -0.34, 0.058)),
+                 RENDER, 'pksh_mat')]
+    p += [_paint(lib.box('pkshr', (0.24, 0.20, 0.022), loc=(0.06, -0.34, 0.126)),
+                 PANTILE, 'pkshr_mat')]
+    return p
+
+
+def playing_field():
+    """Marked out, with a pavilion. Flat where the others are planted.
+
+    It has to be told apart from the green at a glance and the two are the same
+    colour, so the difference is all in the layout: mown stripes, a white line
+    round the edge, goals at the ends, and every tree pushed to the boundary.
+    """
+    p = pad('pfp', 1.30, 1.06, body=TURF)
+    # Mown stripes. Pale bands, which is what a cut pitch looks like from above
+    # and is two triangles each.
+    for i in range(4):
+        p += [_paint(lib.box('pfs%d' % i, (1.30, 0.13, 0.006),
+                             loc=(0, -0.39 + i * 0.26, 0.013)),
+                     TURF_WORN, 'pfs_mat', rough=0.95)]
+    # The touchline, as four thin white boxes.
+    for i, (w, d, x, y) in enumerate((
+            (1.06, 0.016, 0, 0.41), (1.06, 0.016, 0, -0.41),
+            (0.016, 0.82, -0.53, 0), (0.016, 0.82, 0.53, 0))):
+        p += [_paint(lib.box('pfl%d' % i, (w, d, 0.006), loc=(x, y, 0.017)),
+                     SILO, 'pfl_mat', rough=0.9)]
+    # Goals, which are the one unmistakable shape on the whole model.
+    for i, sx in enumerate((-1, 1)):
+        p += [_paint(lib.box('pfgb%d' % i, (0.014, 0.24, 0.014),
+                             loc=(sx * 0.53, 0, 0.088)), SILO, 'pfg_mat')]
+        for j, sy in enumerate((-1, 1)):
+            p += [_paint(lib.box('pfgp%d%d' % (i, j), (0.014, 0.014, 0.088),
+                                 loc=(sx * 0.53, sy * 0.12, 0.044)),
+                         SILO, 'pfg_mat')]
+    # The pavilion, off one corner and outside the lines.
+    p += [_paint(lib.box('pfpav', (0.30, 0.18, 0.10), loc=(-0.34, -0.47, 0.05)),
+                 TIMBER, 'pfpav_mat')]
+    p += [_paint(lib.box('pfpavr', (0.34, 0.22, 0.020), loc=(-0.34, -0.47, 0.109)),
+                 STEEL, 'pfpavr_mat')]
+    p += _tree('pft1', at=(0.44, 0.46), h=0.26, spread=0.115)
+    p += _tree('pft2', at=(-0.50, 0.44), h=0.22, spread=0.10)
+    return p
+
+
 def village_shop():
     p = pad('vsp', 0.80, 0.66)
     p += moved(house('vsh', w=0.42, d=0.34, wall=0.34, body=RENDER, roof=PANTILE),
@@ -587,6 +730,9 @@ BUILDS = [
     ('plc_livestock_farm', livestock_farm),
     ('plc_abattoir', abattoir),
     ('plc_village_shop', village_shop),
+    ('plc_village_green', village_green),
+    ('plc_park', park),
+    ('plc_playing_field', playing_field),
     ('plc_yard', yard),
     ('plc_distribution_centre', distribution_centre),
     # Three cottages, and the point of three is that no two next to each other

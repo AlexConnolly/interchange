@@ -284,7 +284,74 @@ const BY_ID: Record<string, () => JSX.Element> = {
   yard: Lorry,
   track: Track,
   pick: Pick,
+  'village-green': Green,
+  park: Park,
+  'playing-field': Pitch,
 };
+
+/**
+ * A broadleaf and a bench: the village green.
+ *
+ * A round crown rather than the fir's triangle, which is the whole distinction
+ * being drawn - the fir is forestry, a crop, and this is a tree nobody is going to
+ * cut down. The bench is what turns a tree into a place.
+ */
+function Green(): JSX.Element {
+  return (
+    <>
+      <circle cx="12" cy="8.4" r="4.6" />
+      <rect x="11.2" y="12" width="1.6" height="4.2" rx="0.5" />
+      <rect x="4.6" y="17.4" width="14.8" height="1.5" rx="0.7" />
+      <rect x="5.6" y="18.9" width="1.4" height="2.4" rx="0.5" />
+      <rect x="17" y="18.9" width="1.4" height="2.4" rx="0.5" />
+    </>
+  );
+}
+
+/**
+ * A tree inside railings: the park.
+ *
+ * It was two trees and a pond, and at twenty pixels two crowns above two thin
+ * trunks read unmistakably as two *people* — which is what it looked like on the
+ * map marker as well, where the same glyph is used. The enclosure is the honest
+ * distinction from a green anyway: a green is open ground the road runs past and a
+ * park is ground somebody put a fence and a gate around.
+ */
+function Park(): JSX.Element {
+  return (
+    <>
+      <path
+        d="M3.6 6.2h16.8v12.6H3.6Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="11.4" r="3.5" />
+      <rect x="11.3" y="14.4" width="1.4" height="3.3" rx="0.45" />
+      <rect x="9.4" y="4.6" width="5.2" height="3.2" rx="0.8" />
+    </>
+  );
+}
+
+/** A goal, and the line it stands on: the playing field. */
+function Pitch(): JSX.Element {
+  return (
+    <>
+      <path d="M5.4 7.2h13.2v1.5H5.4Z" />
+      <rect x="5.4" y="7.2" width="1.5" height="7.4" rx="0.5" />
+      <rect x="17.1" y="7.2" width="1.5" height="7.4" rx="0.5" />
+      <path
+        d="M4 17.6h16"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        fill="none"
+      />
+      <circle cx="12" cy="12.6" r="1.9" />
+    </>
+  );
+}
 
 /** A plain box. General haulage. */
 function BoxBody(): JSX.Element {

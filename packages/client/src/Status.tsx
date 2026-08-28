@@ -51,7 +51,7 @@ function clockTime(fraction: number): string {
 }
 
 export function Status({
-  cash, date, dayFraction, speed, onSpeed, onMenu, inbox,
+  cash, date, dayFraction, speed, onSpeed, onMenu, inbox, dial,
 }: {
   cash: number;
   date: string;
@@ -59,6 +59,19 @@ export function Status({
   speed: number;
   onSpeed: (speed: number) => void;
   onMenu: () => void;
+  /**
+   * What the parish thinks of you, to the left of the clock.
+   *
+   * Beside the clock rather than beside the purse because of what it *is*: the
+   * time and the parish's regard are both facts about the world going on whether
+   * you look or not, where the money and the post are about you. Grouping it with
+   * the clock also means the three things at that end of the bar — mood, hour,
+   * speed — read as one instrument panel.
+   *
+   * Passed in for the same reason the inbox is: it has a panel behind it and this
+   * file holds no state.
+   */
+  dial?: JSX.Element;
   /**
    * The inbox, and its toast, dropped in beside the money.
    *
@@ -98,6 +111,7 @@ export function Status({
         * pixels of gap and makes both obvious.
         */}
       <div className="dials">
+        {dial}
       <div className="clock">
         {/*
           * The figures, then the speed.
