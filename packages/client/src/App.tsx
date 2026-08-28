@@ -43,7 +43,9 @@ import { Approval, ApprovalDial } from './Approval.tsx';
 import {
   DIORAMA_SIZE, DIORAMA_TRIES, DIORAMA_DAY, dioramaAcross, goodEnough, seedFor,
 } from './diorama.ts';
-import { trayPageFor } from './tray.ts';
+import {
+  TRAY_CATEGORIES, BUILDING_PAGES, trayPageFor, type TrayPage,
+} from './tray.ts';
 import { Market } from './Market.tsx';
 import { Land } from './Land.tsx';
 import { powerLines, SPAN, WIRE_H } from './powerlines.ts';
@@ -512,9 +514,8 @@ export function App(): JSX.Element {
    * different moments. Going back to the categories should not silently drop the
    * lorry you were about to place, and closing the tray should.
    */
-  const [buildAt, setBuildAt] = useState<
-    'closed' | 'cats' | 'roads' | 'works' | 'parish'
-  >('closed');
+  /* `closed`, or one of the tray's own pages. See `tray.ts`. */
+  const [buildAt, setBuildAt] = useState<'closed' | TrayPage>('closed');
   /** Which business is in hand, as an index into the industry content. */
   const [placeDef, setPlaceDef] = useState(-1);
   /*
@@ -662,7 +663,7 @@ export function App(): JSX.Element {
   /** The business in hand, for the frame loop and the click handler. */
   const placeDefRef = useRef(-1);
   /** Which page the tray is on, for the keyboard and right-click handlers. */
-  const buildRef = useRef<'closed' | 'cats' | 'roads' | 'works' | 'parish'>('closed');
+  const buildRef = useRef<'closed' | TrayPage>('closed');
   /** The tile under the pointer while a road tool is in hand, or -1. */
   const hoverRef = useRef(-1);
   /*
@@ -4068,41 +4069,44 @@ export function App(): JSX.Element {
             */}
           <div className={`tool-page page-${buildAt}`} key={buildAt}>
             {buildAt === 'cats' && (
-              <>
+              /*
+               * Six categories from one table, rather than three hand-written
+               * buttons. The table is the thing worth having: adding a category used
+               * to mean a button here, a page below, and a filter in the middle of
+               * it, and the filter was where the distribution centre got lost.
+               */
+              TRAY_CATEGORIES.map((cat) => (
                 <button
-                  className={`tool-btn ${tool === 'lay' || tool === 'lift' ? 'on' : ''}`}
-                  onClick={() => { setBuildAt('roads'); setTool('lay'); setNote(''); }}
-                  title="Lay and lift farm tracks on your own land"
+                  key={cat.page}
+                  className={`tool-btn ${buildAt === cat.page ? 'on' : ''}`}
+                  onClick={() => {
+                    setBuildAt(cat.page);
+                    // Roads arrives with its tool already in hand; the rest wait
+                    // for you to pick a building.
+                    setTool(cat.page === 'roads' ? 'lay' : 'none');
+                    setNote('');
+                  }}
+                  title={cat.hint}
                 >
-                  <Icon id="track" size={20} />
-                  <span>Roads</span>
+                  {/*
+                    * The glyph gets the render's box, not the render's size.
+                    *
+                    * A 20px icon beside a 34px render put the word "Roads" a
+                    * dozen pixels above every other label in the row. Sizing the
+                    * glyph up to 34 would make it a very large road; giving it a
+                    * 34-tall box to sit in the middle of costs nothing and lines
+                    * the labels up.
+                    */}
+                  {cat.sample === null
+                    ? (
+                      <span className="tool-glyph">
+                        <Icon id={cat.icon} size={22} />
+                      </span>
+                    )
+                    : <img className="tool-thumb" src={placeThumb(cat.sample)} alt="" />}
+                  <span>{cat.label}</span>
                 </button>
-                <button
-                  className={`tool-btn ${tool === 'place' ? 'on' : ''}`}
-                  onClick={() => { setBuildAt('works'); setTool('none'); setNote(''); }}
-                  title="Build a business on land you own"
-                >
-                  <Icon id="creamery" size={20} />
-                  <span>Business</span>
-                </button>
-                {/*
-                  * The third category, and the only one that makes you nothing.
-                  *
-                  * A green does not trade, has no contracts and never appears in
-                  * the Business list, so putting it in the same row as a creamery
-                  * would be filing it under the wrong question. What it is *for* is
-                  * the parish, and the parish is the dial at the top of the screen
-                  * — so it is named after the thing it moves.
-                  */}
-                <button
-                  className={`tool-btn ${tool === 'place' ? 'on' : ''}`}
-                  onClick={() => { setBuildAt('parish'); setTool('none'); setNote(''); }}
-                  title="Build something for the parish, on land you own"
-                >
-                  <Icon id="village-green" size={20} />
-                  <span>Parish</span>
-                </button>
-              </>
+              ))
             )}
             {buildAt === 'roads' && (
               <>
@@ -4124,17 +4128,16 @@ export function App(): JSX.Element {
                 </button>
               </>
             )}
-            {buildAt === 'works' && live && (
+            {live && BUILDING_PAGES.includes(buildAt as TrayPage) && (
               /*
-               * Every business, and the row scrolls rather than wrapping.
-               *
-               * Sixteen of them will not fit across the district and a grid of
-               * sixteen tiles would be a catalogue rather than a tool row. A strip
-               * that scrolls keeps the tray one row high, which is what makes it
-               * read as the dock having grown rather than as a panel arriving.
+               * Whichever page is open, filled from the content by the same filing
+               * function the categories are built from. One loop for five pages: the
+               * version before this had two, written out, with opposite conditions —
+               * which works right up until a third page arrives or a kind is
+               * renamed, and then a building is on neither.
                */
               live.world.content.industries.map((def, i) => (
-                trayPageFor(def.kind) !== 'works' ? null : (
+                trayPageFor(def.kind, def.deposit) !== buildAt ? null : (
                   <button
                     key={def.id}
                     className={`tool-btn ${tool === 'place' && placeDef === i ? 'on' : ''}`}
@@ -4145,40 +4148,10 @@ export function App(): JSX.Element {
                     }}
                     title={`${def.name} - ${def.footprint} by ${def.footprint} tiles`
                       + (def.approvalNeed > 0
-                        ? `, and the parish wants ${def.approvalNeed} approval` : '')}
-                  >
-                    {/*
-                      * The building, rendered, rather than a glyph of its category.
-                      *
-                      * `alt=""` because the name is right underneath it: a screen
-                      * reader that says "creamery, Creamery" is worse than one that
-                      * says it once. See `placeThumb`.
-                      */}
-                    <img className="tool-thumb" src={placeThumb(def.id)} alt="" />
-                    <span>{def.name}</span>
-                  </button>
-                )
-              ))
-            )}
-            {buildAt === 'parish' && live && (
-              /*
-               * The three that give rather than take. Same tool, same preview, same
-               * click — the only thing that makes them a separate page is that a
-               * player looking for a way to be *liked* should not have to read past
-               * fourteen works to find one.
-               */
-              live.world.content.industries.map((def, i) => (
-                trayPageFor(def.kind) !== 'parish' ? null : (
-                  <button
-                    key={def.id}
-                    className={`tool-btn ${tool === 'place' && placeDef === i ? 'on' : ''}`}
-                    onClick={() => {
-                      setPlaceDef(i);
-                      setTool('place');
-                      setNote('');
-                    }}
-                    title={`${def.name} - ${def.footprint} by ${def.footprint} tiles,`
-                      + ` and worth ${def.approvalImpact} to the parish round it`}
+                        ? `, and the parish wants ${def.approvalNeed} approval` : '')
+                      + (def.approvalImpact > 0
+                        ? `, and is worth ${def.approvalImpact} to the parish round it`
+                        : '')}
                   >
                     {/*
                       * The building, rendered, rather than a glyph of its category.
