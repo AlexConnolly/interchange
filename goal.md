@@ -145,6 +145,55 @@ plus a round-trip test is what makes that trustworthy.
 
 ---
 
+## ~~10. Contracts and tasks~~ — done
+
+**Where it came from.** Reported from a real game: "my tipper is definitely going
+between my livestock farm and the abattoir but the business doesn't seem to know
+about the vehicle anymore — it's just... doing stuff." Buying the place a contract
+delivers to closes the contract, correctly, and leaves the lorry running,
+deliberately. The comment on that code claimed "the player does not have to notice
+that anything happened". They noticed. Measured: £75,206 earned before the
+purchase, £0 in the twenty days after, lorry still driving, work listed nowhere.
+
+**"A contract is a task, but a task is not a contract."** So a task is *derived*,
+not stored: a service of yours with no contract attached. Nothing new to save,
+nothing to keep in step, and the conversion becomes a rename rather than a
+disappearance — `world.tasks()`.
+
+**Measured in tonnes, not money.** A delivery into a place you own pays nothing at
+the moment of unloading, which is right — it is your own shelf, and the money is
+made later when the shop sells. Printing £0/day next to a lorry running flat out
+would be arithmetically true and a lie about whether the run is working. So
+`taskCarried` reports what it moved.
+
+**One list, a chip to say which.** Tasks sit in the Active tab beside contracts
+rather than in a third tab, because they answer the same question — what is my
+fleet doing. Named on the sourcing row too, which is where tasks are born and
+never used to say so.
+
+### Three bugs the pictures found
+
+- **`created` was never stamped.** Two of three `services.alloc` callers omitted
+  the tick, so every run reported existing since the beginning of the world: a task
+  started that afternoon said "78 days on this run" and divided its tonnage by
+  seventy-eight, understating the rate fourfold.
+- **The ledger's second row was clipped.** `.bubble-body` is a flex column with a
+  max height and a flex item shrinks by default: a two-row grid measuring 51px a row
+  was handed a 63px box, and `overflow: hidden` ate the rest. Every cell reported
+  the right text at the right size and half of them were invisible — the *contract*
+  page had been printing two of its four figures for as long as it had had four.
+- **`board.delivered` was set to zero and incremented nowhere.** Every contract in
+  the game printed "0 loads", next to an earnings total in the tens of thousands.
+  Counted at the payment site now, and outside the `pence > 0` test, because a load
+  into a place you own is still a load run.
+
+And a fourth that was only a misreading, which is its own lesson: `.needs
+b::before` puts a middot in front of the figures, and when the row wrapped it
+started line two — "· £62,252 so far" reads as a *minus*, so a contract earning
+sixty-two thousand looked like one losing it. The figures have their own line now.
+
+---
+
 ## Standing rules, for anything on this list
 
 - **Nothing whose visibility matters may be animated through opacity.** Third time
@@ -162,3 +211,7 @@ plus a round-trip test is what makes that trustworthy.
   mid-animation frame looks like a bug. Probe it.
 - **Balance anchor.** A second van at about 8 real minutes on seed 1985, checked
   with `packages/tools/src/probe.ts` after anything that touches the economy.
+- **`window.interchange` is the handle.** `{ world, renderer }` on the running
+  page, so a driver can arrange whatever state a picture needs with the same calls
+  the interface uses. It replaced a growing pile of one-shot URL parameters, and it
+  is how three of the four bugs above were found: measure the DOM, not the pixels.

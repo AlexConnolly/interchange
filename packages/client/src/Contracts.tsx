@@ -6,9 +6,23 @@
  * different moments — "how is that job doing" against "what could I take on" —
  * and the answers want different columns. So: two tabs.
  *
- * **Active** is the money. What it pays, what it has paid so far, and what that
- * comes to per day, which is the only figure that compares a job you took three
- * weeks ago with one you took yesterday.
+ * **Active** is everything you are running, and that is *two kinds of thing*.
+ *
+ * A **contract** is somebody else's work: a payer, a rate, and an end. A **task**
+ * is a standing instruction of your own — move this cargo from here to there,
+ * until told otherwise — with no payer, because both ends are yours and you are
+ * moving your own goods between your own places.
+ *
+ * "A contract is a task, but a task is not a contract." So they share one list and
+ * a chip says which, rather than a third tab: they are the same question — what is
+ * my fleet doing — asked once.
+ *
+ * The reason tasks needed a home at all is a bug. Buying the place a contract
+ * delivers to closes the contract, deliberately, and leaves the lorry running. Up
+ * to now that run then existed nowhere in the interface: "my tipper is definitely
+ * going between my livestock farm and the abattoir but the business doesn't seem
+ * to know about the vehicle anymore." Quite. It was doing unpaid work that no
+ * screen claimed.
  *
  * **Available** is what is left after filtering out everything you are already
  * on. A board that keeps offering you work you have taken is a board you stop
@@ -35,7 +49,14 @@ type Tab = 'active' | 'open';
 
 /** A row on either tab, with everything both the list and the page need. */
 interface Row {
+  /** A contract's board id, or -1 for a task. */
   id: number;
+  /** A task's service id, or -1 for a contract. */
+  service: number;
+  /** Where it runs, which a task has to carry because it has no board entry. */
+  from: number;
+  to: number;
+  cargo: number;
   /** The lorry on it, or -1. */
   vehicle: number;
   /** How far the pickup is from your yard, for ordering the offers. */
@@ -104,11 +125,35 @@ function gather(world: World, tab: Tab): Row[] {
     }
     rows.push({
       id: i,
+      service: b.service[i],
+      from: b.from[i],
+      to: b.to[i],
+      cargo: b.cargo[i],
       vehicle,
       away: Math.hypot(world.sites.x[b.from[i]] - at.x, world.sites.y[b.from[i]] - at.z),
       ready,
       ownsKind,
     });
+  }
+
+  /*
+   * And the tasks, on the Active tab only. There is no such thing as an available
+   * task: a task is something you set up, not something you are offered.
+   */
+  if (tab === 'active') {
+    for (const t of world.tasks()) {
+      rows.push({
+        id: -1,
+        service: t.service,
+        from: t.from,
+        to: t.to,
+        cargo: t.cargo,
+        vehicle: t.vehicle,
+        away: Math.hypot(world.sites.x[t.from] - at.x, world.sites.y[t.from] - at.z),
+        ready: null,
+        ownsKind: false,
+      });
+    }
   }
 
   if (tab === 'open') {
@@ -125,8 +170,17 @@ function gather(world: World, tab: Tab): Row[] {
       return x.away - y.away;
     });
   } else {
-    // Trouble first. A contract with nobody on it is work you have promised and
-    // are not doing, and that belongs at the top whatever it pays.
+    /*
+     * Trouble first. A contract with nobody on it is work you have promised and
+     * are not doing, and that belongs at the top whatever it pays. A *task* with
+     * nobody on it is the same trouble one degree quieter — nobody is owed, but a
+     * shop is running dry — so it sorts by the same rule.
+     *
+     * Then by what it pays per day, which tasks have no answer to: `contractEarned`
+     * returns zero for a task's id of -1, so they fall in below the paid work.
+     * Which is the right order to read them in and not an accident of the guard —
+     * money in hand before goods moved.
+     */
     rows.sort((x, y) => {
       const ax = x.vehicle < 0 ? 0 : 1;
       const ay = y.vehicle < 0 ? 0 : 1;
@@ -137,29 +191,44 @@ function gather(world: World, tab: Tab): Row[] {
   return rows;
 }
 
-/** The two ends of a contract, in words, used by both the list and the page. */
-function endsOf(world: World, id: number): { from: string; to: string; cargo: number } {
-  const b = world.contractBoard;
+/**
+ * The two ends, in words. Off the *row* rather than off the board, because a task
+ * has no board entry and its ends are the only place they exist.
+ */
+function endsOf(world: World, r: { from: number; to: number; cargo: number }): {
+  from: string; to: string; cargo: number;
+} {
   return {
-    from: C.industries[world.sites.def[b.from[id]]].name,
-    to: C.industries[world.sites.def[b.to[id]]].name,
-    cargo: b.cargo[id],
+    from: C.industries[world.sites.def[r.from]]?.name ?? 'Somewhere',
+    to: C.industries[world.sites.def[r.to]]?.name ?? 'Somewhere',
+    cargo: r.cargo,
   };
 }
 
 export function Contracts({
-  world, onGoSite, onGoDriver, onTake, onCancel, onClose,
+  world, onGoSite, onGoDriver, onTake, onCancel, onEndTask, onClose,
 }: {
   world: World;
   onGoSite: (site: number) => void;
   onGoDriver: (vehicle: number) => void;
   onTake: (contract: number, vehicle: number) => void;
   onCancel: (contract: number) => void;
+  /** Take the lorry off a task, which ends it. There is nothing to give back. */
+  onEndTask: (service: number) => void;
   onClose: () => void;
 }): JSX.Element {
   const [tab, setTab] = useState<Tab>('active');
-  /** Which contract's page is open, or -1 for the list. */
-  const [open, setOpen] = useState(-1);
+  /*
+   * Which row's page is open, as the row itself rather than an id.
+   *
+   * Because there are two kinds of row now and one number cannot say which: a
+   * board id and a service id are both small integers and would silently mean
+   * each other. The row already carries the discriminator and both ends, and
+   * everything that changes while the page is open — the lorry, the takings, the
+   * tonnage — is read live off the world underneath, so holding the row is not
+   * holding stale figures.
+   */
+  const [open, setOpen] = useState<Row | null>(null);
   const b = world.contractBoard;
 
   const active = gather(world, 'active');
@@ -172,11 +241,105 @@ export function Contracts({
    * the mistake worth not repeating: a panel that appeared *on top of* the list it
    * came from was the thing that got called out as landing on top again.
    */
-  if (open >= 0 && b.state[open] !== ContractState.Closed) {
+  /*
+   * A task's page. Fewer figures than a contract's, honestly: there is no rate to
+   * quote and no offer to weigh up, because you set this one up yourself. What is
+   * left is whether it is running and what it has shifted.
+   */
+  if (open && open.id < 0) {
     const e = endsOf(world, open);
-    const held = b.state[open] === ContractState.Running
-      || b.state[open] === ContractState.Idle;
-    const earned = world.contractEarned(open);
+    const carried = world.taskCarried(open.service);
+    let onIt = -1;
+    for (let v = 0; v < world.vehicles.count; v++) {
+      if (world.vehicles.alive[v] && world.vehicles.service[v] === open.service) {
+        onIt = v;
+        break;
+      }
+    }
+    return (
+      <div className="bubble fixed">
+        <div className="sheet-head">
+          <button
+            className="x"
+            data-quiet
+            onClick={() => setOpen(null)}
+            aria-label="Back"
+          >&lsaquo;</button>
+          <div className="grow">
+            <div className="sheet-title">{e.from} &rarr; {e.to}</div>
+            <div className="sheet-sub">{C.cargo[e.cargo].name} &middot; your own run</div>
+          </div>
+          <button className="x" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        <div className="bubble-body slide-in">
+          <div className="ledger">
+            <div className="ledger-cell">
+              <i>Carried</i><b>{Math.round(carried.tonnes)} t</b>
+            </div>
+            <div className="ledger-cell">
+              <i>Per day</i><b>{carried.perDay.toFixed(1)} t</b>
+            </div>
+            <div className="ledger-cell">
+              <i>Running</i>
+              <b>{carried.days < 2 ? 'since today' : `${Math.floor(carried.days)} days`}</b>
+            </div>
+            {/*
+              * Said plainly rather than left as a blank cell where a contract has
+              * its rate. A player who has just watched a contract turn into this
+              * wants to know where the money went, and the answer is that it moved
+              * to the far end - the shop sells it - not that it stopped.
+              */}
+            <div className="ledger-cell">
+              <i>Pays</i><b>at the far end</b>
+            </div>
+          </div>
+
+          <div className="head">On it</div>
+          {onIt >= 0 ? (
+            <button className="driver" onClick={() => onGoDriver(onIt)}>
+              <img
+                className="veh-thumb"
+                src={thumb(C.vehicles[world.vehicles.type[onIt]].id)}
+                alt=""
+              />
+              <span className="grow">
+                <span className="driver-name">
+                  {C.vehicles[world.vehicles.type[onIt]].name}
+                </span>
+                <span className="driver-where">
+                  {carried.days < 2 ? 'started today'
+                    : `${Math.floor(carried.days)} days on this run`}
+                </span>
+              </span>
+              <span className="driver-no">&rsaquo;</span>
+            </button>
+          ) : (
+            <div className="nowt">
+              <span className="nowt-head">Nobody is on this</span>
+              <span className="nowt-sub">
+                Nothing is moving between them until a lorry is put on it.
+              </span>
+            </div>
+          )}
+          <div className="plot-row">
+            <button className="btn" onClick={() => onGoSite(open.from)}>Show me</button>
+            {/* "Take the lorry off" rather than "give it back": there is nobody
+                to give it to. Ending a task frees the lorry and stops the run. */}
+            <button
+              className="btn give"
+              onClick={() => { onEndTask(open.service); setOpen(null); }}
+            >Take the lorry off</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (open && b.state[open.id] !== ContractState.Closed) {
+    const e = endsOf(world, open);
+    const held = b.state[open.id] === ContractState.Running
+      || b.state[open.id] === ContractState.Idle;
+    const earned = world.contractEarned(open.id);
     /*
      * The hourly rate, asked of the lorry that is actually on it.
      *
@@ -189,14 +352,14 @@ export function Contracts({
     let onIt = -1;
     if (held) {
       for (let v = 0; v < world.vehicles.count; v++) {
-        if (world.vehicles.alive[v] && world.vehicles.service[v] === b.service[open]) {
+        if (world.vehicles.alive[v] && world.vehicles.service[v] === b.service[open.id]) {
           onIt = v;
           break;
         }
       }
     }
-    const hourly = onIt >= 0 ? world.contractPerHour(open, onIt) : perHour(world, open);
-    const spare = held ? [] : world.driversFor(open).filter((d) => d.suitable);
+    const hourly = onIt >= 0 ? world.contractPerHour(open.id, onIt) : perHour(world, open.id);
+    const spare = held ? [] : world.driversFor(open.id).filter((d) => d.suitable);
     return (
       <div className="bubble fixed">
         <div className="sheet-head">
@@ -205,7 +368,7 @@ export function Contracts({
           <button
             className="x"
             data-quiet
-            onClick={() => setOpen(-1)}
+            onClick={() => setOpen(null)}
             aria-label="Back"
           >&lsaquo;</button>
           <div className="grow">
@@ -226,7 +389,7 @@ export function Contracts({
           <div className="ledger">
             <div className="ledger-cell">
               <i>Pays</i>
-              <b>{hourly > 0 ? `${money(hourly)}/hr` : `${money(b.pay[open])}/t`}</b>
+              <b>{hourly > 0 ? `${money(hourly)}/hr` : `${money(b.pay[open.id])}/t`}</b>
             </div>
             {held && (
               <>
@@ -234,16 +397,16 @@ export function Contracts({
                 <div className="ledger-cell"><i>Per day</i><b>{money(earned.perDay)}</b></div>
                 <div className="ledger-cell">
                   <i>Loads run</i>
-                  <b>{b.delivered[open]}</b>
+                  <b>{b.delivered[open.id]}</b>
                 </div>
               </>
             )}
             {!held && (
               <>
-                <div className="ledger-cell"><i>Rate</i><b>{money(b.pay[open])}/t</b></div>
+                <div className="ledger-cell"><i>Rate</i><b>{money(b.pay[open.id])}/t</b></div>
                 <div className="ledger-cell">
                   <i>Loaded run</i>
-                  <b>{Math.round(b.distance[open])} tiles</b>
+                  <b>{Math.round(b.distance[open.id])} tiles</b>
                 </div>
                 {/*
                   * The dead miles, which is the fact an offer is most often
@@ -291,7 +454,7 @@ export function Contracts({
                 </div>
               )}
               <div className="plot-row">
-                <button className="btn" onClick={() => onGoSite(b.from[open])}>
+                <button className="btn" onClick={() => onGoSite(open.from)}>
                   Show me
                 </button>
                 {/*
@@ -301,7 +464,7 @@ export function Contracts({
                   */}
                 <button
                   className="btn give"
-                  onClick={() => { onCancel(open); setOpen(-1); }}
+                  onClick={() => { onCancel(open.id); setOpen(null); }}
                 >Give it back</button>
               </div>
             </>
@@ -327,7 +490,7 @@ export function Contracts({
                 <button
                   key={d.vehicle}
                   className="driver"
-                  onClick={() => { onTake(open, d.vehicle); setOpen(-1); }}
+                  onClick={() => { onTake(open.id, d.vehicle); setOpen(null); }}
                 >
                   <img
                     className="veh-thumb"
@@ -388,22 +551,27 @@ export function Contracts({
             </span>
             <span className="nowt-sub">
               {tab === 'active'
-                ? 'Take something on from the Available tab and put a lorry on it.'
+                ? 'Take work on from the Available tab, or set up a run of your own '
+                  + 'from a business you own.'
                 : 'Offers appear as businesses fill their yards. Give it a day.'}
             </span>
           </div>
         )}
         {rows.map((r) => {
-          const e = endsOf(world, r.id);
+          const e = endsOf(world, r);
           const cargo = C.cargo[e.cargo];
+          const task = r.id < 0;
           const earned = world.contractEarned(r.id);
-          const hourly = perHour(world, r.id);
+          const carried = task ? world.taskCarried(r.service) : null;
+          const hourly = task ? 0 : perHour(world, r.id);
           return (
             <button
-              key={r.id}
+              /* Board ids and service ids overlap, so the kind is part of the key
+                 or React reuses a contract's row for a task. */
+              key={task ? `t${r.service}` : `c${r.id}`}
               className={`job${r.ready !== null ? ' ready' : ''}`
                 + `${tab === 'open' && r.ready === null ? ' blocked' : ''}`}
-              onClick={() => setOpen(r.id)}
+              onClick={() => setOpen(r)}
             >
               <span className="job-line">
                 <span className="swatch" style={{ background: cargo.colour }} />
@@ -415,18 +583,44 @@ export function Contracts({
                   * same per tonne and differ fourfold in what they are worth - and
                   * comparing offers is the entire purpose of this list.
                   */}
-                {hourly > 0
-                  ? <span className="pay">{money(hourly)}<i>/hr</i></span>
-                  : <span className="pay">{money(b.pay[r.id])}<i>/t</i></span>}
+                {/*
+                  * What it pays, or - for a task - what kind of thing it is.
+                  *
+                  * The chip sits where the money would, which is the point: the
+                  * one column that reads straight down the list answers "what is
+                  * this worth to me", and for a task the honest answer is not a
+                  * number but a category. Reading `task` down the column is how
+                  * you tell at a glance which of your lorries are earning and
+                  * which are stocking your own shelves.
+                  */}
+                {task
+                  ? <span className="kind">task</span>
+                  : hourly > 0
+                    ? <span className="pay">{money(hourly)}<i>/hr</i></span>
+                    : <span className="pay">{money(b.pay[r.id])}<i>/t</i></span>}
               </span>
               {tab === 'active' ? (
                 <span className={`needs${r.vehicle >= 0 ? '' : ' cannot'}`}>
                   <BodyIcon handling={cargo.handling} />
-                  {r.vehicle >= 0
-                    ? `${C.vehicles[world.vehicles.type[r.vehicle]].name} · ${b.delivered[r.id]} loads`
-                    : 'nobody on it'}
-                  {/* The two figures the Active tab exists for. */}
-                  {r.vehicle >= 0 && <b>{money(earned.total)} so far · {money(earned.perDay)}/day</b>}
+                  {/* In a span of its own so it wraps as a unit - see `.needs`. */}
+                  <span>
+                    {r.vehicle >= 0
+                      ? C.vehicles[world.vehicles.type[r.vehicle]].name
+                        + (task ? '' : ` · ${b.delivered[r.id]} loads`)
+                      : 'nobody on it'}
+                  </span>
+                  {/* The two figures the Active tab exists for - money for a
+                      contract, tonnage for a task, in the same place and the same
+                      shape: what it has done, and what that is a day. */}
+                  {r.vehicle >= 0 && (
+                    /* Its own line, always. See `.needs .figs`. */
+                    <b className="figs">
+                      {carried
+                        ? `${Math.round(carried.tonnes)} t carried`
+                          + ` · ${carried.perDay.toFixed(1)} t/day`
+                        : `${money(earned.total)} so far · ${money(earned.perDay)}/day`}
+                    </b>
+                  )}
                 </span>
               ) : (
                 <span className={`needs${r.ready !== null ? ' can' : ' cannot'}`}>

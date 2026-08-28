@@ -715,6 +715,18 @@ function Supply({
     );
   }
 
+  /*
+   * A run already going, which is a **task**: a standing instruction of yours to
+   * keep moving this, with no contract behind it.
+   *
+   * The word is on the row because this row is where tasks are born and it never
+   * used to say so. A player sets one of these up here, sees a lorry start
+   * driving, and then looks for it in Contracts — where, until now, it was not,
+   * because it is not a contract. "My tipper is definitely going between my
+   * livestock farm and the abattoir but the business doesn't seem to know about
+   * the vehicle anymore." It did know; it had no word for it. Naming it here and
+   * listing it there is the whole of the fix.
+   */
   if (run) {
     return (
       <div className="running-row">
@@ -725,6 +737,7 @@ function Supply({
             <em>{stock} in hand</em>
           </span>
           <span className="running-sub">
+            <span className="kind">task</span>
             {run.vehicle >= 0
               ? C.vehicles[world.vehicles.type[run.vehicle]].name
               : 'no lorry on it'}

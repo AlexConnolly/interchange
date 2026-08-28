@@ -108,6 +108,34 @@ describe('a contract with a lorry on it', () => {
     expect(e.perDay).toBe(Math.round(e.total / e.days));
   });
 
+  it('counts the loads it has run', () => {
+    /*
+     * `delivered` was set to zero when a contract was offered and incremented
+     * nowhere in the simulation, so every contract in the game reported "0 loads"
+     * — printed on the row in the list and as a figure of its own on the detail
+     * page, next to an earnings total in the tens of thousands. The two facts sat
+     * in the same sentence and contradicted each other.
+     */
+    const w = district();
+    const id = takeable(w);
+    expect(id).not.toBe(NONE);
+    const free = w.driversFor(id).find((d) => d.suitable);
+    expect(free).toBeTruthy();
+    if (!free) return;
+    expect(w.acceptContract(id, w.player, free.vehicle)).toBe(true);
+    expect(w.contractBoard.delivered[id]).toBe(0);
+
+    for (let i = 0; i < 45 * TICKS_PER_DAY; i++) w.step();
+
+    const loads = w.contractBoard.delivered[id];
+    expect(loads, 'it has run some loads').toBeGreaterThan(0);
+    /*
+     * And the two figures agree. A contract cannot have been paid without having
+     * carried anything, which is the shape the bug took.
+     */
+    expect(w.contractEarned(id).total).toBeGreaterThan(0);
+  });
+
   it('does not credit a load to a contract that is not running it', () => {
     // One lorry, one contract, so every other contract on the board must still
     // read zero after a long run. The scan that finds the contract from the

@@ -500,9 +500,56 @@ html, body, #root, .app {
 .job.ready:hover { background: #f5fdf7; border-color: rgba(72, 156, 96, 0.6); }
 .job.blocked { opacity: 0.62; }
 .job.blocked:hover { opacity: 1; }
+/*
+ * Two tidy lines rather than a broken one.
+ *
+ * `.needs` is a flex row and its first child is a bare text node, which breaks
+ * wherever it runs out of room while the `<b>` beside it stays put: a row reading
+ * "Refrigerated van · 0 loads" and "£62,252 so far · £3,457/day" came out as
+ * "Refrigerated van · 0 · £62,252 so far ·" over "loads   £3,457/day". The middot
+ * left stranded next to a figure read as a minus sign, which made a contract
+ * earning sixty-two thousand pounds look like one losing it.
+ *
+ * So the row may wrap, and each part may not.
+ */
+.needs { flex-wrap: wrap; }
+.needs > span:not([class]), .needs b { white-space: nowrap; }
 .needs b { font-weight: 650; opacity: 0.75; }
+/*
+ * The figures, on a line of their own and without the leading separator.
+ *
+ * Wrapping tidily was not enough. `.needs b::before` puts a middot in front of
+ * the `<b>`, which is right when it follows the lorry on one line and reads as a
+ * *minus sign* the moment it starts a line: "· £62,252 so far" at the head of
+ * line two is how a contract earning sixty-two thousand pounds came to look like
+ * one losing it.
+ *
+ * And a fixed line for them is better than a line they sometimes get. What the
+ * row says is "this lorry, doing this much" — two facts of different kinds, which
+ * belong on two lines whether or not the numbers happen to be long enough today
+ * to force it.
+ */
+.needs .figs { flex-basis: 100%; }
+.needs .figs::before { content: none; }
 .needs b::before { content: "\00b7 "; }
 .pay i { font-style: normal; font-weight: 500; opacity: 0.55; font-size: 11px; }
+
+/* A task's chip, where a contract prints its rate.
+ *
+ * Deliberately quiet - a hollow outline rather than a filled badge - because it
+ * sits in the column the eye runs down looking for money, and a task is not
+ * competing for that attention. It is a label saying "this one is yours", and the
+ * moment it shouts it starts reading like a warning. */
+.kind {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #7c8ba0;
+  border: 1px solid #cdd6e2;
+  border-radius: 999px;
+  padding: 1px 7px;
+  background: #f4f7fb;
+}
 
 /* ---------------------------------------------------------------- bubble
  *
@@ -1728,7 +1775,16 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 }
 .running-row .grow { display: flex; flex-direction: column; min-width: 0; }
 .running-name { font-size: 12px; font-weight: 600; }
-.running-sub { font-size: 10.5px; color: var(--ink-dim); }
+.running-sub {
+  font-size: 10.5px;
+  color: var(--ink-dim);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+/* Smaller here than on the contracts list: this row is a sub-line under a cargo
+   name, and the chip at full size outweighs the thing it is labelling. */
+.running-sub .kind { font-size: 9.5px; padding: 0 5px; }
 .running-off {
   border: 1px solid rgba(0, 0, 0, 0.14);
   border-radius: 8px;
@@ -2649,6 +2705,17 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   border-radius: 10px;
   overflow: hidden;
   background: rgba(0, 0, 0, 0.06);
+  /*
+   * Never squashed by the column it sits in.
+   *
+   * `.bubble-body` is a flex column with a max height, and a flex item shrinks
+   * by default: a two-row grid whose rows measured 51px each was being given a
+   * 63px box, and `overflow: hidden` up there quietly ate the second row. Every
+   * cell reported the right size and the right text and half of them were
+   * invisible - the contract page has printed two of its four figures for as long
+   * as it has had four.
+   */
+  flex: 0 0 auto;
 }
 .ledger-cell {
   display: flex;

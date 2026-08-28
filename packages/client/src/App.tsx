@@ -3636,6 +3636,25 @@ export function App(): JSX.Element {
     document.addEventListener('visibilitychange', onVisible);
 
     raf = requestAnimationFrame(loop);
+    /*
+     * A handle on the running game, for measuring it from outside.
+     *
+     * Because "how does it look" and "what is it actually doing" have been the
+     * two hardest questions in this project and screenshots keep answering the
+     * first one wrongly — a headless browser on software GL renders this scene at
+     * about three frames a second, so the shutter opens seconds after the state
+     * it was meant to catch. Every workaround so far has been a new URL parameter
+     * that sets one thing up, and there are five of them now.
+     *
+     * One handle instead. A driver can arrange whatever state the picture needs
+     * with the same calls the interface uses, which means the picture is of the
+     * real thing rather than of a fixture built to resemble it.
+     *
+     * Not hidden behind a build flag, on the same reasoning as `?happyHour=`: a
+     * single-player game on a machine whose console is already open loses nothing
+     * by admitting the state is there.
+     */
+    (window as unknown as { interchange: unknown }).interchange = { world, renderer };
     setLive({ world, renderer, src });
     setReady(true);
 
@@ -3803,6 +3822,9 @@ export function App(): JSX.Element {
             const r = live.world.cancelContract(contract);
             if (r.ok) { setNote(''); bump(); } else setNote(r.reason);
           }}
+          /* The same call the sourcing screen makes, because it is the same act:
+             a task has one control and it is the lorry. */
+          onEndTask={(service) => { if (live.world.endRun(service)) bump(); }}
           onClose={() => setPanel({ k: 'none' })}
         />
       )}

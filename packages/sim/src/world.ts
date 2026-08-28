@@ -2001,16 +2001,27 @@ export class World {
      * service on the vehicle is the link - a contract *is* a service underneath -
      * so the lookup is a scan of the board, which is a few dozen entries.
      */
-    if (pence > 0) {
-      const svc = this.vehicles.service[vehicle];
-      if (svc !== NONE) {
-        const cb = this.contractBoard;
-        for (let i = 0; i < cb.count; i++) {
-          if (cb.service[i] === svc && cb.state[i] !== ContractState.Closed) {
-            cb.earned[i] += pence;
-            break;
-          }
-        }
+    const onContract = this.vehicles.service[vehicle];
+    if (onContract !== NONE) {
+      const cb = this.contractBoard;
+      for (let i = 0; i < cb.count; i++) {
+        if (cb.service[i] !== onContract || cb.state[i] === ContractState.Closed) continue;
+        /*
+         * The load, always; the money, only when there is any.
+         *
+         * `delivered` was set to zero when a contract was offered and incremented
+         * nowhere, so every contract in the game reported "0 loads" — on the row
+         * in the list and as a figure of its own on the detail page, beside an
+         * earnings total in the tens of thousands. The two were in the same
+         * sentence and contradicted each other.
+         *
+         * Counting it outside the `pence > 0` test rather than inside, because a
+         * load delivered into a place you own is still a load run: no money moves
+         * at the moment of unloading and the lorry still did the work.
+         */
+        cb.delivered[i] += 1;
+        if (pence > 0) cb.earned[i] += pence;
+        break;
       }
     }
     if (company === this.player && !isTown && target >= 0) {
@@ -5134,9 +5145,19 @@ export class World {
     const inbound = this.sites.owner[to] === this.player;
     if (!outbound && !inbound) return false;
     // Named for the place it serves, which for an inbound run is the far end.
+    /*
+     * With the tick, which two of the three callers of `alloc` were not passing.
+     *
+     * `created` defaults to zero, so every run set up this way reported having
+     * existed since the beginning of the world: a task started this afternoon said
+     * "78 days on this run" and divided its tonnage by seventy-eight, understating
+     * what it was actually shifting by a factor of four. The same default also told
+     * the route review that a service ten minutes old was mature enough to judge.
+     */
     const svc = this.services.alloc(
       this.player,
       this.content.industries[this.sites.def[outbound ? from : to]].name,
+      this.tick,
     );
     if (svc === NONE) return false;
     this.services.addStop(svc, from, 0, StopAction.LoadFull, cargo);
@@ -5246,9 +5267,126 @@ export class World {
    * than cancelling. The lorry keeps driving the route it was driving; it simply
    * stops being a job somebody gave you and becomes a job you are doing for
    * yourself. Releasing the board slot leaves the service and its vehicle
-   * untouched — see `ContractBoard.release` — so nothing is stranded and the
-   * player does not have to notice that anything happened.
+   * untouched — see `ContractBoard.release` — so nothing is stranded.
+   *
+   * What it becomes is a **task**: a standing run of your own, with no payer and no
+   * rate, which is what the work honestly is once both ends are yours. See `tasks`,
+   * and see the note there for why "the player does not have to notice that
+   * anything happened" — which this comment used to claim — was wrong.
    */
+  /**
+   * What a task has carried, and what that is per day.
+   *
+   * Tonnage rather than money, which is the whole difference between a task and a
+   * contract and the reason this is not just `contractEarned` pointed elsewhere.
+   * A task has no payer: both ends are yours, so a delivery moves goods off your
+   * own yard onto your own shelf and no money changes hands at the moment of
+   * unloading. The money it makes is real but it is made *later*, at the far end,
+   * when the shop sells the thing — which is not a figure this run can claim.
+   *
+   * So the honest measure of a task is what it moved. Printing £0 a day next to a
+   * lorry that has run flat out for three weeks would be arithmetically true and a
+   * lie about whether the run is working.
+   *
+   * Floored at a day for the same reason as the contract version: a run set up
+   * this morning should not report a fortnight's rate.
+   */
+  taskCarried(service: number): { tonnes: number; perDay: number; days: number } {
+    if (service < 0 || service >= this.services.count) {
+      return { tonnes: 0, perDay: 0, days: 0 };
+    }
+    const tonnes = this.services.tonnes[service];
+    const days = Math.max(1, (this.tick - this.services.created[service]) / TICKS_PER_DAY);
+    return { tonnes, perDay: tonnes / days, days };
+  }
+
+  /**
+   * Every standing run of yours that is *not* under a contract. A task.
+   *
+   * "A contract is a task, but a task is not a contract." Which is exactly the
+   * shape of it: a contract is somebody else's work, with a payer, a rate and an
+   * end; a task is a standing instruction of your own — move this cargo from here
+   * to there, until told otherwise. The machinery for both is the same service
+   * table underneath, and the only difference is whether a board slot points at it.
+   *
+   * So a task is *derived* rather than stored: a service of the player's with no
+   * contract attached. Nothing to keep in step, nothing extra to save, and a
+   * contract that stops being a contract becomes a task by construction rather
+   * than by anybody remembering to convert it.
+   *
+   * ## Which is the bug this is fixing
+   *
+   * `absorbContracts` has always closed a contract when you buy the place it
+   * delivers to — you cannot hold a contract with yourself — and deliberately left
+   * the lorry running, on the reasoning that "the player does not have to notice
+   * that anything happened". They do. Reported from a real game: "my tipper is
+   * definitely going between my livestock farm and the abattoir but the business
+   * doesn't seem to know about the vehicle anymore." Measured, the contract earned
+   * £75,206 before the purchase and £0 in the twenty days after, with the lorry
+   * still driving — because a delivery into a place you own pays nothing, which is
+   * right, and because the work had vanished from the only screen that listed it,
+   * which is not.
+   *
+   * It had no name and no home. Now it has both.
+   */
+  tasks(): {
+    service: number; from: number; to: number; cargo: number; vehicle: number;
+  }[] {
+    const out: {
+      service: number; from: number; to: number; cargo: number; vehicle: number;
+    }[] = [];
+    /*
+     * Which services a contract is holding. Built once rather than asked per
+     * service, because both loops are over "a few dozen" and the nested version is
+     * the one that gets slow first when a board fills up.
+     */
+    const spoken = new Set<number>();
+    const b = this.contractBoard;
+    for (let i = 0; i < b.count; i++) {
+      if (b.state[i] === ContractState.Closed) continue;
+      if (b.service[i] !== NONE) spoken.add(b.service[i]);
+    }
+
+    for (let svc = 0; svc < this.services.count; svc++) {
+      if (!this.services.active[svc]) continue;
+      if (this.services.company[svc] !== this.player) continue;
+      if (spoken.has(svc)) continue;
+      /*
+       * Read the ends off the stops, which is where they actually live. A task is
+       * "load here, unload there", so the first Load stop is the source and the
+       * first Unload is the destination — and a service with neither is not a task,
+       * it is a service somebody is halfway through building.
+       */
+      let from = NONE;
+      let to = NONE;
+      let cargo = NONE;
+      const n = this.services.stopCount[svc];
+      for (let k = 0; k < n; k++) {
+        const si = svc * MAX_STOPS + k;
+        if (this.services.stopKind[si] !== 0) continue;
+        const act = this.services.stopAction[si];
+        if (from === NONE && (act === StopAction.LoadFull || act === StopAction.Load)) {
+          from = this.services.stopTarget[si];
+          cargo = this.services.stopCargo[si];
+        } else if (to === NONE
+          && (act === StopAction.Unload || act === StopAction.Exchange)) {
+          to = this.services.stopTarget[si];
+          if (cargo === NONE) cargo = this.services.stopCargo[si];
+        }
+      }
+      if (from === NONE || to === NONE) continue;
+      let vehicle = NONE;
+      for (let v = 0; v < this.vehicles.count; v++) {
+        if (this.vehicles.alive[v] && this.vehicles.service[v] === svc) {
+          vehicle = v;
+          break;
+        }
+      }
+      out.push({ service: svc, from, to, cargo, vehicle });
+    }
+    return out;
+  }
+
   private absorbContracts(site: number): void {
     const b = this.contractBoard;
     for (let i = 0; i < b.count; i++) {
@@ -5672,7 +5810,9 @@ export class World {
     const to = b.to[id];
     if (from === NONE || to === NONE) return false;
 
-    const svc = this.services.alloc(company, this.content.industries[this.sites.def[from]].name);
+    const svc = this.services.alloc(
+      company, this.content.industries[this.sites.def[from]].name, this.tick,
+    );
     if (svc === NONE) return false;
     this.services.addStop(svc, from, 0, StopAction.LoadFull, b.cargo[id]);
     this.services.addStop(svc, to, 0, StopAction.Unload, b.cargo[id]);
