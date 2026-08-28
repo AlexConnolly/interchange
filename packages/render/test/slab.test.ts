@@ -70,24 +70,35 @@ describe('the edge of the world', () => {
     expect(ys.filter((y) => y <= -BASE_DEPTH + 1e-6).length).toBeGreaterThan(20);
   });
 
-  it('cuts from the waterline, so the top of the slab is one flat line', () => {
+  it('starts the cut at the ground, not at the waterline', () => {
     /*
-     * The bug this pins. Following the seabed gave the slab a torn top edge that
-     * read as a broken-off piece rather than a cut one — the sea floor is not
-     * level, so the rim rose and fell by a tenth of a unit all the way round.
+     * The bug this pins, and it is the opposite of what the first version of this
+     * test asserted.
      *
-     * Every wall on a water rim must therefore start at exactly zero.
+     * The wall used to be clamped up to y = 0 for "a clean line right round it at
+     * the water's surface". There is no water surface: the sea in this renderer is
+     * the seabed painted blue, sitting about a sixth of a unit down at the rim. So
+     * the clamp stood the slab *proud* of the water all the way round, and because
+     * the material is double-sided you saw the inside of the far two walls as well
+     * as the outside of the near two — a dark border on all four edges with the
+     * district floating in the middle of it. Reported as "why does it have a random
+     * black square".
+     *
+     * Nothing in the mesh may therefore sit above the ground it stands on.
      */
     const src = island();
     const m = buildGround(src, 0, 0, S, S);
-    /*
-     * The seabed is well below zero here, so anything in the mesh at exactly zero
-     * can only be the top of the cut: no terrain triangle is at that height.
-     */
     const seabed = HEIGHT_TO_WORLD(-24);
     expect(seabed).toBeLessThan(-0.05);
-    const atWaterline = heights(m).filter((y) => Math.abs(y) < 1e-6).length;
-    expect(atWaterline).toBeGreaterThan(10);
+    /*
+     * The whole rim is sea, so the highest thing anywhere along an edge strip is
+     * the seabed itself. A single vertex above it is a lip.
+     */
+    const rim = buildGround(src, 0, 0, S, 1);
+    const highest = Math.max(...heights(rim));
+    expect(highest).toBeLessThanOrEqual(seabed + 1e-6);
+    // And the cut still goes all the way down.
+    expect(Math.min(...heights(m))).toBeCloseTo(-BASE_DEPTH, 5);
   });
 
   it('leaves the inside of the map alone', () => {

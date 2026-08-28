@@ -238,31 +238,30 @@ function skirt(
 ): void {
   const base = -BASE_DEPTH;
   /*
-   * The cut starts at the waterline, not at the seabed.
+   * The wall starts at the ground, and *not* at the waterline.
    *
-   * Measured across every size the generator makes: the coast never reaches the
-   * map edge — 0 land tiles on the boundary at 32, 40, 48, 56, 64 and 128 — so the
-   * whole rim of the world is sea, and following the seabed gave the slab a torn
-   * top edge that read as a broken-off piece rather than as a cut one. Clamping to
-   * zero puts a clean line right round it at the water's surface, which is what a
-   * terrarium looks like: a square of ground and water, sliced.
+   * It started at the waterline, to give the slab "a clean line right round it at
+   * the water's surface, which is what a terrarium looks like". It does not. The
+   * sea in this renderer is not a surface at y = 0 — there is no sea plane at all,
+   * the water is the seabed painted blue and it sits at whatever the depth is,
+   * about a sixth of a unit down at the rim. Clamping the wall to zero therefore
+   * stood it *proud* of the water by that sixth all the way round the map.
    *
-   * `Math.max` rather than a flat zero, so that if a district ever does run to the
-   * edge the cut still follows the hill up.
-   */
-  const top = (h: number): number => Math.max(h, 0);
-  /*
-   * One wall, given its two top corners in order. Wound so the outward face is
-   * the one that shows: the triangles are single-sided, and getting this wrong
-   * produces an island you can see straight through from one side and not from
-   * the other.
+   * Which is a lip. And because the material is double-sided you see the inside of
+   * the far two walls as well as the outside of the near two, so it read as a dark
+   * border on all four edges with the district floating in the middle of it — "why
+   * does it have a random black square". Reported after I had looked straight at it
+   * in five screenshots and called it the sea twice, snow once and the slab itself
+   * once.
+   *
+   * Following the ground makes the top of the wall flush with the terrain by
+   * construction: the far walls are then behind the surface and cannot be seen at
+   * all, and the near ones are a cut face starting exactly where the ground stops.
    */
   const wall = (
-    ax: number, az: number, ah0: number,
-    bx: number, bz: number, bh0: number,
+    ax: number, az: number, ah: number,
+    bx: number, bz: number, bh: number,
   ): void => {
-    const ah = top(ah0);
-    const bh = top(bh0);
     const aSoil = Math.max(base, ah - SOIL_BAND);
     const bSoil = Math.max(base, bh - SOIL_BAND);
     m.tri(ax, ah, az, bx, bh, bz, ax, aSoil, az, CUT_SOIL);
