@@ -1,396 +1,516 @@
 [
-  {
-    "id": "dairy-farm",
-    "name": "Dairy farm",
-    "kind": "extraction",
-    "deposit": 9,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "milk": 5
-      },
-      "period": 40
-    },
-    "footprint": 2,
-    "foundCost": 380000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 2,
-    "amenityRadius": 3,
-    "fromEra": 1,
-    "kit": "farm",
-    "colour": "#8ea866"
+ {
+  "id": "dairy-farm",
+  "name": "Dairy farm",
+  "kind": "extraction",
+  "deposit": 9,
+  "recipe": {
+   "inputs": {},
+   "outputs": {
+    "milk": 5
+   },
+   "period": 40
   },
-  {
-    "id": "arable-farm",
-    "name": "Arable farm",
-    "kind": "extraction",
-    "deposit": 9,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "grain": 5,
-        "produce": 2
-      },
-      "period": 44
-    },
-    "footprint": 2,
-    "foundCost": 340000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 1,
-    "amenityRadius": 3,
-    "fromEra": 1,
-    "kit": "farm",
-    "colour": "#b0a95e"
+  "footprint": 2,
+  "foundCost": 380000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 2,
+  "amenityRadius": 3,
+  "fromEra": 1,
+  "kit": "farm",
+  "colour": "#8ea866",
+  "approvalImpact": -1,
+  "approvalRadius": 8,
+  "approvalNeed": 0
+ },
+ {
+  "id": "arable-farm",
+  "name": "Arable farm",
+  "kind": "extraction",
+  "deposit": 9,
+  "recipe": {
+   "inputs": {},
+   "outputs": {
+    "grain": 5,
+    "produce": 2
+   },
+   "period": 44
   },
-  {
-    "id": "creamery",
-    "name": "Creamery",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "milk": 6
-      },
-      "outputs": {
-        "dairy": 4
-      },
-      "period": 36
-    },
-    "footprint": 3,
-    "foundCost": 1650000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 14,
-    "amenityRadius": 7,
-    "fromEra": 1,
-    "kit": "works",
-    "colour": "#c8cbc4"
+  "footprint": 2,
+  "foundCost": 340000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 1,
+  "amenityRadius": 3,
+  "fromEra": 1,
+  "kit": "farm",
+  "colour": "#b0a95e",
+  "approvalImpact": -1,
+  "approvalRadius": 8,
+  "approvalNeed": 0
+ },
+ {
+  "id": "creamery",
+  "name": "Creamery",
+  "kind": "processing",
+  "deposit": 0,
+  "recipe": {
+   "inputs": {
+    "milk": 6
+   },
+   "outputs": {
+    "dairy": 4
+   },
+   "period": 36
   },
-  {
-    "id": "mill",
-    "name": "Feed mill",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "grain": 6
-      },
-      "outputs": {
-        "feed": 5
-      },
-      "period": 40
-    },
-    "footprint": 3,
-    "foundCost": 1200000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 12,
-    "amenityRadius": 6,
-    "fromEra": 1,
-    "kit": "works",
-    "colour": "#a89050"
+  "footprint": 3,
+  "foundCost": 1650000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 14,
+  "amenityRadius": 7,
+  "fromEra": 1,
+  "kit": "works",
+  "colour": "#c8cbc4",
+  "approvalImpact": -11,
+  "approvalRadius": 14,
+  "approvalNeed": 35
+ },
+ {
+  "id": "mill",
+  "name": "Feed mill",
+  "kind": "processing",
+  "deposit": 0,
+  "recipe": {
+   "inputs": {
+    "grain": 6
+   },
+   "outputs": {
+    "feed": 5
+   },
+   "period": 40
   },
-  {
-    "id": "brewery",
-    "name": "Brewery",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "grain": 4
-      },
-      "outputs": {
-        "beer": 3
-      },
-      "period": 52
-    },
-    "footprint": 3,
-    "foundCost": 1650000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 3,
-    "amenityRadius": 4,
-    "fromEra": 1,
-    "kit": "works",
-    "colour": "#8c5a2b"
+  "footprint": 3,
+  "foundCost": 1200000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 12,
+  "amenityRadius": 6,
+  "fromEra": 1,
+  "kit": "works",
+  "colour": "#a89050",
+  "approvalImpact": -10,
+  "approvalRadius": 14,
+  "approvalNeed": 35
+ },
+ {
+  "id": "brewery",
+  "name": "Brewery",
+  "kind": "processing",
+  "deposit": 0,
+  "recipe": {
+   "inputs": {
+    "grain": 4
+   },
+   "outputs": {
+    "beer": 3
+   },
+   "period": 52
   },
-  {
-    "id": "quarry",
-    "name": "Quarry",
-    "kind": "extraction",
-    "deposit": 3,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "aggregate": 8
-      },
-      "period": 44
-    },
-    "footprint": 3,
-    "foundCost": 1900000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 34,
-    "amenityRadius": 12,
-    "fromEra": 1,
-    "kit": "mine",
-    "colour": "#948f86"
+  "footprint": 3,
+  "foundCost": 1650000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 3,
+  "amenityRadius": 4,
+  "fromEra": 1,
+  "kit": "works",
+  "colour": "#8c5a2b",
+  "approvalImpact": -3,
+  "approvalRadius": 10,
+  "approvalNeed": 20
+ },
+ {
+  "id": "quarry",
+  "name": "Quarry",
+  "kind": "extraction",
+  "deposit": 3,
+  "recipe": {
+   "inputs": {},
+   "outputs": {
+    "aggregate": 8
+   },
+   "period": 44
   },
-  {
-    "id": "forestry",
-    "name": "Forestry",
-    "kind": "extraction",
-    "deposit": 4,
-    "recipe": {
-      "inputs": {},
-      "outputs": {
-        "timber": 4
-      },
-      "period": 52
-    },
-    "footprint": 2,
-    "foundCost": 420000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 4,
-    "amenityRadius": 4,
-    "fromEra": 1,
-    "kit": "yard",
-    "colour": "#4f6642"
+  "footprint": 3,
+  "foundCost": 1900000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 34,
+  "amenityRadius": 12,
+  "fromEra": 1,
+  "kit": "mine",
+  "colour": "#948f86",
+  "approvalImpact": -14,
+  "approvalRadius": 22,
+  "approvalNeed": 45
+ },
+ {
+  "id": "forestry",
+  "name": "Forestry",
+  "kind": "extraction",
+  "deposit": 4,
+  "recipe": {
+   "inputs": {},
+   "outputs": {
+    "timber": 4
+   },
+   "period": 52
   },
-  {
-    "id": "sawmill",
-    "name": "Sawmill",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "timber": 5
-      },
-      "outputs": {
-        "sawn": 4
-      },
-      "period": 40
-    },
-    "footprint": 3,
-    "foundCost": 1100000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 16,
-    "amenityRadius": 7,
-    "fromEra": 1,
-    "kit": "works",
-    "colour": "#96703e"
+  "footprint": 2,
+  "foundCost": 420000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 4,
+  "amenityRadius": 4,
+  "fromEra": 1,
+  "kit": "yard",
+  "colour": "#4f6642",
+  "approvalImpact": -2,
+  "approvalRadius": 8,
+  "approvalNeed": 0
+ },
+ {
+  "id": "sawmill",
+  "name": "Sawmill",
+  "kind": "processing",
+  "deposit": 0,
+  "recipe": {
+   "inputs": {
+    "timber": 5
+   },
+   "outputs": {
+    "sawn": 4
+   },
+   "period": 40
   },
-  {
-    "id": "concrete-plant",
-    "name": "Concrete plant",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "aggregate": 7
-      },
-      "outputs": {},
-      "period": 40
-    },
-    "footprint": 3,
-    "foundCost": 1450000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 26,
-    "amenityRadius": 9,
-    "fromEra": 1,
-    "kit": "works",
-    "colour": "#8f9298"
+  "footprint": 3,
+  "foundCost": 1100000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 16,
+  "amenityRadius": 7,
+  "fromEra": 1,
+  "kit": "works",
+  "colour": "#96703e",
+  "approvalImpact": -13,
+  "approvalRadius": 14,
+  "approvalNeed": 40
+ },
+ {
+  "id": "concrete-plant",
+  "name": "Concrete plant",
+  "kind": "processing",
+  "deposit": 0,
+  "recipe": {
+   "inputs": {
+    "aggregate": 7
+   },
+   "outputs": {},
+   "period": 40
   },
-  {
-    "id": "terminal",
-    "name": "Freight terminal",
-    "kind": "terminal",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "dairy": 3,
-        "sawn": 3
-      },
-      "outputs": {
-        "parcels": 4,
-        "fuel": 4
-      },
-      "period": 32
-    },
-    "footprint": 4,
-    "foundCost": 3200000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 22,
-    "amenityRadius": 9,
-    "fromEra": 1,
-    "kit": "yard",
-    "colour": "#5b6470"
+  "footprint": 3,
+  "foundCost": 1450000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 26,
+  "amenityRadius": 9,
+  "fromEra": 1,
+  "kit": "works",
+  "colour": "#8f9298",
+  "approvalImpact": -18,
+  "approvalRadius": 16,
+  "approvalNeed": 50
+ },
+ {
+  "id": "terminal",
+  "name": "Freight terminal",
+  "kind": "terminal",
+  "deposit": 0,
+  "recipe": {
+   "inputs": {
+    "dairy": 3,
+    "sawn": 3
+   },
+   "outputs": {
+    "parcels": 4,
+    "fuel": 4
+   },
+   "period": 32
   },
-  {
-    "id": "builders-merchant",
-    "name": "Builders' merchant",
-    "kind": "terminal",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "sawn": 4
-      },
-      "outputs": {},
-      "period": 36
-    },
-    "footprint": 2,
-    "foundCost": 620000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 8,
-    "amenityRadius": 5,
-    "fromEra": 1,
-    "kit": "yard",
-    "colour": "#a4763f"
+  "footprint": 4,
+  "foundCost": 3200000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 22,
+  "amenityRadius": 9,
+  "fromEra": 1,
+  "kit": "yard",
+  "colour": "#5b6470",
+  "approvalImpact": -20,
+  "approvalRadius": 18,
+  "approvalNeed": 55
+ },
+ {
+  "id": "builders-merchant",
+  "name": "Builders' merchant",
+  "kind": "terminal",
+  "deposit": 0,
+  "recipe": {
+   "inputs": {
+    "sawn": 4
+   },
+   "outputs": {},
+   "period": 36
   },
-  {
-    "id": "filling-station",
-    "name": "Filling station",
-    "kind": "terminal",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "fuel": 3
-      },
-      "outputs": {},
-      "period": 32
-    },
-    "footprint": 1,
-    "foundCost": 340000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 6,
-    "amenityRadius": 4,
-    "fromEra": 1,
-    "kit": "yard",
-    "colour": "#43506a"
+  "footprint": 2,
+  "foundCost": 620000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 8,
+  "amenityRadius": 5,
+  "fromEra": 1,
+  "kit": "yard",
+  "colour": "#a4763f",
+  "approvalImpact": -8,
+  "approvalRadius": 12,
+  "approvalNeed": 30
+ },
+ {
+  "id": "filling-station",
+  "name": "Filling station",
+  "kind": "terminal",
+  "deposit": 0,
+  "recipe": {
+   "inputs": {
+    "fuel": 3
+   },
+   "outputs": {},
+   "period": 32
   },
-  {
-    "id": "livestock-farm",
-    "name": "Livestock farm",
-    "kind": "extraction",
-    "deposit": 9,
-    "recipe": {
-      "inputs": {
-        "feed": 3
-      },
-      "outputs": {
-        "livestock": 4
-      },
-      "period": 48
-    },
-    "footprint": 2,
-    "foundCost": 420000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 6,
-    "amenityRadius": 4,
-    "fromEra": 1,
-    "kit": "farm",
-    "colour": "#a89a6e"
+  "footprint": 1,
+  "foundCost": 340000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 6,
+  "amenityRadius": 4,
+  "fromEra": 1,
+  "kit": "yard",
+  "colour": "#43506a",
+  "approvalImpact": -5,
+  "approvalRadius": 10,
+  "approvalNeed": 25
+ },
+ {
+  "id": "livestock-farm",
+  "name": "Livestock farm",
+  "kind": "extraction",
+  "deposit": 9,
+  "recipe": {
+   "inputs": {
+    "feed": 3
+   },
+   "outputs": {
+    "livestock": 4
+   },
+   "period": 48
   },
-  {
-    "id": "abattoir",
-    "name": "Abattoir",
-    "kind": "processing",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "livestock": 5
-      },
-      "outputs": {
-        "meat": 4
-      },
-      "period": 36
-    },
-    "footprint": 3,
-    "foundCost": 1750000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 30,
-    "amenityRadius": 9,
-    "fromEra": 1,
-    "kit": "works",
-    "colour": "#b9b3ab"
+  "footprint": 2,
+  "foundCost": 420000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 6,
+  "amenityRadius": 4,
+  "fromEra": 1,
+  "kit": "farm",
+  "colour": "#a89a6e",
+  "approvalImpact": -4,
+  "approvalRadius": 10,
+  "approvalNeed": 0
+ },
+ {
+  "id": "abattoir",
+  "name": "Abattoir",
+  "kind": "processing",
+  "deposit": 0,
+  "recipe": {
+   "inputs": {
+    "livestock": 5
+   },
+   "outputs": {
+    "meat": 4
+   },
+   "period": 36
   },
-  {
-    "id": "village-shop",
-    "name": "Village shop",
-    "kind": "terminal",
-    "retail": true,
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "produce": 3,
-        "parcels": 1
-      },
-      "outputs": {},
-      "period": 30
-    },
-    "footprint": 1,
-    "foundCost": 260000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 2,
-    "amenityRadius": 3,
-    "fromEra": 1,
-    "kit": "yard",
-    "colour": "#c8a95e"
+  "footprint": 3,
+  "foundCost": 1750000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 30,
+  "amenityRadius": 9,
+  "fromEra": 1,
+  "kit": "works",
+  "colour": "#b9b3ab",
+  "approvalImpact": -20,
+  "approvalRadius": 14,
+  "approvalNeed": 52
+ },
+ {
+  "id": "village-shop",
+  "name": "Village shop",
+  "kind": "terminal",
+  "retail": true,
+  "deposit": 0,
+  "recipe": {
+   "inputs": {
+    "produce": 3,
+    "parcels": 1
+   },
+   "outputs": {},
+   "period": 30
   },
-  {
-    "id": "distribution-centre",
-    "name": "Distribution centre",
-    "kind": "terminal",
-    "deposit": 0,
-    "recipe": {
-      "inputs": {
-        "dairy": 8,
-        "meat": 8,
-        "sawn": 8,
-        "feed": 8,
-        "parcels": 8,
-        "beer": 8,
-        "produce": 8
-      },
-      "outputs": {},
-      "period": 30
-    },
-    "footprint": 1,
-    "foundCost": 4200000,
-    "powerNeed": 0,
-    "waterNeed": 0,
-    "labourNeed": 0,
-    "amenityPenalty": 2,
-    "amenityRadius": 3,
-    "fromEra": 1,
-    "kit": "yard",
-    "colour": "#7a8794",
-    "passThrough": true
-  }
+  "footprint": 1,
+  "foundCost": 260000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 2,
+  "amenityRadius": 3,
+  "fromEra": 1,
+  "kit": "yard",
+  "colour": "#c8a95e",
+  "approvalImpact": 9,
+  "approvalRadius": 10,
+  "approvalNeed": 0
+ },
+ {
+  "id": "distribution-centre",
+  "name": "Distribution centre",
+  "kind": "terminal",
+  "deposit": 0,
+  "recipe": {
+   "inputs": {
+    "dairy": 8,
+    "meat": 8,
+    "sawn": 8,
+    "feed": 8,
+    "parcels": 8,
+    "beer": 8,
+    "produce": 8
+   },
+   "outputs": {},
+   "period": 30
+  },
+  "footprint": 1,
+  "foundCost": 4200000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 2,
+  "amenityRadius": 3,
+  "fromEra": 1,
+  "kit": "yard",
+  "colour": "#7a8794",
+  "passThrough": true,
+  "approvalImpact": -22,
+  "approvalRadius": 16,
+  "approvalNeed": 55
+ },
+ {
+  "id": "village-green",
+  "name": "Village green",
+  "kind": "amenity",
+  "deposit": 0,
+  "recipe": {
+   "inputs": {},
+   "outputs": {},
+   "period": 30
+  },
+  "footprint": 2,
+  "foundCost": 600000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 0,
+  "amenityRadius": 0,
+  "approvalImpact": 12,
+  "approvalRadius": 12,
+  "approvalNeed": 0,
+  "fromEra": 1,
+  "kit": "green",
+  "colour": "#7fa860"
+ },
+ {
+  "id": "park",
+  "name": "Park",
+  "kind": "amenity",
+  "deposit": 0,
+  "recipe": {
+   "inputs": {},
+   "outputs": {},
+   "period": 30
+  },
+  "footprint": 3,
+  "foundCost": 1400000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 0,
+  "amenityRadius": 0,
+  "approvalImpact": 16,
+  "approvalRadius": 16,
+  "approvalNeed": 0,
+  "fromEra": 1,
+  "kit": "park",
+  "colour": "#6f9c58"
+ },
+ {
+  "id": "playing-field",
+  "name": "Playing field",
+  "kind": "amenity",
+  "deposit": 0,
+  "recipe": {
+   "inputs": {},
+   "outputs": {},
+   "period": 30
+  },
+  "footprint": 3,
+  "foundCost": 900000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 0,
+  "amenityRadius": 0,
+  "approvalImpact": 11,
+  "approvalRadius": 12,
+  "approvalNeed": 0,
+  "fromEra": 1,
+  "kit": "pitch",
+  "colour": "#86a95f"
+ }
 ]

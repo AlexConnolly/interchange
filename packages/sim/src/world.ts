@@ -43,6 +43,11 @@ import {
 } from './fittings.ts';
 import { AmenityField, stepAmenity, REMEDIATION_PRICE, REMEDIATION_FROM_ERA } from './amenity.ts';
 import {
+  ApprovalField, type ApprovalSource, type ApprovalReason, reasonsAt, COUNTED_AT,
+  WIDEN_APPROVAL, APPROVAL_DRIFT_PER_DAY, APPROVAL_PER_LOAD, APPROVAL_REST,
+  PARISH_PER_DAY,
+} from './approval.ts';
+import {
   AssetTable, Graph, NONE, NO_WAY, WayLayer, hashNetwork, rebuildGraph,
 } from './network.ts';
 import { Router, type RouteCosts } from './pathfinding.ts';
@@ -51,11 +56,6 @@ import {
   Crop, GROWING, NEEDS_WORK, arableStage, grassStage, isWood, springSown,
 } from './fields.ts';
 import { Heap } from './heap.ts';
-import {
-  APPROVAL_DRIFT_PER_DAY, APPROVAL_PER_LOAD, APPROVAL_REST, PARISH_PER_DAY,
-  PLANNING_FROM_VEHICLES,
-  WORKS_APPROVAL, Works, levyGain,
-} from './planning.ts';
 import { Rng } from './rng.ts';
 import {
   IndustryKind, SiteState, SiteTable, TownTable, hashSites, stepSiteDecay, ageSites,
@@ -193,6 +193,14 @@ export class World {
   /** What the region is like to be in, and what industry has done to it.
    *  design.md 2.3. */
   readonly amenity: AmenityField;
+  /**
+   * What the parish thinks of you, place by place — the local part.
+   *
+   * Named for the parish rather than called `approval` because `approval` is
+   * already the earned, district-wide scalar below and the two are added together
+   * on read. See `approvalAt`, and `approval.ts` for why they are kept apart.
+   */
+  readonly parishApproval: ApprovalField;
   /*
    * What each *tile* mostly carries, and how much.
    *
@@ -342,6 +350,9 @@ export class World {
       cargoFromEra: new Uint8Array(content.cargo.length),
       amenityPenalty: new Int32Array(content.industries.length),
       amenityRadius: new Int32Array(content.industries.length),
+      approvalImpact: new Int32Array(content.industries.length),
+      approvalRadius: new Int32Array(content.industries.length),
+      approvalNeed: new Int32Array(content.industries.length),
       // Era 3 is when transmission lines and treatment works first exist, so
       // it is the earliest era in which the requirement could be met.
       networkFromEra: 3,
@@ -368,7 +379,11 @@ export class World {
         : ind.kind === 'processing' ? IndustryKind.Processing
         : ind.kind === 'utility' ? IndustryKind.Utility
         : ind.kind === 'tourism' ? IndustryKind.Tourism
+        : ind.kind === 'amenity' ? IndustryKind.Amenity
         : IndustryKind.Terminal;
+      this.recipes.approvalImpact[i] = ind.approvalImpact;
+      this.recipes.approvalRadius[i] = ind.approvalRadius;
+      this.recipes.approvalNeed[i] = ind.approvalNeed;
       this.recipes.powerNeed[i] = ind.powerNeed;
       this.recipes.waterNeed[i] = ind.waterNeed;
       this.recipes.labourNeed[i] = ind.labourNeed;
@@ -424,6 +439,7 @@ export class World {
     this.tileCargo = new Uint8Array(this.config.size * this.config.size).fill(255);
     this.tileTonnes = new Float32Array(this.config.size * this.config.size);
     this.amenity = new AmenityField(this.config.size);
+    this.parishApproval = new ApprovalField(this.config.size);
     this.router = new Router(MAX_COMPANIES, 100000);
     this.influence = new InfluenceField(this.config.size);
   }
@@ -1303,6 +1319,17 @@ export class World {
       }
       this.approval = Math.min(100, this.approval + PARISH_PER_DAY * stocked);
     }
+
+    /*
+     * And the local field, then what it adds up to.
+     *
+     * Daily rather than on change, as well as on change, because the local field
+     * depends on which of your buildings are *alive* — a works that shuts because
+     * nobody supplied it stops being a thing the neighbours can complain about,
+     * and nothing calls a refresh when that happens.
+     */
+    this.refreshApproval();
+    this.refreshStanding();
 
     const b = this.content.balance;
 
@@ -3256,6 +3283,15 @@ export class World {
     // Founding one claims its ground, the same as buying one does.
     if (company === this.player) this.landRevision++;
     this.sites.extraction[site] = def.kind === 'extraction' ? 1 : 0;
+    /*
+     * Only when it is the player doing the founding.
+     *
+     * This path is also how the AI companies and worldgen put things up, and
+     * marking those would mean buying a going concern later made you answer for a
+     * decision somebody else took — which is the one thing `SiteTable.raised`
+     * exists to prevent.
+     */
+    if (company === this.player) this.sites.raised[site] = 1;
     this.sites.built[site] = this.year;
     this.sites.modernity[site] = 100;
     this.sites.richness[site] = 40 + (this.terrain.deposit[tile] > 0 ? 40 : 20);
@@ -3748,6 +3784,112 @@ export class World {
    * pay. Road access is deliberately *not* on the list - it is a condition of
    * working, not of building, and there is a warning for it.
    */
+  /**
+   * Everything of yours that is shaping local opinion, and where.
+   *
+   * Built from the sites table on demand rather than kept as a list, because it is
+   * a projection of state that already exists and a second copy of it is a second
+   * thing to get wrong. It is a handful of entries — the buildings *you raised* —
+   * so the cost is nil and it is never stale.
+   */
+  approvalSources(): ApprovalSource[] {
+    const out: ApprovalSource[] = [];
+    for (let s = 0; s < this.sites.count; s++) {
+      if (this.sites.raised[s] !== 1) continue;
+      if (this.sites.owner[s] !== this.player) continue;
+      if (this.sites.state[s] === SiteState.Dead) continue;
+      const def = this.sites.def[s];
+      const impact = this.recipes.approvalImpact[def];
+      if (impact === 0) continue;
+      out.push({
+        x: this.sites.x[s],
+        y: this.sites.y[s],
+        impact,
+        radius: this.recipes.approvalRadius[def],
+        site: s,
+      });
+    }
+    return out;
+  }
+
+  /** Recompute the local field. Cheap, and called whenever what you own changes. */
+  refreshApproval(): void {
+    this.parishApproval.rebuild(this.approvalSources());
+  }
+
+  /**
+   * What the parish thinks of you *here*, 0..100.
+   *
+   * The earned district-wide part plus the local part, clamped. This is the figure
+   * every gate is checked against, and the one the interface should show whenever
+   * it is talking about a place rather than about you in general.
+   */
+  approvalAt(x: number, y: number): number {
+    return Math.max(0, Math.min(100, this.approval + this.parishApproval.at(x, y)));
+  }
+
+  /**
+   * And the one figure for the top of the screen.
+   *
+   * Averaged over the *towns*, weighted by population, because approval is what
+   * people think and empty moorland has no opinion. A district-wide mean over
+   * cells would be dominated by the two thirds of the map nobody lives in, so
+   * putting a depot next to the largest village would barely move it — which is
+   * exactly the case the number exists to report.
+   */
+  approvalOverall(): number {
+    let sum = 0;
+    let weight = 0;
+    for (let t = 0; t < this.towns.count; t++) {
+      const pop = Math.max(1, this.towns.population[t]);
+      sum += this.approvalAt(this.towns.x[t], this.towns.y[t]) * pop;
+      weight += pop;
+    }
+    if (weight === 0) return this.approval;
+    return sum / weight;
+  }
+
+  /** Why approval at a point is what it is, worst first. For the panel. */
+  approvalReasons(x: number, y: number): ApprovalReason[] {
+    return reasonsAt(x, y, this.approval, this.approvalSources(),
+      (s) => this.content.industries[this.sites.def[s]]?.name ?? 'Something of yours',
+      this.parishApproval.cols);
+  }
+
+  /**
+   * The approval figure the *gate* uses for putting this here, and what it wants.
+   *
+   * One call, because the alternative is two subtly different answers to the same
+   * question. The gate measures at the centre of the footprint — a four-tile depot
+   * is sixteen metres across and the parish does not hold a different opinion at
+   * one end of it — while anything reading `approvalAt` at the cursor is asking
+   * about the north-west corner. For a three-tile works that is a tile and a half
+   * out, which is enough to put the two on either side of a threshold and show a
+   * player a green preview that refuses the click.
+   *
+   * So the preview, the overlay and the refusal all ask this.
+   */
+  approvalForBuild(defIndex: number, tile: number): { here: number; need: number } {
+    const n2 = (this.footprintOf(defIndex) - 1) / 2;
+    const size = this.config.size;
+    return {
+      here: this.approvalAt(tile % size + n2, ((tile / size) | 0) + n2),
+      need: this.recipes.approvalNeed[defIndex] ?? 0,
+    };
+  }
+
+  /**
+   * Where in the district the parish would let you build this, for the overlay.
+   *
+   * The "all your available areas light up blue" rule already lights the ground
+   * you own; this is the second half of it, and the two are different questions
+   * now.
+   */
+  approvalAllows(defIndex: number, tile: number): boolean {
+    const { here, need } = this.approvalForBuild(defIndex, tile);
+    return here >= need;
+  }
+
   canPlaceSite(
     company: number, defIndex: number, tile: number,
   ): { ok: boolean; reason: string; price: number } {
@@ -3831,6 +3973,28 @@ export class World {
       }
     }
 
+    /*
+     * And whether the parish would have it here.
+     *
+     * Last of the tests, deliberately, so the message a player gets is the most
+     * specific one that applies: "part of that is water" is more use than "the
+     * parish would not have it" about a lake. It is also the only test in this
+     * function that a player can *change* — every other refusal is a fact about
+     * the ground, and this one is a fact about them, which is the whole point of
+     * the mechanic.
+     *
+     * Measured at the centre of the footprint rather than the worst corner. A
+     * four-tile depot is sixteen metres across and the parish does not hold a
+     * different opinion at one end of it.
+     */
+    const { here, need } = this.approvalForBuild(defIndex, tile);
+    if (need > 0 && here < need) {
+      return no(
+        `The parish would not have it here. It wants ${need} approval; `
+        + `on this spot you have ${Math.floor(here)}.`,
+      );
+    }
+
     if (this.companies.cash[company] < price) return no('Not enough in the bank.');
     return { ok: true, reason: '', price };
   }
@@ -3850,6 +4014,8 @@ export class World {
     if (site === NONE) return { ok: false, reason: 'No room left in the register.', site: NONE };
 
     this.sites.extraction[site] = def.kind === 'extraction' ? 1 : 0;
+    // You put it up, so you answer for it. See `SiteTable.raised`.
+    this.sites.raised[site] = 1;
     this.sites.built[site] = this.year;
     this.sites.modernity[site] = 100;
     this.sites.richness[site] = 40 + (this.terrain.deposit[tile] > 0 ? 40 : 20);
@@ -3868,6 +4034,14 @@ export class World {
     // Which sets the access tile and the stranded flag, so a works built away
     // from the lane knows it is cut off before anybody looks at it.
     this.rebuild();
+    /*
+     * Before influence, because influence now depends on it: a green that lifts a
+     * village over the line makes the parish count you, and being counted is what
+     * widens your reach. Ordering it the other way would leave the new reach a day
+     * late, arriving on the next daily tick for no visible reason.
+     */
+    this.refreshApproval();
+    this.refreshStanding();
     this.refreshInfluence();
     return { ok: true, reason: '', site };
   }
@@ -4086,6 +4260,13 @@ export class World {
     this.absorbContracts(site);
     // The land it stands on is yours now too, and the ground is drawn from this.
     this.landRevision++;
+    /*
+     * Buying does not itself upset anybody - see `SiteTable.raised`, the village
+     * is no worse off for the abattoir changing hands - but the sources are
+     * filtered on ownership, so selling and buying back has to be reflected.
+     */
+    this.refreshApproval();
+    this.refreshStanding();
     this.refreshInfluence();
     // New standing means new work in view.
     this.offerWorkNow();
@@ -4548,19 +4729,19 @@ export class World {
   // ------------------------------------------------- the planning board
 
   /**
-   * Is the board even a thing yet?
+   * There was a `planningOpen()` here, and a `fundParish()`, and both are gone.
    *
-   * design.md is emphatic that "nobody cares about your approval rating until
-   * the further along you get", so there is no approval anywhere in the
-   * interface until the player is a presence — measured in vehicles, because a
-   * vehicle is this game's unit of measurement. Showing it on day one would make
-   * the first ten minutes a game about a bar filling up, which is the opposite
-   * of a milk round.
+   * `planningOpen` hid the whole mechanic until you ran four lorries, which was
+   * right while approval was a screen you visited and wrong now that it gates
+   * building: a threshold a player cannot see is a wall they walk into. The dial
+   * is at the top of the screen from the first minute.
+   *
+   * `fundParish` let you buy goodwill by the thousand pounds, with diminishing
+   * returns tuned so money could carry you part of the way and never all of it.
+   * A careful piece of arithmetic in service of the wrong idea — "I don't like
+   * that it only allows you to influence, not do". You cannot buy the parish's
+   * opinion any more. You can build something they want.
    */
-  planningOpen(): boolean {
-    return this.fleetSize() >= PLANNING_FROM_VEHICLES;
-  }
-
   fleetSize(): number {
     let n = 0;
     for (let v = 0; v < this.vehicles.count; v++) {
@@ -4569,42 +4750,14 @@ export class World {
     return n;
   }
 
-  /**
-   * Put money into the parish, and get a little goodwill for it.
-   *
-   * Diminishing, hard — see `levyGain`. Money can carry you part of the way to
-   * standing and never all of it, so the last rung cannot be bought outright.
-   */
-  fundParish(pence: number): { ok: boolean; reason: string; gained: number } {
-    if (pence <= 0) return { ok: false, reason: 'Nothing to give.', gained: 0 };
-    if (this.companies.cash[this.player] < pence) {
-      return { ok: false, reason: 'Not enough in the bank.', gained: 0 };
-    }
-    const gained = levyGain(this.approval, pence);
-    // Not construction and not an asset: money that leaves and buys nothing you
-    // own. `Penalties` is the existing line for exactly that shape of outgoing.
-    this.companies.post(this.player, Line.Penalties, pence);
-    this.approval = Math.min(100, this.approval + gained);
-    return { ok: true, reason: '', gained };
-  }
-
-  /**
-   * What the board would hear from you today.
-   *
-   * Built from what you actually own, so the list is short and every entry is
-   * about a road you personally drive. A generic "build a road" tool would be a
-   * level editor; a list of the four roads between your own places that could be
-   * better is a decision.
-   */
-  proposals(): {
-    works: number; from: number; to: number; label: string;
-    cost: number; approval: number; ok: boolean; reason: string;
+  roadWorks(): {
+    from: number; label: string;
+    cost: number; approval: number; here: number; ok: boolean; reason: string;
   }[] {
     const out: {
-      works: number; from: number; to: number; label: string;
-      cost: number; approval: number; ok: boolean; reason: string;
+      from: number; label: string;
+      cost: number; approval: number; here: number; ok: boolean; reason: string;
     }[] = [];
-    if (!this.planningOpen()) return out;
 
     /*
      * The lane up to your own gate, not the trunk road between two of them.
@@ -4648,39 +4801,27 @@ export class World {
         ? this.content.industries[this.sites.def[h]].name
         : this.yards.names[-1 - h];
       const cost = Math.round(spur.length * this.content.ways[best].buildCost * WIDEN_SHARE);
-      const need = WORKS_APPROVAL[Works.Widen];
+      /*
+       * Local approval, measured where the lane goes rather than across the
+       * district. The people whose lane it is are the ones with an opinion about
+       * it, and it is now possible for a player to be welcome at one end of the
+       * parish and not at the other.
+       */
+      const here = this.approvalAt(from % size, (from / size) | 0);
       const affordable = this.companies.cash[this.player] >= cost;
       out.push({
-        works: Works.Widen,
         from: h,
-        to: NONE,
         label: `the lane to ${name}`,
         cost,
-        approval: need,
-        ok: this.approval >= need && affordable,
-        reason: this.approval < need
-          ? `The board wants ${Math.ceil(need)} approval. You have ${Math.floor(this.approval)}.`
+        approval: WIDEN_APPROVAL,
+        here,
+        ok: here >= WIDEN_APPROVAL && affordable,
+        reason: here < WIDEN_APPROVAL
+          ? `They want ${WIDEN_APPROVAL} approval along there. It is ${Math.floor(here)}.`
           : affordable ? '' : 'Not enough in the bank.',
       });
     }
     out.sort((a, b) => a.cost - b.cost);
-
-    // And the one that is not a road at all.
-    const standingNeed = WORKS_APPROVAL[Works.Standing];
-    const standingCost = 900_000 * (this.standing + 1);
-    out.push({
-      works: Works.Standing,
-      from: NONE,
-      to: NONE,
-      label: 'Ask to be counted',
-      cost: standingCost,
-      approval: standingNeed,
-      ok: this.approval >= standingNeed
-        && this.companies.cash[this.player] >= standingCost,
-      reason: this.approval < standingNeed
-        ? `The board wants ${Math.ceil(standingNeed)} approval. You have ${Math.floor(this.approval)}.`
-        : this.companies.cash[this.player] >= standingCost ? '' : 'Not enough in the bank.',
-    });
     void layer;
     return out.slice(0, 5);
   }
@@ -4732,49 +4873,30 @@ export class World {
   }
 
   /**
-   * Put a proposal to the board.
+   * Make up the lane to one of your places.
    *
-   * Widening actually lays the way, so the district visibly changes: the lane
-   * your lorries have been grinding along becomes a proper road, they go faster
-   * on it, and the frame looks different afterwards. That last part is the whole
-   * reward — the earlier rungs change what you *own*, and this is the first one
-   * that changes what the place *is*.
+   * What is left of the planning board, and it is the half that *did* something:
+   * the lane your lorries have been grinding along becomes a proper road, they go
+   * faster on it, and the district looks different afterwards. The earlier rungs
+   * change what you own; this one changes what the place is.
    *
-   * Standing spends approval rather than earning it, which is why it is the
-   * dearest: it converts a reputation into reach, and then you have to build the
-   * reputation again.
+   * Three things went with the board. There is no proposal and no agreeing — you
+   * pay for it and it is built, like everything else in Build. Approval is not
+   * *spent*: it was costing eight points on top of the money, which made using the
+   * mechanic reduce your ability to use it again, for no reason anybody could
+   * state. And the gate is local, at the lane, rather than a district total.
    */
-  propose(works: number, from: number, to: number): { ok: boolean; reason: string } {
-    if (!this.planningOpen()) {
-      return { ok: false, reason: 'The board does not know who you are yet.' };
-    }
-    const need = WORKS_APPROVAL[works] ?? 100;
-    if (this.approval < need) {
+  widenTo(handle: number): { ok: boolean; reason: string } {
+    const size = this.config.size;
+    const a = handle >= 0 ? this.siteAccessTile[handle] : this.yards.tile[-1 - handle];
+    if (a === undefined || a < 0) return { ok: false, reason: 'Nowhere to build.' };
+    const here = this.approvalAt(a % size, (a / size) | 0);
+    if (here < WIDEN_APPROVAL) {
       return {
         ok: false,
-        reason: `The board wants ${Math.ceil(need)} approval. You have ${Math.floor(this.approval)}.`,
+        reason: `They want ${WIDEN_APPROVAL} approval along there. It is ${Math.floor(here)}.`,
       };
     }
-
-    if (works === Works.Standing) {
-      // Dearer every time. The first is the parish agreeing you belong; the
-      // fourth is asking them to rearrange the county for you.
-      const cost = 900_000 * (this.standing + 1);
-      if (this.companies.cash[this.player] < cost) {
-        return { ok: false, reason: 'Not enough in the bank.' };
-      }
-      this.companies.post(this.player, Line.Penalties, cost);
-      // Reach, bought with reputation. Spent, not kept: the number goes back
-      // down and has to be earned again for the next one.
-      this.standing += 1;
-      this.approval = Math.max(APPROVAL_REST, this.approval - 22);
-      this.refreshInfluence();
-      return { ok: true, reason: '' };
-    }
-
-    void to;
-    const a = from >= 0 ? this.siteAccessTile[from] : this.yards.tile[-1 - from];
-    if (a === undefined || a < 0) return { ok: false, reason: 'Nowhere to build.' };
     const best = this.bestRoadClass();
     const spur = this.spurToTrunk(a, best);
     if (spur.length < 2) return { ok: false, reason: 'That lane is already made up.' };
@@ -4785,14 +4907,45 @@ export class World {
     this.companies.post(this.player, Line.Construction, cost);
     this.layPublicWay(Mode.Road, best, spur, this.wayCharge[best], 0);
     this.rebuild();
-    // A road the parish agreed to is a road the parish is pleased about, but
-    // building it also spends the goodwill that got it agreed.
-    this.approval = Math.max(APPROVAL_REST, this.approval - 8);
     return { ok: true, reason: '' };
   }
 
-  /** How many times the board has agreed you belong here. Widens influence. */
+  /**
+   * How many of the parish's towns count you as one of their own. Widens influence.
+   *
+   * This used to be a purchase: nine thousand pounds and twenty-two points of
+   * approval bought you one, at the planning board, under the heading "ask to be
+   * counted". Which was the clearest example of the thing that was wrong with that
+   * whole screen — a button whose only effect was on your standing, bought with
+   * your standing.
+   *
+   * Now nobody is asked. A town that thinks well enough of you counts you, and
+   * what makes a town think well of you is what you have built there. The number
+   * is therefore derived and not stored: it cannot drift out of step with the
+   * reason for it, and losing it works the same way as gaining it — put a depot
+   * on the green and the village stops counting you, which is a consequence rather
+   * than a punishment.
+   */
   standing = 0;
+
+  /**
+   * Recount, and rebuild influence if the answer changed.
+   *
+   * Guarded on the change because `refreshInfluence` is a pass over every tile
+   * against every source and this is called daily. Recomputing an identical field
+   * three hundred times a game year would be the most expensive thing in the
+   * simulation to no effect.
+   */
+  refreshStanding(): void {
+    let counted = 0;
+    for (let t = 0; t < this.towns.count; t++) {
+      if (this.approvalAt(this.towns.x[t], this.towns.y[t]) >= COUNTED_AT) counted++;
+    }
+    if (counted !== this.standing) {
+      this.standing = counted;
+      this.refreshInfluence();
+    }
+  }
 
   // ----------------------------------------------------------------- your land
 

@@ -105,7 +105,15 @@ export const IndustryDef = z.object({
   id: z.string(),
   name: z.string(),
   /** extraction sites sit on a deposit; processing and terminal do not. */
-  kind: z.enum(['extraction', 'processing', 'terminal', 'utility', 'tourism']),
+  /*
+   * `amenity` is a building with no trade at all: a green, a park, a playing
+   * field. It consumes nothing, produces nothing, and exists for its effect on
+   * the people living around it — which is why it needs a kind of its own rather
+   * than an empty recipe on a terminal. Half the simulation asks "what does this
+   * place want" and the honest answer for a park is "nothing", including the road
+   * access every trading site needs to operate.
+   */
+  kind: z.enum(['extraction', 'processing', 'terminal', 'utility', 'tourism', 'amenity']),
   /** Deposit index it must be founded on, if extraction. */
   deposit: z.number().int().min(0).default(0),
   recipe: IndustryRecipe,
@@ -140,6 +148,28 @@ export const IndustryDef = z.object({
   /** Amenity penalty and its radius in tiles, design.md §2.3. */
   amenityPenalty: z.number().int().min(0).default(0),
   amenityRadius: z.number().int().min(0).default(0),
+  /**
+   * What putting one up does to what the parish thinks of you, and how far.
+   *
+   * Signed: a village shop is welcome, an abattoir is not. Its own number rather
+   * than the amenity penalty above, because pollution and unpopularity are
+   * different things and the two clearest cases in the district disagree about
+   * which is which — a quarry is the worst amenity penalty in the game and sits
+   * out in the hills where nobody lives, and a distribution centre has an amenity
+   * penalty of 2 and would be the most resented building in the parish.
+   *
+   * The radius is in tiles and is honest about it. See `approval.ts`.
+   */
+  approvalImpact: z.number().int().default(0),
+  approvalRadius: z.number().int().min(0).default(0),
+  /**
+   * How well the parish must think of you *at that spot* before you may build it.
+   *
+   * Zero for anything nobody minds. Set against a resting approval of 30: at rest
+   * a player may put up a farm, a shop or a filling station and not a creamery,
+   * and the heavy end of the list wants a neighbourhood you have actually improved.
+   */
+  approvalNeed: z.number().int().min(0).max(100).default(0),
   fromEra: z.number().int().min(1).max(8).default(1),
   /** Kit id in the art package; three visual states come from the same kit. */
   kit: z.string(),

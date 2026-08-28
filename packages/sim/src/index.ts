@@ -27,7 +27,7 @@ export * from './junction.ts';
 export * from './snapshot.ts';
 export * from './state.ts';
 export * from './fittings.ts';
-export * from './planning.ts';
+export * from './approval.ts';
 
 import { loadContent, type Content } from '@interchange/data';
 import { DEFAULT_CONFIG, type WorldConfig } from './terrain.ts';

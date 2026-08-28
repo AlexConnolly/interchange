@@ -51,6 +51,15 @@ function district() {
 function landed() {
   const w = district();
   for (const f of w.landForSale().slice(0, 6)) w.buyLand(f.parcel);
+  /*
+   * Well thought of, so that the parish is not the thing under test.
+   *
+   * Approval gates building now — a creamery wants 35 where you are standing and a
+   * fresh district sits at the resting 30 — so without this every test in this
+   * file about footprints and ground would be measuring the approval gate instead.
+   * It has its own file. Two tests here failed on exactly this and were right to.
+   */
+  w.approval = 100;
   return w;
 }
 

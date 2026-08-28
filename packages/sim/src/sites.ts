@@ -116,6 +116,18 @@ export class SiteTable {
    * the trade moves to whoever did.
    */
   readonly built = new Int32Array(MAX_SITES);
+  /**
+   * 1 if the player put it up themselves, rather than finding it there or buying
+   * it.
+   *
+   * Which is the difference between changing the district and changing hands.
+   * Approval answers for what you *build*: buying the abattoir on the edge of the
+   * village does not make the village any worse off — it was there and it already
+   * smelt — whereas putting a new one up is a thing you did to them. Without this
+   * column, buying a going concern would tank your standing for somebody else's
+   * decision.
+   */
+  readonly raised = new Uint8Array(MAX_SITES);
   /** How modern it is, 0..100, recomputed from its age and its era. */
   readonly modernity = new Uint8Array(MAX_SITES).fill(100);
   /** Lifetime tonnes shipped out, for reporting and for the balance sweep. */
@@ -297,6 +309,11 @@ export interface RecipeTables {
   /** Amenity penalty a site emits, and how far it carries. design.md 2.3. */
   amenityPenalty: Int32Array;
   amenityRadius: Int32Array;
+  /** Signed approval impact per industry def, its radius in tiles, and the local
+   *  approval needed to put one up. See `approval.ts`. */
+  approvalImpact: Int32Array;
+  approvalRadius: Int32Array;
+  approvalNeed: Int32Array;
   fromEra: Uint8Array;
   /** Era in which each cargo starts existing; outputs before it are dropped. */
   cargoFromEra: Uint8Array;
@@ -319,6 +336,15 @@ export const IndustryKind = {
   Terminal: 2,
   Utility: 3,
   Tourism: 4,
+  /**
+   * A green, a park, a playing field: no trade of any kind.
+   *
+   * Its own kind rather than a terminal with an empty recipe, because half the
+   * simulation asks a site what it wants and the honest answer here is "nothing".
+   * That includes the road access every trading place needs before it can operate
+   * — a park with no road to it is a park, not a stranded works.
+   */
+  Amenity: 5,
 } as const;
 
 export interface SiteStepResult {

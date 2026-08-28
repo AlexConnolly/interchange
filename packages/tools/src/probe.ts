@@ -14,7 +14,7 @@
 
 import {
   createWorld, Mode, NO_WAY, snowCover, DAYS_PER_YEAR, TICKS_PER_DAY,
-  facilitiesFor, Works, PLANNING_FROM_VEHICLES,
+  facilitiesFor,
 } from '../../sim/src/index.ts';
 import { loadContent } from '../../data/src/index.ts';
 
@@ -164,34 +164,175 @@ if (placed.site >= 0) {
       : ''));
 }
 
-// ---- rung 7: the planning board --------------------------------------------
+// ---- rung 7: the parish, which now gates rather than sells -----------------
 console.log('--- rung 7: the parish');
-console.log(`  board opens at ${PLANNING_FROM_VEHICLES} vehicles;`
-  + ` fleet is ${w.fleetSize()}, open: ${w.planningOpen()}`);
 const boxIdx = w.content.vehicles.findIndex((v) => v.id === 'rigid-box');
 for (let i = 0; i < 3; i++) w.buyVehicleAtYard(boxIdx, w.yards.count > 1 ? 1 : 0);
-console.log(`  after buying: fleet ${w.fleetSize()}, open: ${w.planningOpen()}`);
 
-const before = w.approval;
-for (let i = 0; i < 6; i++) w.fundParish(1_000_000);
-console.log(`  approval ${before.toFixed(1)} -> ${w.approval.toFixed(1)}`
-  + ' after £60,000 of funding (diminishing on purpose)');
+/*
+ * What the parish thinks of you, and where.
+ *
+ * The old version of this measured how much approval sixty thousand pounds
+ * bought. Nothing buys approval now, so the questions worth asking are the two
+ * the mechanic actually turns on: what the thresholds admit at rest, and whether
+ * improving a neighbourhood opens the one thing it was refusing.
+ */
+console.log(`  overall ${w.approvalOverall().toFixed(1)}, record ${w.approval.toFixed(1)},`
+  + ` towns counting you: ${w.standing}`);
 
-// Own something out on a lane, which is what a real player would have by now:
-// the depot landed next to the yard on the best road, so the pair had nothing
-// to widen and the test was measuring an empty case.
+/*
+ * Some ground, because you cannot build without it and the rest of this measures
+ * building. Money is not the variable here.
+ */
+w.companies.cash[w.player] = 200_000_000_00;
+{
+  let bought = 0;
+  for (let b = 0; b < w.land.owner.length && bought < 6; b++) {
+    if (w.buyLand(b).ok) bought++;
+  }
+  console.log(`  bought ${bought} fields to build on`);
+}
+
+// What the resting parish will and will not let you put up, anywhere you own.
+{
+  const owned = w.landOwned();
+  const spot = owned.length > 0 ? owned[0] : -1;
+  const at = spot >= 0 ? w.land.centres[spot] : { x: opening.x | 0, y: opening.y | 0 };
+  const here = w.approvalAt(at.x, at.y);
+  console.log(`  at your own ground (${at.x},${at.y}) approval is ${here.toFixed(1)}`);
+  const admits: string[] = [];
+  const refuses: string[] = [];
+  w.content.industries.forEach((ind, di) => {
+    (here >= ind.approvalNeed ? admits : refuses).push(
+      `${ind.name}${ind.approvalNeed > 0 ? `(${ind.approvalNeed})` : ''}`,
+    );
+  });
+  console.log(`    admits: ${admits.join(', ')}`);
+  console.log(`    refuses: ${refuses.join(', ')}`);
+}
+
+/*
+ * And the move the old design could not express: improve a place, then earn the
+ * right to industrialise it. A green is £6,000 and lifts local approval by twelve
+ * at the centre, which is the difference between being refused a creamery and
+ * being allowed one.
+ */
+{
+  /*
+   * The first spot on your own ground where a thing will actually stand.
+   *
+   * Asked of the game rather than guessed at, because a parcel centre is as
+   * likely as not to have the lane across it - which is what the first version of
+   * this measured, and it reported "no spot" while sitting on six fields.
+   */
+  const findSpot = (di: number, avoid = -1): number => {
+    for (let t = 0; t < D * D; t++) {
+      if (avoid >= 0) {
+        const dx = (t % D) - (avoid % D);
+        const dy = ((t / D) | 0) - ((avoid / D) | 0);
+        if (Math.sqrt(dx * dx + dy * dy) < 4) continue;
+      }
+      if (w.canPlaceSite(w.player, di, t).ok) return t;
+    }
+    return -1;
+  };
+  const greenIdx = w.content.industries.findIndex((i2) => i2.id === 'village-green');
+  const creameryIdx = w.content.industries.findIndex((i2) => i2.id === 'creamery');
+  /*
+   * Where the creamery *would* go if approval allowed. `canPlaceSite` refuses it
+   * outright at rest, so the spot is found with the green - same footprint rules,
+   * no approval need - and then asked about.
+   */
+  const spot = findSpot(greenIdx);
+  if (spot >= 0 && creameryIdx >= 0) {
+    const sx = spot % D;
+    const sy = (spot / D) | 0;
+    const before = w.canPlaceSite(w.player, creameryIdx, spot);
+    console.log(`  at (${sx},${sy}) approval ${w.approvalAt(sx, sy).toFixed(1)};`
+      + ` a creamery: ok ${before.ok}${before.reason ? ' - ' + before.reason : ''}`);
+    // Now the green, close enough to lift that spot but not on top of it.
+    const near = findSpot(greenIdx, spot);
+    const placed = near >= 0 ? w.placeSite(greenIdx, near)
+      : { ok: false, reason: 'nowhere near', site: -1 };
+    const away = near >= 0
+      ? Math.round(Math.sqrt(Math.pow(near % D - sx, 2) + Math.pow(((near / D) | 0) - sy, 2)))
+      : -1;
+    console.log(`  put up a village green ${away} tiles off: ${placed.ok}`
+      + `${placed.reason ? ' - ' + placed.reason : ''}`);
+    if (placed.ok) {
+      console.log(`    approval at the spot now ${w.approvalAt(sx, sy).toFixed(1)}`);
+      const after = w.canPlaceSite(w.player, creameryIdx, spot);
+      console.log(`    a creamery: ok ${after.ok}${after.reason ? ' - ' + after.reason : ''}`);
+      console.log('    why: ' + w.approvalReasons(sx, sy)
+        .map((r) => `${r.label} ${r.points >= 0 ? '+' : ''}${r.points.toFixed(1)}`)
+        .join(', '));
+      // And the other direction: what a depot does to the same neighbourhood.
+      const depotIdx = w.content.industries.findIndex((i2) => i2.id === 'distribution-centre');
+      w.approval = 62;
+      w.refreshApproval();
+      const depotSpot = findSpot(depotIdx, near);
+      if (depotSpot >= 0) {
+        const d = w.placeSite(depotIdx, depotSpot);
+        console.log(`  with a record of 62, a depot: ${d.ok}`
+          + `${d.reason ? ' - ' + d.reason : ''}`);
+        if (d.ok) {
+          console.log(`    approval by the green now ${w.approvalAt(sx, sy).toFixed(1)},`
+            + ` overall ${w.approvalOverall().toFixed(1)}`);
+          /*
+           * The *nearest* legal spot to the first depot, not the first one found
+           * anywhere. Scanning from tile zero returned a field forty tiles away
+           * where the depot has no effect, so the test reported "yes" and was
+           * measuring nothing.
+           */
+          let near2 = -1;
+          let best2 = Infinity;
+          for (let t = 0; t < D * D; t++) {
+            const dx = (t % D) - (depotSpot % D);
+            const dy = ((t / D) | 0) - ((depotSpot / D) | 0);
+            const dd = Math.sqrt(dx * dx + dy * dy);
+            if (dd >= best2) continue;
+            if (!w.canPlaceSite(w.player, greenIdx, t).ok) continue;
+            best2 = dd;
+            near2 = t;
+          }
+          if (near2 >= 0) {
+            const second = w.canPlaceSite(w.player, depotIdx, near2);
+            const nx = near2 % D;
+            const ny = (near2 / D) | 0;
+            console.log(`    a second depot ${best2.toFixed(0)} tiles from the first:`
+              + ` ok ${second.ok}${second.reason ? ' - ' + second.reason : ''}`);
+            /*
+             * With the reasons, because "yes" here is not necessarily a hole in
+             * the gate — the green is close enough to be paying for the depot, and
+             * that is the design working. Printing the figure is the difference
+             * between a test that says yes and one that says why.
+             */
+            console.log(`      approval there ${w.approvalAt(nx, ny).toFixed(1)}: `
+              + w.approvalReasons(nx, ny)
+                .map((r) => `${r.label} ${r.points >= 0 ? '+' : ''}${r.points.toFixed(1)}`)
+                .join(', '));
+          }
+        }
+      }
+      w.approval = 30;
+      w.refreshApproval();
+    }
+  } else {
+    console.log('  no spot on your own ground to build on');
+  }
+}
+
+// Own something out on a lane, which is what a real player would have by now.
 if (opening.from >= 0) {
   w.sites.owner[opening.from] = w.player;
   w.refreshInfluence();
 }
-w.approval = 90;
-const list = w.proposals();
-console.log(`  proposals at 90 approval: ${list.length}`);
-for (const p of list) {
-  console.log(`    ${p.label}: £${(p.cost / 100).toFixed(0)}, needs ${p.approval}, `
-    + `ok ${p.ok}${p.reason ? ' - ' + p.reason : ''}`);
+const list = w.roadWorks();
+console.log(`  road works offered: ${list.length}`);
+for (const p2 of list) {
+  console.log(`    ${p2.label}: £${(p2.cost / 100).toFixed(0)}, wants ${p2.approval},`
+    + ` there it is ${p2.here.toFixed(0)}, ok ${p2.ok}${p2.reason ? ' - ' + p2.reason : ''}`);
 }
-// What classes are actually on the ground, and which is "best"?
 {
   const counts = new Map<number, number>();
   for (let t = 0; t < D * D; t++) {
@@ -204,27 +345,8 @@ for (const p of list) {
     parts.push(`${w.content.ways[c].id}(${c}) ${n}`);
   }
   console.log(`  road tiles by class: ${parts.join(', ')}`);
-  const mine: number[] = [];
-  for (let i = 0; i < w.sites.count; i++) if (w.sites.owner[i] === w.player) mine.push(i);
-  console.log(`  sites you own: ${mine.length}, yards: ${w.yards.count}`);
-  const handles: number[] = [...mine];
-  for (let y = 0; y < w.yards.count; y++) {
-    if (w.yards.owner[y] === w.player) handles.push(-1 - y);
-  }
-  const tileOf2 = (h: number): number =>
-    (h >= 0 ? w.siteAccessTile[h] : w.yards.tile[-1 - h]);
-  for (let i = 0; i < handles.length; i++) {
-    for (let j = i + 1; j < handles.length; j++) {
-      const a = tileOf2(handles[i]);
-      const b = tileOf2(handles[j]);
-      const path = w.roadRoute(a, b);
-      const classes = new Set(path.map((t) => layer.cls[t]));
-      console.log(`    pair ${handles[i]}(${a}) -> ${handles[j]}(${b}): `
-        + `path ${path.length}, classes {${[...classes].join(',')}}`);
-    }
-  }
 }
-const widen = list.find((p) => p.works === Works.Widen && p.ok);
+const widen = list.find((p2) => p2.ok) ?? list[0];
 if (widen) {
   const count = (c: number): number => {
     let n = 0;
@@ -232,15 +354,9 @@ if (widen) {
     return n;
   };
   const roadBefore = count(2);
-  const r = w.propose(widen.works, widen.from, widen.to);
+  const r = w.widenTo(widen.from);
   console.log(`  widened "${widen.label}": ${r.ok}${r.reason ? ' - ' + r.reason : ''}; `
     + `road-class tiles ${roadBefore} -> ${count(2)}`);
 } else {
-  console.log('  nothing widenable is affordable');
+  console.log('  nothing to widen');
 }
-
-const had = w.standing;
-w.approval = 95;
-const r2 = w.propose(Works.Standing, -1, -1);
-console.log(`  asked to be counted: ${r2.ok}${r2.reason ? ' - ' + r2.reason : ''}; `
-  + `standing ${had} -> ${w.standing}, approval now ${w.approval.toFixed(1)}`);

@@ -34,7 +34,6 @@ import {
   Settings, loadOptions, saveOptions, type Options,
 } from './Settings.tsx';
 import { Fleet, Upgrades, Yard } from './Fleet.tsx';
-import { Planning } from './Planning.tsx';
 import { Dock } from './Dock.tsx';
 import { Icon } from './Icons.tsx';
 import { Owned } from './Owned.tsx';
@@ -3533,7 +3532,9 @@ export function App(): JSX.Element {
             fields: world.landOwned().length,
             delivered: world.companies.delivered[world.player],
             cash: world.companies.cash[world.player],
-            boardOpen: world.planningOpen(),
+            /* The parish counting you as one of their own, which is the thing
+               the letter about it was really about. See `refreshStanding`. */
+            boardOpen: world.standing > 0,
             stranded,
             holdingStock: holding,
           });
@@ -3825,17 +3826,6 @@ export function App(): JSX.Element {
           /* The same call the sourcing screen makes, because it is the same act:
              a task has one control and it is the lorry. */
           onEndTask={(service) => { if (live.world.endRun(service)) bump(); }}
-          onClose={() => setPanel({ k: 'none' })}
-        />
-      )}
-      {live && showPanel && shownPanel.k === 'planning' && (
-        <Planning
-          world={live.world}
-          onFund={(pence) => { if (live.world.fundParish(pence).ok) bump(); }}
-          onPropose={(works, from, to) => {
-            const r = live.world.propose(works, from, to);
-            if (r.ok) { bump(); setNote(''); } else setNote(r.reason);
-          }}
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
@@ -4275,38 +4265,18 @@ export function App(): JSX.Element {
               },
             },
             /*
-             * The parish, which is the last rung, and which used to appear out of
-             * nowhere.
+             * There was a Parish item here and there is not one now.
              *
-             * `planningOpen()` gates it on four lorries — planning.ts explains why
-             * four, and Planning.tsx makes the case for hiding it until then: a bar
-             * filling up on day one would make the opening a game about a bar rather
-             * than about a milk round. That argument is right and is kept.
+             * It opened a screen whose whole content was a number and some things
+             * to spend it on, and the complaint about it was exact: "I don't like
+             * that it only allows you to influence, not do." Both halves of it
+             * moved somewhere better — the road works are in Build, where the rest
+             * of the changing-the-district lives, and the number is at the top of
+             * the screen where it can gate things without being visited.
              *
-             * What was wrong was the *jump* from absent to present, which produced
-             * the question it was supposed to prevent: "why does my friend have a
-             * Parish tab and I don't?" Nobody could answer that from inside the
-             * game.
-             *
-             * So there are three states, not two. Absent on your first lorry, when
-             * the parish genuinely is not a thought anybody is having. Then shown
-             * but locked, saying what opens it — from the second lorry, which is
-             * about when "could this road be better" starts to occur to people.
-             * Then open. The opening is still clean and the ladder still has a rung
-             * you have to reach, but it is never a secret.
+             * Which also settles "why does my friend have a Parish tab and I
+             * don't?" for good, by there being no such tab for anybody.
              */
-            ...(live.world.fleetSize() >= 2 ? [{
-              key: 'parish',
-              label: 'Parish',
-              icon: 'village-shop',
-              on: panel.k === 'planning',
-              locked: live.world.planningOpen() ? undefined
-                : `The parish will hear you at four lorries. You have ${
-                  live.world.fleetSize()}.`,
-              onClick: (): void => setPanel(
-                panel.k === 'planning' ? { k: 'none' } : { k: 'planning' },
-              ),
-            }] : []),
           ]}
         />
       )}
