@@ -35,12 +35,11 @@ type OwnedTab = 'mine' | 'sale';
  * tab counts tell you which one you are in.
  */
 export function Owned({
-  world, onGoSite, onGoYard, onBuild, onClose,
+  world, onGoSite, onGoYard, onClose,
 }: {
   world: World;
   onGoSite: (site: number) => void;
   onGoYard: (yard: number) => void;
-  onBuild: () => void;
   onClose: () => void;
 }): JSX.Element {
   const [tab, setTab] = useState<OwnedTab>('mine');
@@ -146,15 +145,15 @@ export function Owned({
 
       <div className="bubble-body">
         {tab === 'mine' && mine}
-        {tab === 'mine' && (
-          <button className="veh-row empty" onClick={onBuild}>
-            <span className="bay-slot">+</span>
-            <span className="grow">
-              <span className="driver-name">Build a distribution centre</span>
-              <span className="driver-where">Somewhere to break bulk</span>
-            </span>
-          </button>
-        )}
+        {/*
+          * There was a "Build a distribution centre" row here, and it is gone.
+          *
+          * It was the only way to build anything, back when building meant one
+          * hard-coded depot dropped beside a road. Building is the Build tray now —
+          * any business, on your own land, at its own footprint, with a preview
+          * before you commit — so this row offered a worse route to a smaller
+          * version of a thing the dock already does properly.
+          */}
         {tab === 'sale' && sale}
         {tab === 'sale' && sale.length === 0 && (
           <div className="why">Nothing within reach is for sale.</div>

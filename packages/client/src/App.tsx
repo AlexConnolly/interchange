@@ -397,7 +397,6 @@ export function App(): JSX.Element {
    * where to put a building is *the district*, unobscured. A dialogue with a
    * coordinate picker in it would be the worst of both.
    */
-  const [building, setBuilding] = useState(false);
   const [options, setOptions] = useState<Options>(loadOptions);
   const [paused, setPaused] = useState(false);
   const [, pauseLeaving] = useLeaving(paused, paused, 140);
@@ -608,8 +607,6 @@ export function App(): JSX.Element {
      consequence of holding a tool: you can have the tray open and nothing in
      hand, which is what the category page *is*. */
   const [, trayLeaving] = useLeaving(buildAt, buildAt !== 'closed', 150);
-  const buildingRef = useRef(false);
-  buildingRef.current = building;
   const toolRef = useRef<'none' | 'lay' | 'lift' | 'land' | 'place'>('none');
   /** The business in hand, for the frame loop and the click handler. */
   const placeDefRef = useRef(-1);
@@ -2423,19 +2420,16 @@ export function App(): JSX.Element {
         }
         return;
       }
-      if (buildingRef.current) {
-        // Build mode: the click is a location, not a selection.
-        const r = world.foundDepot(cx, cz, `Depot ${world.yards.count}`);
-        if (r.site >= 0) {
-          setBuilding(false);
-          setNote('');
-          bumpRef.current();
-          setPanel({ k: 'place', site: r.site });
-        } else {
-          setNote(r.reason);
-        }
-        return;
-      }
+      /*
+       * There was a depot-placing mode here, and it is gone with the row that
+       * turned it on.
+       *
+       * It hard-coded one building — a distribution centre — dropped beside a road
+       * from a list in the Business panel. The Build tray does all of it properly
+       * now: any business, on land you own, at its own footprint, with a green or
+       * red preview before you commit. Two ways to build, one of them worse, is one
+       * too many.
+       */
       if (found >= 0) {
         // Centre what you clicked. The panel anchors itself over the place, so
         // a business at the edge of the frame would otherwise open a panel half
@@ -3778,7 +3772,6 @@ export function App(): JSX.Element {
             lookAt(live.world.yards.x[yard] + 0.5, live.world.yards.y[yard] + 0.5);
             setPanel({ k: 'yard', yard });
           }}
-          onBuild={() => { setBuilding(true); setNote(''); setPanel({ k: 'none' }); }}
           onClose={() => setPanel({ k: 'none' })}
         />
       )}
@@ -3951,13 +3944,15 @@ export function App(): JSX.Element {
           >&times;</button>
         </div>
       )}
-      {building && (
-        <div className="build-hint">
-          Click a spot beside a road to put a depot there
-          {note !== '' && <b>{note}</b>}
-        </div>
-      )}
-      {!building && note !== '' && <div className="build-hint"><b>{note}</b></div>}
+      {/*
+        * Whatever the last tool refused to do, in words.
+        *
+        * There was a second version of this above it carrying the depot mode's
+        * instruction — "click a spot beside a road" — and it went with the mode.
+        * What is left is the refusal, which every tool still needs: the green and
+        * red square says *whether*, and this says *why not*.
+        */}
+      {note !== '' && <div className="build-hint"><b>{note}</b></div>}
       {live && showPanel && shownPanel.k === 'market' && (
         <Market
           world={live.world}
@@ -4143,6 +4138,57 @@ export function App(): JSX.Element {
         <Dock
           fresh={!intro.done}
           items={[
+            /*
+             * Build, first in the dock, and a *tool* rather than a screen.
+             *
+             * First because it is the only item that changes the district rather
+             * than telling you about it. Everything to its right opens a panel and
+             * closes again leaving the parish exactly as it was; this one lays road
+             * and puts up buildings. Reading order in the dock is now roughly
+             * "what can I change" then "what have I got", which is the order those
+             * two questions actually get asked in.
+             *
+             * The one dock item that does not open a panel over the district,
+             * because what you need on screen while deciding where a thing goes is
+             * the place it is going. It was "Roads" and it held one kind of
+             * building; it holds two now, and the tray it opens is where the
+             * choosing happens rather than here - the dock is a budget of eight
+             * controls, and spending two of them on "roads" and "businesses"
+             * separately would be spending them on the same idea twice.
+             */
+            {
+              key: 'build',
+              label: 'Build',
+              icon: 'track',
+              // The tray being open, not a tool being in hand: you can be on the
+              // category page with nothing selected and the dock should still show
+              // where you are.
+              on: buildAt !== 'closed',
+              onClick: () => {
+                setPanel({ k: 'none' });
+                setNote('');
+                /*
+                 * Open on the categories, or shut. A dock button should always be
+                 * able to say "this one now" - the version of this that read
+                 * `tool === 'none' ? ... : 'none'` turned *everything* off when
+                 * pressed with another tool in hand, and the dock went dark.
+                 */
+                if (buildAt === 'closed') {
+                  setBuildAt('cats');
+                  /*
+                   * And nothing in hand, because the category page *is* nothing in
+                   * hand. Without this, pressing Build while buying land opened the
+                   * tray on top of the land panel and left the land tool live -
+                   * two tools at once, and the map taking clicks for the wrong
+                   * one. A control that changes mode has to end every other mode.
+                   */
+                  setTool('none');
+                } else {
+                  setBuildAt('closed');
+                  setTool('none');
+                }
+              },
+            },
             {
               key: 'owned',
               label: 'Business',
@@ -4199,7 +4245,6 @@ export function App(): JSX.Element {
               on: tool === 'land',
               onClick: () => {
                 setPanel({ k: 'none' });
-                setBuilding(false);
                 setNote('');
                 // The build tray goes with it, for the same reason Build puts the
                 // land tool down: one mode at a time.
@@ -4208,55 +4253,9 @@ export function App(): JSX.Element {
               },
             },
             /*
-             * Build, which is a *tool* rather than a screen.
-             *
-             * The one dock item that does not open a panel over the district,
-             * because what you need on screen while deciding where a thing goes is
-             * the place it is going. It was "Roads" and it held one kind of
-             * building; it holds two now, and the tray it opens is where the
-             * choosing happens rather than here - the dock is a budget of eight
-             * controls, and spending two of them on "roads" and "businesses"
-             * separately would be spending them on the same idea twice.
-             */
-            {              key: 'build',
-              label: 'Build',
-              icon: 'track',
-              // The tray being open, not a tool being in hand: you can be on the
-              // category page with nothing selected and the dock should still show
-              // where you are.
-              on: buildAt !== 'closed',
-              onClick: () => {
-                setPanel({ k: 'none' });
-                setBuilding(false);
-                setNote('');
-                /*
-                 * Open on the categories, or shut. A dock button should always be
-                 * able to say "this one now" - the version of this that read
-                 * `tool === 'none' ? ... : 'none'` turned *everything* off when
-                 * pressed with another tool in hand, and the dock went dark.
-                 */
-                if (buildAt === 'closed') {
-                  setBuildAt('cats');
-                  /*
-                   * And nothing in hand, because the category page *is* nothing in
-                   * hand. Without this, pressing Build while buying land opened the
-                   * tray on top of the land panel and left the land tool live -
-                   * two tools at once, and the map taking clicks for the wrong
-                   * one. A control that changes mode has to end every other mode.
-                   */
-                  setTool('none');
-                } else {
-                  setBuildAt('closed');
-                  setTool('none');
-                }
-              },
-            },
-            /*
-             * The parish appears when the parish would notice you, and not
-             * before (planning.ts). Build is *not* here: it is one action inside
-             * Businesses, because a permanent slot for a thing you do three
-             * times in a game is a slot spent badly — and it read as a mode with
-             * nothing behind it.
+             * The parish appears when the parish would notice you, and not before
+             * (planning.ts) — the one dock item that is not always there, because a
+             * control for a thing you cannot do yet is a question you cannot answer.
              */
             ...(live.world.planningOpen() ? [{
               key: 'parish',
