@@ -24,7 +24,7 @@ import {
   CHUNK, Renderer, RoadClass, TILES_ACROSS_DEFAULT, TILES_ACROSS_OPENING,
   RUN, loadKit, type RenderSource,
 } from '@interchange/render';
-import { Alerts, Earnings, Markers, Mine, money } from './Markers.tsx';
+import { Alerts, Earnings, Markers, Mine, money, placeThumb } from './Markers.tsx';
 import { Ambient, areaDemand } from './ambient.ts';
 import { Grazing } from './grazing.ts';
 import { eveningFor, litness, type Evening } from './evening.ts';
@@ -4147,7 +4147,14 @@ export function App(): JSX.Element {
                       + (def.approvalNeed > 0
                         ? `, and the parish wants ${def.approvalNeed} approval` : '')}
                   >
-                    <Icon id={def.id} size={20} />
+                    {/*
+                      * The building, rendered, rather than a glyph of its category.
+                      *
+                      * `alt=""` because the name is right underneath it: a screen
+                      * reader that says "creamery, Creamery" is worse than one that
+                      * says it once. See `placeThumb`.
+                      */}
+                    <img className="tool-thumb" src={placeThumb(def.id)} alt="" />
                     <span>{def.name}</span>
                   </button>
                 )
@@ -4173,7 +4180,14 @@ export function App(): JSX.Element {
                     title={`${def.name} - ${def.footprint} by ${def.footprint} tiles,`
                       + ` and worth ${def.approvalImpact} to the parish round it`}
                   >
-                    <Icon id={def.id} size={20} />
+                    {/*
+                      * The building, rendered, rather than a glyph of its category.
+                      *
+                      * `alt=""` because the name is right underneath it: a screen
+                      * reader that says "creamery, Creamery" is worse than one that
+                      * says it once. See `placeThumb`.
+                      */}
+                    <img className="tool-thumb" src={placeThumb(def.id)} alt="" />
                     <span>{def.name}</span>
                   </button>
                 )

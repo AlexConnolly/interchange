@@ -464,6 +464,24 @@ export function thumb(vehicleId: string): string {
 }
 
 /**
+ * And the same for a business, which the pipeline has been rendering all along.
+ *
+ * `build_thumbs.py` says "every vehicle and every business" at the top of it and
+ * has done since it was written — sixteen `plc_*.png` files have been sitting in
+ * `public/thumbs` unreferenced by anything, while the Build tray picked from
+ * sixteen little SVG glyphs. The vehicles got their pictures because choosing
+ * between nine names was the complaint that came in first; the buildings never got
+ * asked about until now.
+ *
+ * A glyph says *which category* — a cow, a barrel, a shed. The render says what
+ * you are about to put in a field, which is the question actually being asked, and
+ * it is the same answer the vehicle lists give.
+ */
+export function placeThumb(industryId: string): string {
+  return `thumbs/plc_${industryId.replace(/-/g, '_')}.png`;
+}
+
+/**
  * Which vehicles can carry a cargo, by name.
  *
  * Read out of the content, because the content is the only thing that knows. The

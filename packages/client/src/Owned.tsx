@@ -19,7 +19,7 @@
 import { useState, type JSX } from 'react';
 import { type World } from '@interchange/sim';
 import { content } from '@interchange/data';
-import { money } from './Markers.tsx';
+import { money, placeThumb } from './Markers.tsx';
 import { Icon } from './Icons.tsx';
 
 const C = content();
@@ -53,7 +53,11 @@ export function Owned({
     }
     mine.push(
       <button key={`y${y}`} className="veh-row" onClick={() => onGoYard(y)}>
-        <span className="row-icon"><Icon id="yard" size={20} /></span>
+        {/* The yard, rendered too. It is not an industry, so it does not come out
+            of the content the way the rows below do — but the pipeline has drawn
+            `plc_yard` all along and a row of renders with one glyph in it reads as
+            a row with something missing from it. */}
+        <img className="veh-thumb" src="thumbs/plc_yard.png" alt="" />
         <span className="grow">
           <span className="driver-name">{world.yards.names[y]}</span>
           <span className="driver-where">
@@ -69,9 +73,14 @@ export function Owned({
     const def = C.industries[world.sites.def[s]];
     mine.push(
       <button key={`s${s}`} className="veh-row" onClick={() => onGoSite(s)}>
-        <span className="row-icon" style={{ color: def.colour }}>
-          <Icon id={def.id} size={20} />
-        </span>
+        {/*
+          * The building, rendered. These are `veh-row`s — the same row the Vehicles
+          * list uses — and that list has shown a picture of the lorry since the
+          * complaint that choosing between nine names told you nothing. A business
+          * list in the same shape with a glyph in the same slot was the half of that
+          * argument nobody had come back to.
+          */}
+        <img className="veh-thumb" src={placeThumb(def.id)} alt="" />
         <span className="grow">
           <span className="driver-name">{def.name}</span>
           <span className="driver-where">
@@ -105,9 +114,14 @@ export function Owned({
     const def = C.industries[world.sites.def[cand.site]];
     sale.push(
       <button key={cand.site} className="veh-row" onClick={() => onGoSite(cand.site)}>
-        <span className="row-icon" style={{ color: def.colour }}>
-          <Icon id={def.id} size={20} />
-        </span>
+        {/*
+          * The building, rendered. These are `veh-row`s — the same row the Vehicles
+          * list uses — and that list has shown a picture of the lorry since the
+          * complaint that choosing between nine names told you nothing. A business
+          * list in the same shape with a glyph in the same slot was the half of that
+          * argument nobody had come back to.
+          */}
+        <img className="veh-thumb" src={placeThumb(def.id)} alt="" />
         <span className="grow">
           <span className="driver-name">{def.name}</span>
           <span className="driver-where">{money(cand.price)}</span>

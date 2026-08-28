@@ -1510,6 +1510,37 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   letter-spacing: 0.02em;
   cursor: pointer;
 }
+/*
+ * The rendered building, where a glyph used to be.
+ *
+ * Bigger than the 20px icon it replaced, because a render needs the room: at 20
+ * square a creamery and a feed mill are two grey smudges, and the whole point of
+ * showing the model is that they are not the same shape. 34 is the largest that
+ * keeps two rows of sixteen inside the tray without the labels losing a line.
+ *
+ * The same drop shadow the vehicle thumbnails use, and for the same reason — the
+ * renders carry their own light, so a shadow seats them on the tray without a
+ * border, which at this size would read as a box round a farm.
+ */
+/* The place at the head of its own panel. Bigger than the 24px glyph it replaced
+   for the same reason the tray's is bigger: a render needs the room to be a shape
+   rather than a smudge. Sized to the sheet head's line, so the title still sets
+   beside it rather than under it. */
+.sheet-thumb {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 2px rgba(30, 40, 30, 0.22));
+}
+
+.tool-thumb {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 2px rgba(30, 40, 30, 0.22));
+}
+
 /* Two lines at most, then clipped. "Builders' merchant" and "Distribution
    centre" do not fit on one 62-pixel line, and a tray that changed height
    depending on which page you were on would bounce the dock about. */

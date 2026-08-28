@@ -37,7 +37,7 @@ import { useEffect, useState, type JSX } from 'react';
 import { type World, ContractState, MoneyKind } from '@interchange/sim';
 import { content } from '@interchange/data';
 import type { Renderer } from '@interchange/render';
-import { money, Carriers, thumb, useAnchor } from './Markers.tsx';
+import { money, Carriers, thumb, useAnchor, placeThumb } from './Markers.tsx';
 import { anchorAt } from './anchor.ts';
 import { BodyIcon, Icon } from './Icons.tsx';
 
@@ -216,9 +216,9 @@ export function Place({
             aria-label="Back"
           >‹</button>
         ) : (
-          <span className="sheet-icon" style={{ color: def.colour }}>
-            <Icon id={def.id} size={24} />
-          </span>
+          /* The place itself, rendered, at the head of its own panel. A glyph
+             said which *sort* of works this was; the render says which works. */
+          <img className="sheet-thumb" src={placeThumb(def.id)} alt="" />
         )}
         <div className="grow">
           <div className="sheet-title">
