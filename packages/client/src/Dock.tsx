@@ -27,6 +27,20 @@ export interface DockItem {
   icon: string;
   on: boolean;
   onClick: () => void;
+  /**
+   * Why this cannot be pressed yet, if it cannot.
+   *
+   * For a rung of the ladder that exists but is not open. The alternative —
+   * hiding it until it works — was the original design and it produced exactly
+   * the question it was meant to avoid: "why does my friend have a Parish tab and
+   * I don't?" A control that appears from nowhere is a control the player has to
+   * be *told* about by somebody else.
+   *
+   * So it is shown, dimmed, and it says what opens it. That is not the same as a
+   * progress bar on day one — see the Parish item in App.tsx for where the line is
+   * drawn.
+   */
+  locked?: string;
 }
 
 export function Dock({
@@ -44,8 +58,12 @@ export function Dock({
       {items.map((it) => (
         <button
           key={it.key}
-          className={`dock-btn ${it.on ? 'on' : ''}`}
+          className={`dock-btn ${it.on ? 'on' : ''}${it.locked ? ' locked' : ''}`}
           onClick={it.onClick}
+          disabled={it.locked !== undefined}
+          /* The requirement in the tooltip as well as the label, because the dock
+             label has room for one word and this needs a sentence. */
+          title={it.locked}
         >
           <Icon id={it.icon} size={22} />
           <span>{it.label}</span>

@@ -4253,15 +4253,34 @@ export function App(): JSX.Element {
               },
             },
             /*
-             * The parish appears when the parish would notice you, and not before
-             * (planning.ts) — the one dock item that is not always there, because a
-             * control for a thing you cannot do yet is a question you cannot answer.
+             * The parish, which is the last rung, and which used to appear out of
+             * nowhere.
+             *
+             * `planningOpen()` gates it on four lorries — planning.ts explains why
+             * four, and Planning.tsx makes the case for hiding it until then: a bar
+             * filling up on day one would make the opening a game about a bar rather
+             * than about a milk round. That argument is right and is kept.
+             *
+             * What was wrong was the *jump* from absent to present, which produced
+             * the question it was supposed to prevent: "why does my friend have a
+             * Parish tab and I don't?" Nobody could answer that from inside the
+             * game.
+             *
+             * So there are three states, not two. Absent on your first lorry, when
+             * the parish genuinely is not a thought anybody is having. Then shown
+             * but locked, saying what opens it — from the second lorry, which is
+             * about when "could this road be better" starts to occur to people.
+             * Then open. The opening is still clean and the ladder still has a rung
+             * you have to reach, but it is never a secret.
              */
-            ...(live.world.planningOpen() ? [{
+            ...(live.world.fleetSize() >= 2 ? [{
               key: 'parish',
               label: 'Parish',
               icon: 'village-shop',
               on: panel.k === 'planning',
+              locked: live.world.planningOpen() ? undefined
+                : `The parish will hear you at four lorries. You have ${
+                  live.world.fleetSize()}.`,
               onClick: (): void => setPanel(
                 panel.k === 'planning' ? { k: 'none' } : { k: 'planning' },
               ),

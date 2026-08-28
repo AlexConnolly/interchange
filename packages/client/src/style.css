@@ -1587,6 +1587,15 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .dock-btn:hover,
 .tool-btn:hover,
 .tool-x:hover { background: rgba(255, 255, 255, 0.16); color: inherit; }
+/* A rung you can see and cannot reach yet.
+ *
+ * Dimmed rather than hidden, because hiding it is what produced "why does my
+ * friend have a Parish tab and I don't?" — a control that appears from nowhere is
+ * one the player has to be told about by somebody else. Half opacity and a default
+ * cursor: visibly present, visibly not yet, and the tooltip says what opens it. */
+.dock-btn.locked { opacity: 0.42; cursor: default; }
+.dock-btn.locked:hover { background: none; }
+
 /* Gold is the only colour coding in the dock, and it reads on black. */
 .dock-btn.on,
 .tool-btn.on { background: #f4c95d; color: #4a3c14; }
