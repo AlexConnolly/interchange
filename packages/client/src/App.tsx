@@ -3452,44 +3452,69 @@ export function App(): JSX.Element {
       {
         const hover = hoverRef.current;
         const held = toolRef.current;
-        if ((held === 'lay' || held === 'lift') && hover >= 0) {
-          const ok = held === 'lay'
-            ? world.trackHere(world.player, hover).ok
-            : world.liftHere(world.player, hover).ok;
-          const tiles = [hover];
-          if (ok && held === 'lay') {
-            for (const d of [1, -1, D, -D]) {
-              if (roadClass[hover + d] >= 0) { tiles.push(hover + d); break; }
-            }
-          }
-          renderer.showPlots([{
-            tiles,
-            wash: ok ? PLOT.yesWash : PLOT.noWash,
-            edge: ok ? PLOT.yesEdge : PLOT.noEdge,
-          }], src);
-        } else if (held === 'place' && placeDefRef.current >= 0) {
+        const tray = buildRef.current !== 'closed';
+        /*
+         * Your ground goes blue the moment the tray opens, not when you pick
+         * something out of it.
+         *
+         * It used to wait for a business to be selected, which had the sequence
+         * backwards. "Have I anywhere to put anything" is the question you ask
+         * *before* choosing what to put there — a player who opens Build wants to
+         * know what they are working with, and making them commit to a creamery
+         * first in order to find out means choosing blind and then going back.
+         *
+         * It applies to the road pages too, and not as an afterthought: a track
+         * can only be laid on land you own, so the blue is the same answer to the
+         * same question. Before this the road tool replaced the whole overlay with
+         * a single tile under the cursor and threw the context away.
+         */
+        if (tray || held === 'lay' || held === 'lift' || held === 'place') {
+          const regions: { tiles: readonly number[]; wash: RGB; edge: RGB }[] = [];
           /*
-           * Placing a business: your own ground in blue, and the footprint under
-           * the cursor in green or red.
-           *
-           * Two regions rather than one, and they answer different questions. The
-           * blue is *where you could put something* - the whole of your land, so
-           * the answer to "have I anywhere for this" is on screen before you go
-           * hunting for it. The square is *what would happen here*, at the exact
-           * size of the building, which is the only honest preview: a one-tile
-           * marker for a three-tile works would be a promise the click could not
-           * keep.
-           *
-           * The owned ground is recomputed every frame, which sounds wasteful and
-           * is not - it is a walk over the parcels you hold, and it means buying a
-           * field mid-placement lights it up immediately.
+           * Recomputed every frame, which sounds wasteful and is not — it is a walk
+           * over the parcels you hold, and it means buying a field with the tray
+           * open lights it up immediately.
            */
           const owned = world.landOwnedTiles();
-          const regions: { tiles: readonly number[]; wash: RGB; edge: RGB }[] = [];
           if (owned.length > 0) {
             regions.push({ tiles: owned, wash: PLOT.ownWash, edge: PLOT.ownEdge });
           }
-          if (hover >= 0) {
+
+          /*
+           * And on top of the blue, what would happen if you pressed the button
+           * here. The two answer different questions and are drawn as two regions:
+           * the blue is *where you could*, the square is *what this would do*.
+           *
+           * The green includes the road tile a track would join, because the join is
+           * the half a player is actually judging. And a refusal shows red rather
+           * than nothing, because an unmarked tile could mean "not allowed here" or
+           * "the tool is not really on", and those are indistinguishable when the
+           * answer is an absence.
+           */
+          if ((held === 'lay' || held === 'lift') && hover >= 0) {
+            const ok = held === 'lay'
+              ? world.trackHere(world.player, hover).ok
+              : world.liftHere(world.player, hover).ok;
+            const tiles = [hover];
+            if (ok && held === 'lay') {
+              for (const d of [1, -1, D, -D]) {
+                if (roadClass[hover + d] >= 0) { tiles.push(hover + d); break; }
+              }
+            }
+            regions.push({
+              tiles,
+              wash: ok ? PLOT.yesWash : PLOT.noWash,
+              edge: ok ? PLOT.yesEdge : PLOT.noEdge,
+            });
+          }
+
+          let hint = '';
+          if (held === 'place' && placeDefRef.current >= 0 && hover >= 0) {
+            /*
+             * The footprint at the exact size of the building, which is the only
+             * honest preview: a one-tile marker for a three-tile works would be a
+             * promise the click could not keep.
+             */
             const verdict = world.canPlaceSite(world.player, placeDefRef.current, hover);
             const ok = verdict.ok;
             regions.push({
@@ -3507,7 +3532,6 @@ export function App(): JSX.Element {
              */
             const gate = world.approvalForBuild(placeDefRef.current, hover);
             const impact = world.content.industries[placeDefRef.current]?.approvalImpact ?? 0;
-            let hint = '';
             if (!ok && verdict.reason.includes('parish')) {
               hint = `They want ${gate.need} here. It is ${Math.floor(gate.here)}.`;
             } else if (ok && gate.need > 0) {
@@ -3515,17 +3539,19 @@ export function App(): JSX.Element {
             } else if (ok && impact > 0) {
               hint = `Worth +${impact} to the parish round here`;
             }
-            if (hint !== placeHintRef.current) {
-              placeHintRef.current = hint;
-              setPlaceHint(hint);
-            }
-          } else if (placeHintRef.current !== '') {
-            placeHintRef.current = '';
-            setPlaceHint('');
           }
+          if (hint !== placeHintRef.current) {
+            placeHintRef.current = hint;
+            setPlaceHint(hint);
+          }
+
           renderer.showPlots(regions, src);
         } else if (held !== 'land') {
           renderer.showPlots([], src);
+          if (placeHintRef.current !== '') {
+            placeHintRef.current = '';
+            setPlaceHint('');
+          }
         }
       }
 
