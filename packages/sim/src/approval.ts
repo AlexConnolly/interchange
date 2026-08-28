@@ -63,22 +63,62 @@ export const APPROVAL_CELL = 4;
 export const APPROVAL_REST = 30;
 
 /**
- * How fast regard drifts back toward indifference, per day.
+ * How fast regard falls back toward indifference — as a *share* of the distance,
+ * not a fixed number of points a day.
  *
- * Without it the earned part is a ratchet — every delivery you ever made counts
- * for ever — and by the second year it is pinned at a hundred and has stopped
- * being a constraint at all. Drifting means standing still costs you, slowly.
+ * It was a flat 0.16 a day, and a flat drag against a gain that has to earn its way
+ * up produces one of two bad shapes and never a good one. Below the drag you are
+ * pinned at the floor and nothing you do registers at all; above it you rise until
+ * something else stops you. Measured on seed 1985 the opening was the first of
+ * those: a working first van runs 2.50 loads a day, standing still cost 2.9, and
+ * approval sat at exactly 30.00 for a whole game year while the haulier earned
+ * £925,000. "If I do something great early game there's no scale — it gives me
+ * maybe +1%. Nothing." It gave nothing.
  *
- * Note what it does *not* touch: the local part. A depot you built is still there
- * and people can still see it, so its impact does not fade while it stands. What
- * fades is your record, which is fair — being useful last spring is worth less
- * than being useful now.
+ * A proportional decay has neither failure. Any gain at all lifts you off the
+ * floor, the climb slows as it goes, and the number settles at `rest + gain/decay`
+ * instead of running to the ceiling or falling to the floor. Two per cent a day is
+ * a fifty-day time constant: a fortnight of good work is visible, and half a year
+ * of neglect undoes it.
+ *
+ * What it does *not* touch is the local part. A depot you built is still there and
+ * people can still see it, so its impact does not fade while it stands.
  */
-export const APPROVAL_DRIFT_PER_DAY = 0.16;
+export const APPROVAL_DECAY_PER_DAY = 0.02;
 
-/** What one load delivered into the parish is worth. Small: this is meant to
- *  accumulate over months of running, not over an afternoon. */
-export const APPROVAL_PER_LOAD = 0.055;
+/**
+ * What one load delivered into the parish is worth, to a one-lorry haulier.
+ *
+ * To a *one-lorry* haulier, and that qualification is the whole of the change. See
+ * `noticePerLoad`.
+ */
+export const APPROVAL_PER_LOAD = 0.2;
+
+/**
+ * And the same load, run by a bigger firm.
+ *
+ * Divided by the size of the fleet, because what the parish registers is not how
+ * many loads you shifted but how much of *you* they saw doing it. One van running
+ * the village milk is the whole of your business and a visible part of the parish's
+ * week; the same run from a twenty-lorry firm is a rounding error to both.
+ *
+ * Which is the shape the request asked for — "surely early game that impacts more"
+ * — arrived at from the other end. Nothing needs to be made deliberately generous
+ * to a beginner: a beginner's single lorry genuinely *is* their whole operation, and
+ * measuring the work against the operation says so on its own.
+ *
+ * The consequence worth stating, because it is a design decision and not a side
+ * effect: approval settles at about the same figure for a good one-van haulier as
+ * for a good twenty-van one. It measures how well you serve rather than how big you
+ * are. Growing is rewarded everywhere else in this game; here it is neutral, and the
+ * thing that separates a large operator from a small one is what they have *built*,
+ * which is the local half of the field.
+ *
+ * Floored at one, so a company with no lorries at all cannot divide by nothing.
+ */
+export function noticePerLoad(fleet: number): number {
+  return APPROVAL_PER_LOAD / Math.max(1, fleet);
+}
 
 /**
  * And what a day of keeping the village supplied is worth, per place you own that

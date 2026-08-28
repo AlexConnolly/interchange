@@ -44,7 +44,7 @@ import {
 import { AmenityField, stepAmenity, REMEDIATION_PRICE, REMEDIATION_FROM_ERA } from './amenity.ts';
 import {
   ApprovalField, type ApprovalSource, type ApprovalReason, reasonsAt, COUNTED_AT,
-  WIDEN_APPROVAL, APPROVAL_DRIFT_PER_DAY, APPROVAL_PER_LOAD, APPROVAL_REST,
+  WIDEN_APPROVAL, APPROVAL_DECAY_PER_DAY, noticePerLoad, APPROVAL_REST,
   PARISH_PER_DAY,
 } from './approval.ts';
 import {
@@ -1260,18 +1260,16 @@ export class World {
     this.settleSales();
 
     /*
-     * Approval drifts back toward indifference.
+     * Approval falls back toward indifference, by a share of the distance.
      *
-     * Without it the number is a ratchet — every delivery ever made counts for
-     * ever, so by the second year it is pinned at a hundred and has stopped
-     * being a constraint at all. Drifting means standing still costs you
-     * slowly, which is what keeps the rung worth climbing.
+     * Without any decay the number is a ratchet — every delivery ever made counts
+     * for ever, so by the second year it is pinned at a hundred and has stopped
+     * being a constraint. But a *flat* drag, which is what this was, has a worse
+     * failure at the other end: a gain smaller than the drag never lifts you off
+     * the floor at all, and a working first van's gain was smaller than the drag.
+     * Approval sat at exactly 30.00 for a game year. See `APPROVAL_DECAY_PER_DAY`.
      */
-    if (this.approval > APPROVAL_REST) {
-      this.approval = Math.max(APPROVAL_REST, this.approval - APPROVAL_DRIFT_PER_DAY);
-    } else if (this.approval < APPROVAL_REST) {
-      this.approval = Math.min(APPROVAL_REST, this.approval + APPROVAL_DRIFT_PER_DAY);
-    }
+    this.approval += (APPROVAL_REST - this.approval) * APPROVAL_DECAY_PER_DAY;
 
     /*
      * And keeping the village supplied counts for something.
@@ -2081,7 +2079,11 @@ export class World {
        * on revenue would make approval a second name for money, which is the
        * thing planning.ts exists to avoid.
        */
-      this.approval = Math.min(100, this.approval + APPROVAL_PER_LOAD);
+      /*
+       * Scaled by the size of the fleet, so what registers is how much of *you*
+       * the parish saw doing it rather than the raw count. See `noticePerLoad`.
+       */
+      this.approval = Math.min(100, this.approval + noticePerLoad(this.fleetSize()));
     }
     if (company === this.player && this.earned.length < 32) {
       this.earned.push({

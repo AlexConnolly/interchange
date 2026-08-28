@@ -262,6 +262,45 @@ which is how a player learns approval is a *place*.
 
 ---
 
+## ~~12. The parish has to notice a first van~~ — done
+
+**The complaint.** "If I do something great early game there's no scale — it gives
+me maybe +1%. Nothing. Surely early game that impacts more?"
+
+**It gave nothing, not +1%.** Measured on seed 1985: a load was worth 0.055 and a
+flat drift took 0.16 a day, so standing still cost **2.9 loads a day** — and a
+working first van on the opening contract runs **2.50**. Approval sat at exactly
+30.00 for a whole game year while the haulier earned £925,000.
+
+**The drift was as much to blame as the rate.** A flat drag has two failure modes
+and no good one: below it you are pinned at the floor and nothing registers, above
+it you climb until something else stops you. It is a proportional decay now — two
+per cent of the distance a day, a fifty-day time constant — so any gain at all lifts
+you off the floor and the number settles at `rest + gain/decay`.
+
+**And a load is divided by the size of the fleet.** What the parish registers is not
+how many loads you shifted but how much of *you* they saw doing it. One van running
+the village milk is your whole business and a visible part of the parish's week; the
+same run from a twenty-lorry firm is a rounding error to both. Which answers the
+request from the other end — nothing is made deliberately generous to a beginner, it
+is that a beginner's one lorry genuinely *is* their whole operation.
+
+**The curve now**, one van, seed 1985: 30 → **38.4 in the first month**, 44.6 at two,
+50.8 at four, settling near 54. And when the lorry stopped working around day 216 it
+fell to 42 and climbed back when it resumed — which is the half a flat drift could
+never do.
+
+**The design decision this makes, stated rather than stumbled into:** approval
+measures how well you serve, not how big you are. A four-lorry firm doing four times
+the work is regarded the same as the one van; four lorries queued on one milk run
+manage 3.33 loads a day between them and are regarded *less*. Growing is rewarded
+everywhere else in this game; here it is neutral, and what separates a large operator
+from a small one is what they have **built**, which is the local half of the field —
+and that is what keeps the build gates meaningful for the whole game rather than
+until somebody gets rich.
+
+---
+
 ## Standing rules, for anything on this list
 
 - **Nothing whose visibility matters may be animated through opacity.** Third time
