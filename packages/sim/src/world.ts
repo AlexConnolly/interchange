@@ -6440,10 +6440,63 @@ export class World {
     this.companies.post(this.player, Line.AssetTrade, -verdict.price);
     this.land.owner[parcel] = this.player;
     this.note(NONE, MoneyKind.Land, -verdict.price);
+    this.layDownToGrass(parcel);
     // The ground is drawn from this, and your reach grows with it.
     this.landRevision++;
     this.refreshInfluence();
     return { ok: true, reason: '' };
+  }
+
+  /**
+   * Land you have just bought stops being farmed, so it goes back to grass.
+   *
+   * Buying a ploughed field left it ploughed for the rest of the game. Not frozen
+   * by accident — by the rules working exactly as written: `cropBase` holds what
+   * worldgen sowed the field with and the whole rotation is derived from it, so an
+   * arable base runs the arable year for ever and nothing about changing hands
+   * touched it. Meanwhile ploughing, drilling and cutting are *work*, and the farm
+   * that used to do that work does not own the field any more, so the ground sat at
+   * whatever stage it had reached the day you bought it.
+   *
+   * Which is wrong in the model as well as on screen. A field is arable because
+   * somebody is growing corn in it; buy it out from under them and there is nobody
+   * growing corn in it. It lays down to grass.
+   *
+   * Immediately rather than over a season, and that is a choice: the change of
+   * colour is the *receipt*. You have just spent several thousand pounds on a
+   * rectangle in a field of rectangles, and the ground going green is the only
+   * thing on screen that says which one you got.
+   */
+  private layDownToGrass(parcel: number): void {
+    const fields = this.terrain.fields;
+    const tiles = this.land.tiles[parcel];
+    if (!tiles) return;
+    /*
+     * Both arrays are built lazily on the first season step, which has usually run
+     * long before anybody has the money for a field — but `buyLand` is reachable
+     * from a tool on the first tick, so it cannot be assumed.
+     */
+    if (this.cropBase === null) {
+      this.cropBase = new Uint8Array(fields.crop);
+      this.cropWant = new Uint8Array(fields.crop);
+    }
+    const want = this.cropWant as Uint8Array;
+    const offset = ((parcel * 2654435761) >>> 0) % 3;
+    for (const t of tiles) {
+      /*
+       * A wood stays a wood. It is not in the rotation, it is not being farmed by
+       * anybody, and turning one to pasture on purchase would be clearing somebody
+       * else's trees as a side effect of a land deal.
+       */
+      if (isWood(this.cropBase[t] as Crop)) continue;
+      this.cropBase[t] = Crop.Pasture;
+      const stage = grassStage(this.month, offset, Crop.Pasture);
+      want[t] = stage;
+      if (fields.crop[t] !== stage) {
+        fields.crop[t] = stage;
+        this.fieldTouched(t);
+      }
+    }
   }
 
   /** Rebuild the influence area from the yards and places you hold. */

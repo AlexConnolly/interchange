@@ -1426,13 +1426,32 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .tool-page {
   display: flex;
   align-items: stretch;
+  /*
+   * It wraps. It used to be a strip that scrolled sideways with its scrollbar
+   * hidden, and that was not a compromise, it was a hiding place: measured at
+   * 1600x1000, the row wanted 1052px and had 480, so *nine of the sixteen
+   * businesses were off the end* — sawmill, concrete plant, freight terminal,
+   * builders' merchant, filling station, livestock farm, abattoir, village shop and
+   * the distribution centre. Reported, reasonably, as "I can't find the
+   * distribution centre".
+   *
+   * A hidden scrollbar over a horizontal strip is the worst of the options: there
+   * is nothing to grab, no arrow, and no edge fade, so the row does not look
+   * truncated — it looks like a list of seven things. Wrapping is honest about how
+   * many there are, and it costs a second row of forty-odd pixels on a screen with
+   * a whole district of spare height.
+   */
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 4px;
-  max-width: min(62vw, 500px);
-  overflow-x: auto;
-  scrollbar-width: none;
+  /*
+   * Wide enough for eight or nine a row, so sixteen is two rows rather than three.
+   * A button is 60px and the gap is 4, so this is nine across at the cap and it
+   * narrows with the window from there.
+   */
+  max-width: min(78vw, 620px);
   animation: page-in 190ms cubic-bezier(0.2, 0.9, 0.3, 1);
 }
-.tool-page::-webkit-scrollbar { display: none; }
 /* In from the right, because that is the direction a page turns when you go
    deeper. Going back animates the same way, and it should: what you are watching
    is the row being replaced, not a stack being pushed and popped, and one motion

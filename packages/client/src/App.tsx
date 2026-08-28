@@ -43,6 +43,7 @@ import { Approval, ApprovalDial } from './Approval.tsx';
 import {
   DIORAMA_SIZE, DIORAMA_TRIES, DIORAMA_DAY, dioramaAcross, goodEnough, seedFor,
 } from './diorama.ts';
+import { trayPageFor } from './tray.ts';
 import { Market } from './Market.tsx';
 import { Land } from './Land.tsx';
 import { powerLines, SPAN, WIRE_H } from './powerlines.ts';
@@ -4133,7 +4134,7 @@ export function App(): JSX.Element {
                * read as the dock having grown rather than as a panel arriving.
                */
               live.world.content.industries.map((def, i) => (
-                def.kind === 'amenity' ? null : (
+                trayPageFor(def.kind) !== 'works' ? null : (
                   <button
                     key={def.id}
                     className={`tool-btn ${tool === 'place' && placeDef === i ? 'on' : ''}`}
@@ -4160,7 +4161,7 @@ export function App(): JSX.Element {
                * fourteen works to find one.
                */
               live.world.content.industries.map((def, i) => (
-                def.kind !== 'amenity' ? null : (
+                trayPageFor(def.kind) !== 'parish' ? null : (
                   <button
                     key={def.id}
                     className={`tool-btn ${tool === 'place' && placeDef === i ? 'on' : ''}`}
