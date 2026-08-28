@@ -937,10 +937,23 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 /* Build mode. A line at the bottom of the screen and nothing else on it,
    because what you need while choosing where to put a building is the
    district. */
+/*
+ * Above the dock, not under it.
+ *
+ * At `bottom: 22px` this sat at y 945..978 in a thousand-pixel window and the dock
+ * sat at 920..982 — so the pill was *entirely inside the dock's box*, behind it, and
+ * every refusal this game has ever printed went there to die. Nobody reported it
+ * because a message you have never seen is indistinguishable from a message that
+ * was never written.
+ *
+ * Found by measuring where the new price hint landed, which is the only reason it
+ * was found at all: the words were in the DOM and read back correctly, which is
+ * exactly what the old note did.
+ */
 .build-hint {
   position: absolute;
   left: 50%;
-  bottom: 22px;
+  bottom: 92px;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -958,6 +971,10 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 /* The live parish reading, which is information rather than a refusal. Salmon is
    the colour of "you cannot"; this one is only ever telling you where you stand,
    including when the answer is yes. */
+/* And higher still when the build tray is open, because the tray stands between
+   the dock and the hint. Measured: the tray is 97px tall at its tallest page and
+   sits at 84px, so it reaches 181 — this clears it with room for the shadow. */
+.build-hint.over-tray { bottom: 196px; }
 .build-hint.quiet { background: rgba(28, 32, 24, 0.66); }
 .build-hint.quiet b { color: #e4dcc6; font-weight: 600; }
 .hud-btn.armed { background: #f4c95d; color: #4a3c14; }
@@ -1533,6 +1550,28 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   object-fit: contain;
   filter: drop-shadow(0 1px 2px rgba(30, 40, 30, 0.22));
 }
+
+/*
+ * What a building costs, from.
+ *
+ * Under the name, quiet, and in short money. It is a figure for choosing between
+ * buildings rather than for budgeting: the exact price depends on where you put it,
+ * and measured on seed 1985 the spread between a country site and a town gate is
+ * exactly 100% for every building in the game. The exact pounds, and the premium in
+ * brackets, arrive when the cursor is over the ground.
+ *
+ * `font-variant-numeric: tabular-nums` so a row of prices lines up down the column
+ * and can be compared at a glance, which is the only reason it is here.
+ */
+.tool-price {
+  font-style: normal;
+  font-size: 9.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  opacity: 0.62;
+}
+.tool-btn.on .tool-price { opacity: 0.8; }
 
 /* A glyph standing in for a render, in the render's box, so the labels beside it
    sit on the same line. */

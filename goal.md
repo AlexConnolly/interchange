@@ -219,7 +219,7 @@ amenity penalty in the game and sits where nobody lives; a distribution centre h
 an amenity penalty of 2 and is the most resented building in the parish.
 
 **The move the old design could not express**, measured on seed 1985: creamery
-refused at rest → a £6,000 village green four tiles off → local approval 30.0 to
+refused at rest → a village green four tiles off → local approval 30.0 to
 37.9 → creamery allowed. Improve a neighbourhood, earn the right to industrialise
 it.
 
@@ -277,6 +277,10 @@ which is how a player learns approval is a *place*.
 - **Measure, do not reason.** A screenshot has misled this project repeatedly:
   software GL at three frames a second cannot accumulate a particle plume, and a
   mid-animation frame looks like a bug. Probe it.
+- **`foundCost` in the content is not the price.** `SITE_PRICE_SCALE` is 8, so a
+  village green with `foundCost: 600000` costs £47,120 to build and not £6,000. I
+  asserted the content figure as a price twice before checking — once here and once
+  in a commit message. The tray reads `foundPriceBase`, which is the real thing.
 - **Balance anchor.** A second van at about 8 real minutes on seed 1985, checked
   with `packages/tools/src/probe.ts` after anything that touches the economy.
 - **`window.interchange` is the handle.** `{ world, renderer }` on the running

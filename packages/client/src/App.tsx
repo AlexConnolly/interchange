@@ -25,6 +25,7 @@ import {
   RUN, loadKit, type RenderSource,
 } from '@interchange/render';
 import { Alerts, Earnings, Markers, Mine, money, placeThumb } from './Markers.tsx';
+import { roughMoney } from './format.ts';
 import { Ambient, areaDemand } from './ambient.ts';
 import { Grazing } from './grazing.ts';
 import { eveningFor, litness, type Evening } from './evening.ts';
@@ -3534,12 +3535,46 @@ export function App(): JSX.Element {
              */
             const gate = world.approvalForBuild(placeDefRef.current, hover);
             const impact = world.content.industries[placeDefRef.current]?.approvalImpact ?? 0;
-            if (!ok && verdict.reason.includes('parish')) {
-              hint = `They want ${gate.need} here. It is ${Math.floor(gate.here)}.`;
-            } else if (ok && gate.need > 0) {
-              hint = `Parish ${Math.floor(gate.here)} of ${gate.need} needed`;
-            } else if (ok && impact > 0) {
-              hint = `Worth +${impact} to the parish round here`;
+            /*
+             * What it costs here, and how much of that is the location.
+             *
+             * The premium in brackets rather than a second total, because the
+             * question a player is asking while moving the cursor is not "what is
+             * the price" — the tray already told them roughly — it is "what am I
+             * paying for *this spot*". A bare figure that silently doubles as you
+             * approach a town answers neither.
+             */
+            const premium = world.foundPremiumAt(placeDefRef.current, hover);
+            const cost = money(verdict.price)
+              + (premium > 0 ? ` (+${money(premium)})` : '');
+            if (!ok) {
+              /*
+               * Why not, in the simulation's own words.
+               *
+               * `canPlaceSite` has a sentence for every refusal — part of that is
+               * water, there is a road across it, somebody lives there, the parish
+               * would not have it — and until now none of them reached the player
+               * until after they had clicked. A red square with no words is the
+               * ambiguity the preview exists to remove: it could mean "not here" or
+               * "the tool is not really on".
+               */
+              hint = verdict.reason;
+            } else {
+              hint = cost;
+              /*
+               * The parish figure only when it is *close*.
+               *
+               * The reason for showing it on an allowed spot is that the headroom is
+               * being spent \u2014 put the depot here at 57 when it wants 55 and the next
+               * one is not going beside it. That is worth knowing at 57 and worth
+               * nothing at 90, where "parish 90 of 35" is a line of noise beside the
+               * figure the player is actually reading.
+               */
+              if (gate.need > 0 && gate.here - gate.need < 15) {
+                hint += ` \u00b7 parish ${Math.floor(gate.here)}, needs ${gate.need}`;
+              } else if (impact > 0) {
+                hint += ` \u00b7 worth +${impact} to the parish`;
+              }
             }
           }
           if (hint !== placeHintRef.current) {
@@ -4162,6 +4197,26 @@ export function App(): JSX.Element {
                       */}
                     <img className="tool-thumb" src={placeThumb(def.id)} alt="" />
                     <span>{def.name}</span>
+                    {/*
+                      * What it costs, from.
+                      *
+                      * Short money — "£130k" rather than "£130,020" — because this
+                      * is a figure for *choosing between* buildings and the exact
+                      * pounds are neither knowable yet nor useful: the price depends
+                      * on where you put it, and the same creamery is twice the money
+                      * at a town gate as it is up a lane. Measured on seed 1985, that
+                      * spread is exactly 100% for every building in the game.
+                      *
+                      * So the tray quotes the country price, which is the cheapest it
+                      * can be, and the premium for standing it somewhere useful shows
+                      * up in brackets when you point at the ground. A quote a player
+                      * can only ever be charged *more* than would be a nasty
+                      * surprise; one they can only be charged less than is a
+                      * decision.
+                      */}
+                    <em className="tool-price">
+                      {roughMoney(live.world.foundPriceBase(i))}
+                    </em>
                   </button>
                 )
               ))
@@ -4184,7 +4239,11 @@ export function App(): JSX.Element {
         * What is left is the refusal, which every tool still needs: the green and
         * red square says *whether*, and this says *why not*.
         */}
-      {note !== '' && <div className="build-hint"><b>{note}</b></div>}
+      {note !== '' && (
+        <div className={`build-hint${buildAt !== 'closed' ? ' over-tray' : ''}`}>
+          <b>{note}</b>
+        </div>
+      )}
       {/*
         * The live reading, in the refusal's place and only when there is no
         * refusal to show.
@@ -4195,7 +4254,9 @@ export function App(): JSX.Element {
         * reading you can get back by moving the mouse.
         */}
       {note === '' && placeHint !== '' && tool === 'place' && (
-        <div className="build-hint quiet"><b>{placeHint}</b></div>
+        <div className={`build-hint quiet${buildAt !== 'closed' ? ' over-tray' : ''}`}>
+          <b>{placeHint}</b>
+        </div>
       )}
       {live && showPanel && shownPanel.k === 'market' && (
         <Market

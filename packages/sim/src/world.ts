@@ -3739,20 +3739,65 @@ export class World {
    * `landPriceOf` use, so building at the town gate costs what land at the town
    * gate costs.
    */
-  foundPriceAt(defIndex: number, tile: number): number {
+  /**
+   * What one of these costs out in the country, away from every town.
+   *
+   * The figure the Build tray quotes before you have chosen a spot, and it is
+   * deliberately the *cheapest* it can be rather than an average: an estimate a
+   * player can be under-charged against is a nasty surprise, and one they can only
+   * be over-charged against is a decision they can make. So the tray says "from",
+   * and the premium for standing it somewhere useful shows up when they point at
+   * the ground.
+   *
+   * Written as `foundPriceAt` with the town distance sent to infinity rather than
+   * as its own arithmetic, because the two must not be able to disagree. The
+   * previous version of this idea in another game quoted a list price the checkout
+   * did not honour; there is one formula here and both callers go through it.
+   */
+  foundPriceBase(defIndex: number): number {
+    /*
+     * The cheapest point on the curve, which is *not* at infinity.
+     *
+     * The site premium runs out at 30 tiles from a town and the ground premium at
+     * 34 — two constants owned by two different systems, and nobody had noticed they
+     * disagree. Between those distances the site price has stopped falling while the
+     * ground being deducted is still worth a town premium, so the subtraction dips
+     * *below* the country price: measured, a dairy farm at 31 tiles out costs
+     * £29,491 where the same farm in the middle of nowhere costs £29,520.
+     *
+     * Twenty-eight pounds, and it would not matter at all except that this figure is
+     * a promise. A tray quoting "from £29,520" against a district containing a spot
+     * at £29,491 is quoting an average with a floor's face on. So the floor is the
+     * minimum of the two places it can be, rather than the value at one of them.
+     */
+    return Math.min(
+      this.foundPriceFrom(defIndex, 30),
+      this.foundPriceFrom(defIndex, Infinity),
+    );
+  }
+
+  /**
+   * The premium for putting it *here* rather than in the middle of nowhere.
+   *
+   * Always positive or zero, and shown in brackets while you hover. It is the whole
+   * of the land-value gradient made visible: the same creamery is half again as dear
+   * at the town gate as it is up a lane, and until now the only way to find that out
+   * was to move the cursor and watch a single total change.
+   */
+  foundPremiumAt(defIndex: number, tile: number): number {
+    return Math.max(0, this.foundPriceAt(defIndex, tile) - this.foundPriceBase(defIndex));
+  }
+
+  /**
+   * The price at a given distance from the nearest town, which is the shape both
+   * the quote and the actual charge are computed from.
+   *
+   * Split out of `foundPriceAt` so that `foundPriceBase` is the same function with
+   * one argument changed. See the note there for why that matters.
+   */
+  private foundPriceFrom(defIndex: number, nearest: number): number {
     const def = this.content.industries[defIndex];
     if (!def) return 0;
-    const size = this.config.size;
-    const x = tile % size;
-    const y = (tile / size) | 0;
-    let nearest = 1e9;
-    for (let t = 0; t < this.towns.count; t++) {
-      const dx = this.towns.x[t] - x;
-      const dy = this.towns.y[t] - y;
-      const d = Math.sqrt(dx * dx + dy * dy)
-        / Math.max(1, Math.sqrt(this.towns.population[t] / 400));
-      if (d < nearest) nearest = d;
-    }
     const full = def.foundCost * (1 + Math.max(0, 1 - nearest / 30)) * SITE_PRICE_SCALE;
 
     // The ground under it, at the same rate the land market charges for a field
@@ -3769,6 +3814,21 @@ export class World {
      * ground deduction doing the work everywhere it matters.
      */
     return Math.round(Math.max(full * 0.5, full - ground));
+  }
+
+  foundPriceAt(defIndex: number, tile: number): number {
+    const size = this.config.size;
+    const x = tile % size;
+    const y = (tile / size) | 0;
+    let nearest = 1e9;
+    for (let t = 0; t < this.towns.count; t++) {
+      const dx = this.towns.x[t] - x;
+      const dy = this.towns.y[t] - y;
+      const d = Math.sqrt(dx * dx + dy * dy)
+        / Math.max(1, Math.sqrt(this.towns.population[t] / 400));
+      if (d < nearest) nearest = d;
+    }
+    return this.foundPriceFrom(defIndex, nearest);
   }
 
   /**

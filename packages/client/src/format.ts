@@ -26,6 +26,32 @@ export function shortMoney(pence: number): string {
   return `${pence < 0 ? '-' : ''}${GBP}${s}`;
 }
 
+/**
+ * A price to compare, not to budget with. "£130k", "£21k", "£1.2m".
+ *
+ * Not `shortMoney`, which keeps a decimal on the thousands and gives "£130.0k" — a
+ * figure with a false precision in it. This one is for a row of buildings in the
+ * Build tray, where what matters is that a creamery is dearer than a sawmill and
+ * nothing at all turns on the hundreds. The exact pounds appear when the cursor is
+ * over the ground and the game knows which spot is being asked about.
+ *
+ * A decimal only under ten of whatever unit it is in, which is where the difference
+ * between 1.2 and 2.0 is most of the number.
+ */
+export function roughMoney(pence: number): string {
+  const p = Math.abs(Math.round(pence)) / 100;
+  const sign = pence < 0 ? '-' : '';
+  if (p >= 1e6) {
+    const m = p / 1e6;
+    return `${sign}${GBP}${m < 10 ? m.toFixed(1) : Math.round(m)}m`;
+  }
+  if (p >= 1e3) {
+    const k = p / 1e3;
+    return `${sign}${GBP}${k < 10 ? k.toFixed(1) : Math.round(k)}k`;
+  }
+  return `${sign}${GBP}${Math.round(p)}`;
+}
+
 export function num(n: number, digits = 0): string {
   return n.toLocaleString('en-GB', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
