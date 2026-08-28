@@ -1,23 +1,39 @@
 /**
- * The main menu, and the save list that both it and the pause menu use.
+ * The main menu, which is the district seen from the air before you land.
  *
- * The game used to begin the instant the page loaded, which is a lovely thing for
- * a demo and impossible once saves exist: there has to be a moment before the
- * world is made where you can choose not to make a new one. So the page opens
- * here.
+ * The first version of this was four grey cards centred on a gradient, and it was
+ * wrong in a way worth naming: it was a *settings screen wearing a menu's
+ * clothes*. It had no relationship to the game behind it, it invented a second
+ * visual language for one screen, and — worst — it hid the single best thing this
+ * project has, which is a low-poly English parish under broken cloud.
  *
- * Four items, and one of them does nothing. **Exit** is on the list because a main
- * menu without it reads as a menu that is missing something — and because a
- * browser tab cannot be closed by script unless the script opened it, which is a
- * fact about the platform rather than a decision. It says so when pressed rather
- * than being greyed out, because a disabled button with no explanation is worse
- * than a button that tells you the truth.
+ * So the menu does not cover the game. The world is built the moment the page
+ * loads, held at altitude with the last of the overcast over it, drifting slowly;
+ * the menu sits on it like a title card on an establishing shot. Pressing New game
+ * releases the descent that was already paused — which is why it is instant, and
+ * why the loading is spent on the screen nobody minds waiting on.
  *
- * ## The save list is one component used twice
+ * ## The design, and the reasons
  *
- * Loading and saving are the same list of the same slots, differing only in what
- * pressing one does — and in that saving offers a "new save" row where loading
- * does not. Writing it twice would have been two places to get the naming wrong.
+ * **Left, not centred.** A centred column over a landscape fights the landscape
+ * for the middle of the frame. Pushed to the left third, the two arrange
+ * themselves: words on one side, country on the other, which is how a title
+ * sequence is composed and not how a dialog is.
+ *
+ * **A list with hairlines, not a stack of cards.** A card says "press me, I am a
+ * control". Four of them in a column say "fill this in". A rule between rows says
+ * "this is a list of things", which is what a menu is, and it leaves the district
+ * visible between the words instead of boxing it out.
+ *
+ * **No panel behind the words — a scrim.** Text over a bright field needs
+ * contrast, and a card is the lazy way to get it. A soft gradient bled from the
+ * bottom-left darkens the ground behind the type without drawing an edge round it,
+ * so the picture runs under the words rather than stopping at them.
+ *
+ * **The gold marker is the only ornament.** It is the colour the dock lights up
+ * with, so the eye already knows it means "this one". A hover that slides the row
+ * four pixels and puts a mark in the margin is the whole of the interaction
+ * design, and it is enough.
  */
 
 import { useState, type JSX } from 'react';
@@ -29,18 +45,20 @@ import {
 export type MenuPage = 'main' | 'load' | 'settings' | null;
 
 function Item({
-  label, sub, on, onClick, disabled,
+  label, sub, onClick, disabled,
 }: {
-  label: string; sub?: string; on?: boolean; onClick: () => void; disabled?: boolean;
+  label: string; sub?: string; onClick: () => void; disabled?: boolean;
 }): JSX.Element {
   return (
-    <button
-      className={`menu-item${on ? ' on' : ''}`}
-      onClick={onClick}
-      disabled={disabled}
-    >
-      <span className="menu-label">{label}</span>
-      {sub !== undefined && <span className="menu-sub">{sub}</span>}
+    <button className="mi" onClick={onClick} disabled={disabled}>
+      {/* The marker lives in the row's own margin so the label does not move to
+          make room for it — a menu whose text jumps on hover is a menu that feels
+          loose. */}
+      <span className="mi-mark" aria-hidden="true" />
+      <span className="mi-text">
+        <span className="mi-label">{label}</span>
+        {sub !== undefined && <span className="mi-sub">{sub}</span>}
+      </span>
     </button>
   );
 }
@@ -48,9 +66,9 @@ function Item({
 /**
  * The slots, with a delete on each.
  *
- * `onPick` does the loading or the overwriting; `newRow` is the "+ New save" line,
- * absent when loading because there is nothing to load into a slot that does not
- * exist yet.
+ * One component, used by the menu's Load and the pause menu's Save alike —
+ * they are the same list of the same things, differing only in what pressing one
+ * does. Writing it twice would have been two places to get the naming wrong.
  */
 export function SaveList({
   slots, onPick, onDelete, newRow,
@@ -114,67 +132,78 @@ export function Menu({
   const [said, setSaid] = useState('');
 
   return (
+    /*
+     * `menu` is a layout, not a surface. It has no background of its own: the
+     * district is the background, and the only thing this draws is the scrim that
+     * makes the type readable over it.
+     */
     <div className="menu">
-      {/*
-        * The title, and it is the only place in the game the name appears.
-        * Deliberately: a heads-up display with a wordmark on it is a wordmark you
-        * stop seeing after ten seconds, and this is the one screen with room.
-        */}
-      <div className="menu-head">
-        <h1>Interchange</h1>
-        <p>Haulage in an English parish, 1985</p>
-      </div>
-
-      {page === 'main' && (
-        <div className="menu-list">
-          <Item label="New game" sub="A district you have never seen" onClick={onNew} />
-          <Item
-            label="Load game"
-            sub={slots.length === 0 ? 'Nothing saved yet'
-              : slots.length === 1 ? '1 saved game' : `${slots.length} saved games`}
-            onClick={() => { setSlots(listSaves()); onPage('load'); }}
-            disabled={slots.length === 0}
-          />
-          <Item label="Settings" sub="Sound and detail" onClick={() => onPage('settings')} />
+      <div className="menu-col">
+        <div className="menu-head">
           {/*
-            * Exit, which cannot work and says so.
+            * The one place the game's name appears. Deliberately: a wordmark on a
+            * heads-up display is a wordmark you stop seeing in ten seconds, and
+            * this is the only screen with the room to set it properly.
             *
-            * `window.close()` is refused for any tab a script did not open — a
-            * platform rule, not an oversight — so the honest thing is to be here,
-            * be pressable, and explain. Greying it out would leave the player
-            * wondering what they had to do first.
+            * The rule under it is doing real work — it is what makes the title and
+            * the subtitle read as one object rather than two lines that happen to
+            * be near each other.
             */}
-          <Item
-            label="Exit"
-            sub={said || 'Close the game'}
-            onClick={() => setSaid('A browser tab cannot close itself. Use the tab’s ×.')}
-          />
+          <h1>Interchange</h1>
+          <span className="menu-rule" />
+          <p>Haulage in an English parish &middot; 1985</p>
         </div>
-      )}
 
-      {page === 'load' && (
-        <div className="menu-panel">
-          <div className="menu-bar">
-            <button className="menu-back" onClick={() => onPage('main')}>&lsaquo; Back</button>
-            <span className="grow">Load game</span>
-          </div>
-          <SaveList
-            slots={slots}
-            onPick={onLoad}
-            onDelete={(s) => { deleteSave(s.id); setSlots(listSaves()); }}
-          />
-        </div>
-      )}
+        {page === 'main' && (
+          <nav className="menu-list">
+            <Item label="New game" sub="Marchford, and one van" onClick={onNew} />
+            <Item
+              label="Load game"
+              sub={slots.length === 0 ? 'Nothing saved yet'
+                : slots.length === 1 ? '1 saved game' : `${slots.length} saved games`}
+              onClick={() => { setSlots(listSaves()); onPage('load'); }}
+              disabled={slots.length === 0}
+            />
+            <Item label="Settings" sub="Sound and detail" onClick={() => onPage('settings')} />
+            {/*
+              * Exit, which cannot work, and says so when pressed.
+              *
+              * `window.close()` is refused for any tab a script did not open — a
+              * platform rule, not an oversight. Greying it out would leave a player
+              * wondering what they had to do first; telling them the truth costs a
+              * line and respects them.
+              */}
+            <Item
+              label="Exit"
+              sub={said || 'Close the game'}
+              onClick={() => setSaid('A browser tab cannot close itself — use its ×.')}
+            />
+          </nav>
+        )}
 
-      {page === 'settings' && (
-        <div className="menu-panel">
-          <div className="menu-bar">
-            <button className="menu-back" onClick={() => onPage('main')}>&lsaquo; Back</button>
-            <span className="grow">Settings</span>
+        {page !== 'main' && (
+          /*
+            * A page of paper over the same view, in the same column. The district
+            * carries on behind it, which is what stops the menu feeling like a
+            * different application from the game.
+            */
+          <div className="menu-panel">
+            <div className="menu-bar">
+              <button className="menu-back" onClick={() => onPage('main')}>
+                &lsaquo; Back
+              </button>
+              <span className="grow">{page === 'load' ? 'Load game' : 'Settings'}</span>
+            </div>
+            {page === 'load' ? (
+              <SaveList
+                slots={slots}
+                onPick={onLoad}
+                onDelete={(s) => { deleteSave(s.id); setSlots(listSaves()); }}
+              />
+            ) : settings}
           </div>
-          {settings}
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

@@ -138,11 +138,71 @@ function reach(root: object, path: string): { owner: object; key: string } | nul
   return { owner: o, key: parts[parts.length - 1] };
 }
 
-/** Typed arrays on the World itself, outside any table. */
-const ARRAYS = [
-  'movedByCargo', 'tileCargo', 'tileTonnes', 'siteAccessTile',
-  'vehicleFittings', 'townAccessTile', 'cargoPrice', 'cargoRateWeight',
-] as const;
+/**
+ * Typed arrays on the World that are *not* saved, and why.
+ *
+ * A deny-list, and it is a deny-list because the allow-list was wrong. This was
+ * eight names written out by hand — and the very first bug report was "save lost
+ * my vehicles", because `vehicleYard` was not one of them. Every lorry came back
+ * belonging to no yard, so the fleet screen and the bays were empty and the
+ * vehicles might as well have been gone.
+ *
+ * Worse, the round-trip test could not see it: `stateHash` walks the same list, so
+ * a field missing from it is invisible to both halves of the comparison. An
+ * allow-list of state is a list of what somebody remembered, which is exactly what
+ * the top of this file says not to write. Enumerated, there were *twenty-nine*
+ * typed arrays on the World and the list named eight.
+ *
+ * So: everything is saved unless it is named here, and there is a test that fails
+ * if a new field is neither saved nor listed. Three kinds live here.
+ *
+ * **Pathfinder scratch.** `routePool` is 1.9 million entries of working memory for
+ * an A*. It holds whatever the last search left in it and means nothing between
+ * calls; saving it would be seven megabytes of noise.
+ *
+ * **Caches.** `valueCache` is memoised cargo values, rebuilt on demand.
+ *
+ * **Content tables.** `vehicleSpeed`, `waySpeed` and the rest are the content files
+ * flattened into typed arrays at construction. They are a property of the game's
+ * data, not of the save — and saving them would mean an old save quietly
+ * overriding a rebalanced vehicle with its old numbers.
+ */
+const NOT_SAVED = new Set([
+  'routePool', 'routeCameFrom', 'routeCost', 'routeSeen',
+  'valueCache',
+  'waySpeed', 'wayUpkeep', 'wayCharge', 'wayWear', 'wayLanes',
+  'vehicleSpeed', 'vehicleCapacity', 'vehicleTransfer', 'vehicleRunning',
+  'vehicleMode',
+  'townDemandPerThousand', 'townProducePerThousand', 'appetite',
+]);
+
+/**
+ * Every typed array on the World that is state.
+ *
+ * Walked rather than listed, which is the whole point. `vehicleYard`, the money
+ * journal, `loadOriginX/Y` and `lapStart` were all missing from the hand-written
+ * version and are all carried now without anybody having to notice them.
+ */
+export function worldArrays(w: object): string[] {
+  const out: string[] = [];
+  for (const key of Object.keys(w)) {
+    if (NOT_SAVED.has(key)) continue;
+    const v = (w as Record<string, unknown>)[key];
+    if (ArrayBuffer.isView(v) && !(v instanceof DataView)) out.push(key);
+  }
+  return out.sort();
+}
+
+/** And the ones deliberately left out, so a test can check the split is complete. */
+export function worldArraysSkipped(w: object): string[] {
+  const out: string[] = [];
+  for (const key of Object.keys(w)) {
+    if (!NOT_SAVED.has(key)) continue;
+    const v = (w as Record<string, unknown>)[key];
+    if (ArrayBuffer.isView(v) && !(v instanceof DataView)) out.push(key);
+  }
+  return out.sort();
+}
 
 type Cell = number | string | boolean | null;
 
@@ -320,7 +380,25 @@ function restoreBag(o: object, bag: Bag): void {
        * assigning a new array would leave every one of those pointing at the old
        * one. A world that looked right and drew the state it had before the load.
        */
-      if (!isTyped(cur)) continue;
+      if (!isTyped(cur)) {
+        /*
+         * Nothing there to copy into, so make one.
+         *
+         * Some arrays are created lazily on first use — `cropBase` and `cropWant`
+         * are, which is why a freshly generated world has no own property for them
+         * and the restore silently skipped both. Assigning is safe *only* in this
+         * case, and the distinction matters: the whole reason the branch below
+         * copies rather than assigns is that other systems hold references to those
+         * arrays from construction. An array that does not exist yet has no
+         * references to break.
+         */
+        const Kind = KINDS[v.$];
+        if (!Kind) continue;
+        const made = new Kind(v.n);
+        unpackInto(made, v);
+        (o as Record<string, unknown>)[key] = made;
+        continue;
+      }
       unpackInto(cur, v);
     } else if (v === null || typeof v === 'object') {
       // Nothing nested is written by `bagOf`; a `null` here is an old save.
@@ -345,7 +423,7 @@ export function saveState(w: World): SavedState {
       world[key] = v;
     }
   }
-  for (const key of ARRAYS) {
+  for (const key of worldArrays(w as unknown as object)) {
     const v = (w as unknown as Record<string, unknown>)[key];
     if (isTyped(v)) world[key] = packArray(v);
   }

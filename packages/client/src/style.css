@@ -2060,69 +2060,159 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 
 /* ------------------------------------------------- the main menu
 
-   The page opens here now, because saves mean there has to be a moment before the
-   world is made where you can choose not to make a new one. Opaque over the blank
-   canvas rather than instead of it: the setup effect needs an element to attach
-   to, and one state change is simpler than a remount. */
+   A title card on an establishing shot, not a screen in front of the game. The
+   world is built and drifting behind this — see `intro.ts` `MENU_AT` — so nothing
+   here paints a background. The only surface it draws is the scrim that makes type
+   readable over a bright field.
+
+   The first version was four grey cards centred on a gradient: a settings screen
+   wearing a menu's clothes, with no relationship to the game behind it and hiding
+   the best thing the project has. */
 .menu {
   position: absolute;
   inset: 0;
   z-index: 3;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 26px;
-  padding: 24px;
-  overflow-y: auto;
-  /* The same sky the opening descends through, held still. A menu on a photograph
-     of the game would be a menu you cannot read; a menu on its weather is a menu
-     that belongs to it. */
+  align-items: stretch;
+  pointer-events: none;
+  /* Bled from the bottom-left, where the words are, and gone by the middle of the
+     frame. A card would have been the lazy way to get contrast; a scrim lets the
+     picture run *under* the words rather than stopping at them. */
+  /* Warm and shallow. The first attempt was a cool grey at 52% and it read as
+     dirt on the lens — over pale cloud a neutral scrim greys the *whole* frame,
+     because there is nothing dark for it to sit against. Brown-black at a third,
+     gone by the middle, reads as shade instead. */
   background:
-    radial-gradient(130% 90% at 50% -18%, #ffffff 0%, #eef1f5 38%, #cdd6e0 78%, #bcc7d4 100%);
-  color: var(--ink);
-}
-.menu-head { text-align: center; }
-.menu-head h1 {
-  margin: 0;
-  font-size: 42px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
-.menu-head p {
-  margin: 4px 0 0;
-  font-size: 13px;
-  color: var(--ink-dim);
+    linear-gradient(100deg,
+      rgba(34, 30, 24, 0.40) 0%,
+      rgba(34, 30, 24, 0.26) 24%,
+      rgba(34, 30, 24, 0.07) 46%,
+      rgba(34, 30, 24, 0) 62%);
 }
 
-.menu-list { display: flex; flex-direction: column; gap: 8px; width: 300px; }
-.menu-item {
+/* The column. Left third, vertically centred, and it never grows past a measure
+   that type can be read at. */
+.menu-col {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 11px 14px;
-  border: 1px solid var(--edge);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.72);
+  justify-content: center;
+  gap: 30px;
+  /* Wide enough to set the title on one line. At 430px the measure was narrower
+     than the word and it broke mid-syllable — "Interchan / ge". */
+  width: min(520px, 52vw);
+  min-width: 300px;
+  padding: 40px clamp(24px, 5vw, 68px);
+  pointer-events: auto;
+  overflow-y: auto;
+}
+
+.menu-head h1 {
+  margin: 0;
+  /* Fluid, because this is the one piece of type in the game that should fill the
+     space it is given rather than sit at a fixed size in the corner of it. */
+  /* Capped so it cannot outrun the column: "Interchange" at 74px is wider than the
+     430px measure and came out as "Interchang". Sixty is the largest that fits at
+     this letter-spacing, and `overflow-wrap` is the belt to that brace. */
+  font-size: clamp(34px, 4.6vw, 60px);
+  /* Never break the word. If it ever outruns the column it runs a little wide,
+     which reads as a title bleeding off a frame; hyphenating the game's own name
+     reads as a bug. */
+  white-space: nowrap;
+  font-weight: 800;
+  line-height: 0.94;
+  letter-spacing: -0.03em;
+  color: #fdfcf8;
+  /* Two shadows: a tight one for legibility against a light field, and a wide soft
+     one that seats the word on the picture instead of floating it over. */
+  text-shadow:
+    0 1px 2px rgba(20, 26, 22, 0.45),
+    0 6px 34px rgba(20, 26, 22, 0.35);
+}
+/* The rule is doing real work: it is what makes the title and the line under it
+   read as one object rather than two lines that happen to be near each other.
+   Gold, and short, and it stops well before the measure — a full-width rule would
+   be a divider, and this is a flourish. */
+.menu-rule {
+  display: block;
+  width: 68px;
+  height: 3px;
+  margin: 16px 0 12px;
+  border-radius: 2px;
+  background: #f4c95d;
+  box-shadow: 0 1px 10px rgba(244, 201, 93, 0.45);
+}
+.menu-head p {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(253, 252, 248, 0.82);
+  text-shadow: 0 1px 10px rgba(20, 26, 22, 0.5);
+}
+
+/* The list. Hairlines rather than cards: a rule between rows says "this is a list
+   of things", where four boxes in a column say "fill this in" — and the hairline
+   leaves the district visible between the words. */
+.menu-list { display: flex; flex-direction: column; }
+.mi {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  padding: 13px 0 14px;
+  border: 0;
+  border-top: 1px solid rgba(253, 252, 248, 0.16);
+  background: none;
   font: inherit;
   text-align: left;
+  color: #fdfcf8;
   cursor: pointer;
+  /* Transform only — a colour transition on a row over a moving picture is a
+     colour transition you cannot see, and this client has been bitten enough times
+     by animating things that re-render. */
+  transition: transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1);
 }
-.menu-item:hover:not(:disabled) { background: #fff; border-color: #d9a72e; }
-/* Disabled means "there is nothing to load", which the sub-line says in words.
-   Half opacity and a default cursor, not a grey slab. */
-.menu-item:disabled { opacity: 0.5; cursor: default; }
-.menu-label { font-size: 15px; font-weight: 700; }
-.menu-sub { font-size: 11px; color: var(--ink-dim); }
+.mi:last-child { border-bottom: 1px solid rgba(253, 252, 248, 0.16); }
+.mi:hover:not(:disabled), .mi:focus-visible { transform: translateX(9px); }
+.mi:disabled { cursor: default; color: rgba(253, 252, 248, 0.42); }
 
-/* A page of the menu: load, or settings. Wider than the list, because a save row
-   carries three lines of information and the options carry sliders. */
+/* The marker sits in the row's own margin, so the label does not move to make room
+   for it — a menu whose text jumps on hover is a menu that feels loose. Gold,
+   because that is what this game means by "this one" everywhere else. */
+.mi-mark {
+  flex: 0 0 18px;
+  height: 2px;
+  margin-right: 0;
+  border-radius: 2px;
+  background: #f4c95d;
+  opacity: 0;
+  transform: translateX(-18px);
+  transition: opacity 160ms ease, transform 200ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.mi:hover:not(:disabled) .mi-mark,
+.mi:focus-visible .mi-mark { opacity: 1; transform: translateX(0); }
+.mi-text { display: flex; flex-direction: column; gap: 2px; }
+.mi-label {
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-shadow: 0 1px 12px rgba(20, 26, 22, 0.5);
+}
+.mi-sub {
+  font-size: 11.5px;
+  color: rgba(253, 252, 248, 0.68);
+  text-shadow: 0 1px 10px rgba(20, 26, 22, 0.55);
+}
+
+/* A page of paper over the same view, in the same column: load, or settings. The
+   district carries on behind it, which is what stops the menu reading as a
+   different application from the game. */
 .menu-panel {
-  width: min(440px, 92vw);
   padding: 14px 16px 16px;
   border-radius: 14px;
   background: rgba(247, 243, 234, 0.97);
-  box-shadow: 0 10px 34px rgba(30, 40, 30, 0.22);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 40px rgba(16, 22, 18, 0.34);
+  color: var(--ink);
 }
 .menu-bar {
   display: flex;
@@ -2144,7 +2234,7 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .menu-back:hover { color: var(--ink); }
 
 /* The save slots, used by the menu's Load and the pause menu's Save alike. */
-.slots { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow-y: auto; }
+.slots { display: flex; flex-direction: column; gap: 6px; max-height: 44vh; overflow-y: auto; }
 .slot-row { display: flex; align-items: stretch; gap: 6px; }
 .slot {
   display: flex;
@@ -2163,8 +2253,8 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .slot:hover { background: #fff; border-color: #d9a72e; }
 .slot.fresh { align-items: center; color: #8a5a2a; }
 .slot-name { font-size: 13px; font-weight: 700; display: flex; align-items: baseline; gap: 7px; }
-/* The autosave says so on its face, so a player never mistakes it for one of
-   their own and is never surprised when it moves. */
+/* The autosave says so on its face, so a player never mistakes it for one of their
+   own and is never surprised when it moves. */
 .slot-name em {
   font-style: normal;
   font-size: 9.5px;
@@ -2198,6 +2288,19 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 }
 .pause-row { display: flex; gap: 8px; margin-top: 12px; }
 .pause-row .pause-resume { flex: 1 1 auto; }
+
+/* Narrow: the column becomes the whole frame and the scrim goes vertical, because
+   a left-hand scrim on a phone leaves the type over the brightest part of the sky. */
+@media (max-width: 620px) {
+  .menu {
+    background:
+      linear-gradient(180deg,
+        rgba(28, 30, 28, 0.14) 0%,
+        rgba(28, 30, 28, 0.42) 46%,
+        rgba(28, 30, 28, 0.62) 100%);
+  }
+  .menu-col { width: 100%; min-width: 0; justify-content: flex-end; padding-bottom: 34px; }
+}
 
 /* ------------------------------------------------------ the inbox
 

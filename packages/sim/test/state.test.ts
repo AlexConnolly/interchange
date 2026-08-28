@@ -19,6 +19,7 @@ import { describe, it, expect } from 'vitest';
 import {
   createWorld, TICKS_PER_DAY, facilitiesFor, Mode, NO_WAY, NONE,
   saveState, restoreState, stateHash, STATE_VERSION, ContractState,
+  worldArrays, worldArraysSkipped,
 } from '../src/index.ts';
 import { loadContent } from '../../data/src/index.ts';
 
@@ -197,6 +198,87 @@ describe('a save of a played world', () => {
 
     for (let i = 0; i < 3 * TICKS_PER_DAY; i++) { w.step(); back.step(); }
     expect(stateHash(back), 'diverged after loading').toBe(stateHash(w));
+  });
+});
+
+describe('nothing is quietly left out', () => {
+  it('carries every typed array on the World, or names why not', () => {
+    /*
+     * The test that should have existed first, and the bug that proves it.
+     *
+     * The World's arrays were an allow-list of eight names written out by hand, and
+     * the first thing anybody said about saving was "save lost my vehicles" —
+     * because `vehicleYard` was not one of the eight. Every lorry came back
+     * belonging to no yard, so the fleet screen and the bays were empty.
+     *
+     * And the round-trip test could not see it. `stateHash` walks the same list, so
+     * a field missing from it is missing from *both* halves of the comparison and
+     * they agree perfectly about a world with no yards in it. Enumerated: there are
+     * twenty-nine typed arrays on the World and the list named eight — the money
+     * journal, `loadOriginX/Y` and `lapStart` were gone too.
+     *
+     * So the split is the thing under test. Every typed array is either saved or on
+     * the deny-list, and a new field is saved by default rather than forgotten by
+     * default.
+     */
+    const w = fresh();
+    const saved = new Set(worldArrays(w as unknown as object));
+    const skipped = new Set(worldArraysSkipped(w as unknown as object));
+    let seen = 0;
+    for (const key of Object.keys(w)) {
+      const v = (w as unknown as Record<string, unknown>)[key];
+      if (!ArrayBuffer.isView(v) || v instanceof DataView) continue;
+      seen++;
+      expect(
+        saved.has(key) || skipped.has(key),
+        `${key} is neither saved nor on the deny-list`,
+      ).toBe(true);
+    }
+    expect(seen, 'there are arrays to check').toBeGreaterThan(20);
+    // And the one that started it.
+    expect(saved.has('vehicleYard')).toBe(true);
+  });
+
+  it('keeps a lorry in its yard', () => {
+    /*
+     * The reported bug, stated as the player saw it. Named separately from the hash
+     * because "the state matches" and "my vehicles are still in a yard" are
+     * different claims, and it was the second one that failed.
+     */
+    const { w } = played();
+    let had = 0;
+    for (let v = 0; v < w.vehicles.count; v++) {
+      if (w.vehicles.alive[v] && w.vehicleYard[v] >= 0) had++;
+    }
+    expect(had, 'the fixture has lorries in yards').toBeGreaterThan(0);
+
+    const back = fresh();
+    restoreState(back, JSON.parse(JSON.stringify(saveState(w))));
+    for (let v = 0; v < w.vehicles.count; v++) {
+      expect(back.vehicleYard[v], `vehicle ${v}`).toBe(w.vehicleYard[v]);
+    }
+  });
+
+  it('keeps the money journal, which is the whole Money tab', () => {
+    // Six arrays, none of them on the old list. A loaded game would have shown an
+    // empty ledger for a business with a year of trading behind it.
+    const { w } = played();
+    const back = fresh();
+    restoreState(back, JSON.parse(JSON.stringify(saveState(w))));
+    for (let i = 0; i < 40; i++) {
+      expect(back.journalTick[i]).toBe(w.journalTick[i]);
+      expect(back.journalPence[i]).toBe(w.journalPence[i]);
+      expect(back.journalKind[i]).toBe(w.journalKind[i]);
+    }
+  });
+
+  it('does not carry the pathfinder s scratch memory', () => {
+    // `routePool` is 1.9 million entries of A* working memory holding whatever the
+    // last search left in it. Seven megabytes of noise, and meaningless between
+    // calls.
+    const w = fresh();
+    expect(worldArraysSkipped(w as unknown as object)).toContain('routePool');
+    expect(JSON.stringify(saveState(w).world)).not.toContain('routePool');
   });
 });
 

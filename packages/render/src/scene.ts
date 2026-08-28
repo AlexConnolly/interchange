@@ -705,11 +705,29 @@ export class Renderer {
   private readonly tmpForward = new Vector3();
   private readonly tmpUp = new Vector3();
 
+  /**
+   * Extra azimuth, in radians. Zero for the whole game.
+   *
+   * It exists for the main menu, which shows the district as a **diorama** — the
+   * island floating in cloud, turning slowly, like a model on a table. That needs
+   * the one thing the camera has never done, which is move round.
+   *
+   * Deliberately not exposed as a control. The play angle is 38° of elevation and
+   * −32° of azimuth for a reason recorded at `placeCamera`: it is the angle at
+   * which you can see the sides of things and still read a road, and the *ground
+   * mesh is built for it* — `camera.ts` decides which face of a furrow is visible
+   * when the geometry is generated, so a rotated camera sees furrows lit from the
+   * wrong side. At a hundred and fifty tiles across a furrow is a fraction of a
+   * pixel and it does not matter; at playing distance it would, which is why this
+   * is a menu affordance and not a feature.
+   */
+  spin = 0;
+
   private placeCamera(): void {
     // From `camera.ts`, which is also what the ground builder asks when it
     // decides which face of a furrow is the one you can see.
     const el = CAMERA_ELEVATION;
-    const az = CAMERA_AZIMUTH;
+    const az = CAMERA_AZIMUTH + this.spin;
     const d = CAMERA_DISTANCE;
     /*
      * Aim at the ground, not at y = 0.

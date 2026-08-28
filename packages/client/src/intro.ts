@@ -52,15 +52,37 @@ const DESCENT_END = 7;
 const LABEL_UNTIL = 4;
 
 /**
+ * Where the opening *holds* while the main menu is up.
+ *
+ * The menu is the district seen from the air, and this is the altitude it is seen
+ * from: past the solid overcast, through the last of the cloud, still a long way
+ * up. Chosen rather than guessed — it is the point where the veil has dropped to
+ * about a third and the camera is at ninety-eight tiles across, which is high
+ * enough that the whole parish is in frame and low enough that you can see a lorry
+ * on a road.
+ *
+ * Holding here rather than at zero is what makes "New game" instant. The world is
+ * already built and already on screen; pressing it releases the clock and the
+ * descent simply continues, so there is no load between deciding to play and
+ * playing. The loading was spent on the menu, which is the one screen a player does
+ * not mind waiting on.
+ */
+export const MENU_AT = 4.6;
+
+/**
  * How far out the descent starts, in tiles across the frame.
  *
- * Well beyond the zoom limit the wheel allows, and deliberately: the opening shot
- * should be a view of the district you cannot get back to, which is what makes it
- * feel like arriving somewhere rather than like the game starting at the wrong
- * setting. The clamp on the wheel is not touched — this is written straight to the
- * renderer and the player cannot steer it.
+ * Far enough out that the **whole island is in frame**, which is what makes the
+ * opening shot a diorama rather than a wide view: the district is surrounded by
+ * sea, so from up here it is a model floating in cloud with nothing round it. That
+ * is also the shot the main menu holds on.
+ *
+ * Well beyond the zoom limit the wheel allows, and deliberately: the opening should
+ * be a view of the district you cannot get back to. The clamp on the wheel is not
+ * touched — this is written straight to the renderer and the player cannot steer
+ * it.
  */
-export const INTRO_ACROSS = 132;
+export const INTRO_ACROSS = 156;
 
 export interface Intro {
   /** 0 while in cloud, rising to 1 as the deck clears. */

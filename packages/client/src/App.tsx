@@ -47,7 +47,9 @@ import { Menu, SaveList, type MenuPage } from './Menu.tsx';
 import {
   listSaves, writeSave, deleteSave, newId, AUTO_ID, type SaveSlot,
 } from './saves.ts';
-import { introAt, INTRO_LENGTH, INTRO_ACROSS, type Intro } from './intro.ts';
+import {
+  introAt, INTRO_LENGTH, INTRO_ACROSS, MENU_AT, type Intro,
+} from './intro.ts';
 import { Advisor, type Letter } from './advisor.ts';
 import { Inbox, InboxButton, Toast } from './Inbox.tsx';
 import { PLOT, groundHeightAt, type RGB } from '@interchange/render';
@@ -480,7 +482,21 @@ export function App(): JSX.Element {
    */
   const [boot, setBoot] = useState<
     { kind: 'new' } | { kind: 'load'; slot: SaveSlot } | null
-  >(null);
+  >({ kind: 'new' });
+  /*
+   * Whether the player has actually started playing.
+   *
+   * Separate from `boot`, and the separation is the whole redesign. The world is
+   * built the moment the page loads — *behind the menu* — and held at altitude with
+   * the last of the cloud over it. So the menu is not a screen in front of the
+   * game, it is the district seen from the air before you land, and "New game"
+   * releases the descent rather than starting a load.
+   *
+   * Which also means New game is instant. The loading happened while you were
+   * reading the menu, which is the one screen nobody minds waiting on.
+   */
+  const [started, setStarted] = useState(false);
+  const startedRef = useRef(false);
   const [menuPage, setMenuPage] = useState<MenuPage>('main');
   /** Which save list the pause menu is showing, if any. */
   const [saving, setSaving] = useState(false);
@@ -604,6 +620,7 @@ export function App(): JSX.Element {
   toolRef.current = tool;
   placeDefRef.current = placeDef;
   introDone.current = intro.done;
+  startedRef.current = started;
   autoSave.current = () => { putSave(AUTO_ID, true); };
   buildRef.current = buildAt;
   /**
@@ -728,6 +745,14 @@ export function App(): JSX.Element {
     if (!canvas) return;
     // Nothing to build while the menu is up. The effect re-runs when it is not.
     if (!boot) return;
+    /**
+     * Where the menu's slow drift circles.
+     *
+     * Declared up here rather than beside the drift because the *camera framing*
+     * happens a thousand lines earlier than the frame loop does, and this has to be
+     * in scope for both.
+     */
+    const menuHome = { x: 0, z: 0 };
 
     /*
      * Where in the day the game opens, overridable from the address bar.
@@ -1775,6 +1800,8 @@ export function App(): JSX.Element {
     const clamp = (v: number): number => Math.max(inset, Math.min(DISTRICT - inset, v));
     renderer.camX = clamp(opening.x);
     renderer.camZ = clamp(opening.y);
+    menuHome.x = renderer.camX;
+    menuHome.z = renderer.camZ;
     /*
      * `?at=x,z` to open somewhere else, in tiles.
      *
@@ -2686,11 +2713,75 @@ export function App(): JSX.Element {
         toastTimer.current = 0;
         setToast(null);
       }
-      if (introClock < INTRO_LENGTH || holding) {
-        if (introStart < 0) introStart = now;
-        introClock = holding ? heldAt : (now - introStart) / 1000;
+      if (introClock < INTRO_LENGTH || holding || !startedRef.current) {
+        /*
+         * Held at `MENU_AT` for as long as the menu is up, and released from there
+         * the instant it is not — `introStart` is set so that the elapsed time
+         * *begins* at the hold point rather than at zero, which is what makes the
+         * descent continue from where the menu was looking rather than jumping back
+         * into cloud.
+         */
+        if (!startedRef.current) {
+          introStart = now - MENU_AT * 1000;
+          introClock = MENU_AT;
+        } else {
+          if (introStart < 0) introStart = now;
+          introClock = holding ? heldAt : (now - introStart) / 1000;
+        }
+        /*
+         * The diorama: the island turns while you read the menu.
+         *
+         * This is the whole of the redesign in three lines. The district is
+         * surrounded by sea, so from a hundred and fifty tiles up it is a model
+         * floating in cloud with nothing round it — and a model that *turns* stops
+         * being a wide shot and becomes an object on a table. A still frame of a
+         * beautiful district still reads as a screenshot.
+         *
+         * Slow: a full turn in about two and a half minutes. Fast enough that you
+         * can see it moving, slow enough that nothing appears to be scrolling and
+         * you are never waiting for it to come back round.
+         *
+         * Centred on the middle of the map rather than on the opening yard, because
+         * a diorama is centred on *itself*. The play camera takes over the moment
+         * the descent starts.
+         */
+        if (!startedRef.current) {
+          renderer.spin = (now / 1000) * 0.042;
+          renderer.camX = DISTRICT / 2;
+          renderer.camZ = DISTRICT / 2;
+        } else if (renderer.spin !== 0) {
+          /*
+           * And it rights itself as you fall in.
+           *
+           * Eased to the play angle over the first couple of seconds of the
+           * descent, which reads as the model turning to face you — and it has to
+           * be finished well before the ground gets close, because the mesh is
+           * built for one angle and a furrow seen from the wrong side is visible
+           * from about forty tiles down.
+           */
+          const shortest = ((renderer.spin + Math.PI) % (Math.PI * 2)
+            + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+          renderer.spin = Math.abs(shortest) < 0.002
+            ? 0
+            : shortest * (1 - Math.min(1, dt * 1.6));
+          renderer.camX += (menuHome.x - renderer.camX) * Math.min(1, dt * 1.4);
+          renderer.camZ += (menuHome.z - renderer.camZ) * Math.min(1, dt * 1.4);
+        }
         const at = introAt(introClock, openingAcross);
         renderer.tilesAcross = at.across;
+        /*
+         * And closer than that on the menu, because the sea is not the subject.
+         *
+         * At the descent's 156 tiles the island sat in a great deal of empty water,
+         * with a heavy navy wedge in the corner and the low-poly sea reading as
+         * teeth along the edge. At 118 the parish fills the frame and the water is
+         * a margin round it, which is what a model on a table looks like.
+         *
+         * *After* the line above rather than before it, which is where it was and
+         * why the first attempt changed nothing: the intro writes the zoom every
+         * frame, so an override has to be the last word.
+         */
+        if (!startedRef.current) renderer.tilesAcross = 118;
         fit();
         /*
          * The cloud, written straight to the element's style.
@@ -2708,7 +2799,16 @@ export function App(): JSX.Element {
          * be: not an object in the world, but the whole view.
          */
         if (skyRef.current) {
-          skyRef.current.style.opacity = String(at.veil);
+          /*
+           * On the menu the cloud is *framing* the diorama, not hiding it.
+           *
+           * `introAt(MENU_AT)` gives 0.29, which was chosen to be mid-descent —
+           * and at that strength the island is fogged rather than floating: the
+           * whole picture washes out to pale grey and you cannot read a field.
+           * A tenth is enough to soften the edges into white so the model has
+           * nothing round it, which is the entire trick of a diorama.
+           */
+          skyRef.current.style.opacity = String(startedRef.current ? at.veil : 0.06);
         }
         if (at.label !== introRef.current.label
           || at.ui !== introRef.current.ui
@@ -3885,12 +3985,23 @@ export function App(): JSX.Element {
         * back, and it means starting a game is one state change rather than a
         * remount race.
         */}
-      {!boot && menuPage && (
+      {!started && menuPage && (
         <Menu
           page={menuPage}
           onPage={setMenuPage}
-          onNew={() => { setMenuPage(null); setBoot({ kind: 'new' }); }}
-          onLoad={(slot) => { setMenuPage(null); setBoot({ kind: 'load', slot }); }}
+          /*
+           * Nothing is rebuilt. The world under the menu *is* the new game — same
+           * seed, opening sequence already run — so starting one is releasing the
+           * camera, not creating anything.
+           */
+          onNew={() => { setMenuPage(null); setStarted(true); }}
+          onLoad={(slot) => {
+            setMenuPage(null);
+            setStarted(true);
+            setLive(null);
+            setReady(false);
+            setBoot({ kind: 'load', slot });
+          }}
           settings={(
             <Settings
               options={options}
@@ -3940,7 +4051,8 @@ export function App(): JSX.Element {
             setSaving(false);
             setLive(null);
             setReady(false);
-            setBoot(null);
+            setStarted(false);
+            setBoot({ kind: 'new' });
             setMenuPage('main');
           }}
         />
