@@ -83,27 +83,49 @@ export function Markers({
       const size = world.terrain.size;
       const put = (
         key: string, site: number, yard: number, id: string, name: string,
-        tile: number, mine: boolean, work: boolean, cut = false,
+        tile: number, mine: boolean, work: boolean, cut = false, span = 1,
       ): void => {
-        // The world point, not the screen point. Projecting it is the frame
-        // loop's job now, which is the only way a marker and the camera under it
-        // can agree — see `anchor.ts`.
+        /*
+         * The world point, not the screen point. Projecting it is the frame
+         * loop's job now, which is the only way a marker and the camera under it
+         * can agree — see `anchor.ts`.
+         *
+         * `span` is how many tiles across the thing is, and the marker sits over
+         * the middle of it. A one-tile shop lands on its own roof either way; a
+         * four-tile freight terminal put its pin a tile and a half up and to the
+         * left of itself, which is a whole building's width off.
+         */
         out.push({
           key, site, yard, id, name, mine, work, cut,
-          x: (tile % size) + 0.5,
+          x: (tile % size) + span / 2,
           y: world.terrain.height[tile],
-          z: Math.floor(tile / size) + 0.5,
+          z: Math.floor(tile / size) + span / 2,
         });
       };
 
       for (let s = 0; s < world.sites.count; s++) {
         if (s === hide) continue;
-        const tile = world.siteAccessTile[s];
-        if (tile < 0 || !world.influence.usable(tile)) continue;
+        /*
+         * Over the *building*, and over the middle of it.
+         *
+         * It used to be pinned to `siteAccessTile`, which is not the business at
+         * all — it is the tile where the business meets the road, found by walking
+         * out from the footprint until a road turns up. So the icon hung over the
+         * gate, or over the lane outside, and for a works up a long track it was
+         * nowhere near the sheds: "icons for businesses are never in the middle of
+         * the actual business itself".
+         *
+         * The access tile is still what decides whether you can *see* it, because
+         * that is the tile the influence field is asked about everywhere else and
+         * a marker that appeared before the place was reachable would be a
+         * different bug.
+         */
+        const gate = world.siteAccessTile[s];
+        if (gate < 0 || !world.influence.usable(gate)) continue;
         const def = C.industries[world.sites.def[s]];
-        put(`s${s}`, s, -1, def.id, def.name, tile,
+        put(`s${s}`, s, -1, def.id, def.name, world.sites.tile[s],
             world.sites.owner[s] === world.player, working.has(s),
-            world.siteStranded(s));
+            world.siteStranded(s), world.footprintOf(world.sites.def[s]));
       }
       for (let y = 0; y < world.yards.count; y++) {
         if (world.yards.owner[y] !== world.player) continue;

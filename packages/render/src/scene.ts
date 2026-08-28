@@ -723,6 +723,20 @@ export class Renderer {
    */
   spin = 0;
 
+  /**
+   * The whole world is a model on a table, so it has no weather.
+   *
+   * Set for the menu's little sixty-four tile block. The cloud deck is a flat
+   * plane sized for a district and it stops above seventy-eight tiles across —
+   * which is *exactly* where the diorama is framed, so it switched straight back
+   * on and buried the model under a white sheet the size of the screen. Framing a
+   * tile wider would have hidden that behind a coincidence rather than fixing it.
+   *
+   * A diorama has no clouds for the same reason it has no rain: you are looking at
+   * a thing, not standing in a place.
+   */
+  diorama = false;
+
   private placeCamera(): void {
     // From `camera.ts`, which is also what the ground builder asks when it
     // decides which face of a furrow is the one you can see.
@@ -2178,7 +2192,15 @@ export class Renderer {
     // side of every building with something that is not there.
     this.kicker.intensity = 0.45 * (1 - this.night * 0.62);
     aimFog(this.fog, CAMERA_DISTANCE, this.halfDepth(), this.mood, this.clear);
-    this.scene.fog = this.vfx === 'off' ? null : this.fog;
+    /*
+     * And none at all on a diorama.
+     *
+     * Aerial perspective is the far hill being pale because you are looking
+     * through half a mile of air at it. There is no half a mile: the menu is
+     * looking at an object a few feet away, and haze across it just drains the
+     * colour out of a model that is supposed to look like painted resin.
+     */
+    this.scene.fog = this.vfx === 'off' || this.diorama ? null : this.fog;
     /*
      * Motes in the warm half of the year only.
      *
@@ -2230,7 +2252,7 @@ export class Renderer {
     this.clouds.update(
       this.camX, this.camZ, this.tilesAcross,
       CLOUD_DRIFT.value, this.mood.haze, this.night,
-      this.vfx === 'high' ? 1 : 0,
+      this.vfx === 'high' && !this.diorama ? 1 : 0,
     );
 
     if (this.vfx === 'off' || !this.composed) {

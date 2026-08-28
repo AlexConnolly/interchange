@@ -40,6 +40,9 @@ import { Icon } from './Icons.tsx';
 import { Owned } from './Owned.tsx';
 import { Contracts } from './Contracts.tsx';
 import { Approval, ApprovalDial } from './Approval.tsx';
+import {
+  DIORAMA_SIZE, DIORAMA_ACROSS, DIORAMA_TRIES, goodEnough, seedFor,
+} from './diorama.ts';
 import { Market } from './Market.tsx';
 import { Land } from './Land.tsx';
 import { powerLines, SPAN, WIRE_H } from './powerlines.ts';
@@ -63,6 +66,41 @@ import './style.css';
 loadContent();
 
 const DISTRICT = 128;
+
+/**
+ * The little world the menu turns, built by trying seeds until one is worth
+ * looking at.
+ *
+ * Trying rather than trusting, because some seeds are duds: measured over thirty
+ * at this size, two came out with no town, no road and two lone farms. Seven per
+ * cent of launches opening on a barren green lump is not a risk worth taking for a
+ * title card, and a sixty-four tile world costs thirty-one milliseconds to make —
+ * so it is cheaper to make three and keep the best than to accept the first.
+ *
+ * Falls through to the last attempt rather than looping for ever. A slightly dull
+ * diorama is a much better failure than a menu that never appears.
+ */
+function dioramaWorld(): ReturnType<typeof createWorld> {
+  const now = Date.now();
+  let last: ReturnType<typeof createWorld> | null = null;
+  for (let attempt = 0; attempt < DIORAMA_TRIES; attempt++) {
+    const w = createWorld({
+      seed: seedFor(now, attempt),
+      size: DIORAMA_SIZE,
+      townCount: 2,
+      companyCount: 2,
+    });
+    let roadTiles = 0;
+    const cls = w.layers[Mode.Road].cls;
+    for (let t = 0; t < DIORAMA_SIZE * DIORAMA_SIZE; t++) {
+      if (cls[t] !== NO_WAY) roadTiles++;
+    }
+    last = w;
+    if (goodEnough({ towns: w.towns.count, sites: w.sites.count, roadTiles })) return w;
+  }
+  return last!;
+}
+
 
 /**
  * How many things the instanced scatter layer can hold: trees, field props and
@@ -492,8 +530,8 @@ export function App(): JSX.Element {
    * sequence having already run over the top of the save.
    */
   const [boot, setBoot] = useState<
-    { kind: 'new' } | { kind: 'load'; slot: SaveSlot } | null
-  >({ kind: 'new' });
+    { kind: 'menu' } | { kind: 'new' } | { kind: 'load'; slot: SaveSlot } | null
+  >({ kind: 'menu' });
   /*
    * Whether the player has actually started playing.
    *
@@ -808,9 +846,36 @@ export function App(): JSX.Element {
      * of it — the save carries no heightmap and rebuilding the wrong district would
      * put every road and every field somewhere else.
      */
-    const world = createWorld(boot.kind === 'load'
-      ? boot.slot.state.config
-      : { seed: 1985, size: DISTRICT, townCount: 3, companyCount: 1 });
+    /*
+     * The menu's world is not the game's world.
+     *
+     * It used to be: the district you were about to play, held at altitude behind
+     * the title. The objection was that a hundred and twenty-eight tiles seen from
+     * far enough away to fit is a *map*, and what was wanted was "a cute little
+     * slice" — a small square with a yard and a road in it, turning.
+     *
+     * So the menu builds its own, small and disposable, and the real district is
+     * built when New game is pressed. That used to be the thing this design was
+     * avoiding, on the grounds that New game should be instant — but measured, a
+     * full district generates in sixty-three milliseconds. Whatever made the
+     * opening feel slow, it was never this; it is the models, and those are
+     * fetched once and shared between both worlds.
+     */
+    const world = boot.kind === 'menu'
+      ? dioramaWorld()
+      : createWorld(boot.kind === 'load'
+        ? boot.slot.state.config
+          : { seed: 1985, size: DISTRICT, townCount: 3, companyCount: 1 });
+    /*
+     * How wide *this* world is, which is no longer a constant.
+     *
+     * The menu builds a sixty-four tile diorama and the game builds a hundred and
+     * twenty-eight tile district, and everything from here down indexes tiles as
+     * `z * D + x`. Reading the module constant instead would not fail loudly — it
+     * would read the wrong row of the heightmap for every tile in the diorama and
+     * draw a plausible-looking district made of the wrong ground.
+     */
+    const D = world.config.size;
     world.dayOffset = dayOffset;
     /*
      * Start in spring, not on the first of January.
@@ -840,8 +905,8 @@ export function App(): JSX.Element {
 
     // The road class per tile, computed once: the way layer does not change in
     // step one because nothing can be built yet.
-    const roadClass = new Int8Array(DISTRICT * DISTRICT).fill(-1);
-    for (let i = 0; i < DISTRICT * DISTRICT; i++) {
+    const roadClass = new Int8Array(D * D).fill(-1);
+    for (let i = 0; i < D * D; i++) {
       if (layer.cls[i] !== NO_WAY) roadClass[i] = roadClassOf(layer.cls[i], wayNames);
     }
 
@@ -855,7 +920,7 @@ export function App(): JSX.Element {
      * begin by driving into the city.
      */
     const src: RenderSource = {
-      size: DISTRICT,
+      size: D,
       height: world.terrain.height,
       parcel: world.terrain.fields.parcel,
       crop: world.terrain.fields.crop,
@@ -953,8 +1018,8 @@ export function App(): JSX.Element {
      * thousands long and a road is one tile.
      */
     const clearScatterAt = (tile: number): void => {
-      const tx = tile % DISTRICT;
-      const tz = Math.floor(tile / DISTRICT);
+      const tx = tile % D;
+      const tz = Math.floor(tile / D);
       for (let i = trees.length - 1; i >= 0; i--) {
         if (Math.floor(trees[i].x) !== tx || Math.floor(trees[i].z) !== tz) continue;
         trees.splice(i, 1);
@@ -974,8 +1039,8 @@ export function App(): JSX.Element {
     const fillYard = (tile: number, industry: string): void => {
       const want = YARD[industry];
       if (!want) return;
-      const bx = tile % DISTRICT;
-      const bz = Math.floor(tile / DISTRICT);
+      const bx = tile % D;
+      const bz = Math.floor(tile / D);
       let h = ((tile * 2654435761) ^ 0x5f2d) >>> 0;
       const rnd = (): number => {
         h = (h * 1664525 + 1013904223) >>> 0;
@@ -1001,8 +1066,8 @@ export function App(): JSX.Element {
         if (put >= want.length) break;
         const x = bx + dx;
         const z = bz + dz;
-        if (x < 0 || z < 0 || x >= DISTRICT || z >= DISTRICT) continue;
-        const at = z * DISTRICT + x;
+        if (x < 0 || z < 0 || x >= D || z >= D) continue;
+        const at = z * D + x;
         if (roadClass[at] >= 0) continue;
         if (world.terrain.height[at] <= 0) continue;
         trees.push({
@@ -1081,10 +1146,10 @@ export function App(): JSX.Element {
     const claimYard = (tile: number): void => {
       if (yardTiles.has(tile)) return;
       let arms = 0;
-      for (const d of [1, -1, DISTRICT, -DISTRICT]) if (roadClass[tile + d] >= 0) arms++;
+      for (const d of [1, -1, D, -D]) if (roadClass[tile + d] >= 0) arms++;
       if (arms > 1) return;
       yardTiles.add(tile);
-      renderer.dropChunkAt(tile % DISTRICT, Math.floor(tile / DISTRICT));
+      renderer.dropChunkAt(tile % D, Math.floor(tile / D));
     };
     /*
      * Where a building goes, given the road tile it is reached from.
@@ -1100,8 +1165,8 @@ export function App(): JSX.Element {
     const offRoad = (tile: number, ownX: number, ownZ: number): {
       x: number; z: number; rot: number;
     } => {
-      const ax = tile % DISTRICT;
-      const az = Math.floor(tile / DISTRICT);
+      const ax = tile % D;
+      const az = Math.floor(tile / D);
       // Which way the road runs here, from whichever neighbours carry one.
       const eastWest = (roadClass[tile + 1] >= 0 || roadClass[tile - 1] >= 0);
       // And which way is off it: toward the site's own ground, or failing that
@@ -1110,7 +1175,7 @@ export function App(): JSX.Element {
       let dz = 0;
       if (eastWest) {
         dz = Math.sign(ownZ - az) || 1;
-        if (roadClass[tile + dz * DISTRICT] >= 0) dz = -dz;
+        if (roadClass[tile + dz * D] >= 0) dz = -dz;
       } else {
         dx = Math.sign(ownX - ax) || 1;
         if (roadClass[tile + dx] >= 0) dx = -dx;
@@ -1140,7 +1205,7 @@ export function App(): JSX.Element {
         evening: eveningFor(at.x, at.z, seed),
       });
       let arms = 0;
-      for (const d of [1, -1, DISTRICT, -DISTRICT]) if (roadClass[tile + d] >= 0) arms++;
+      for (const d of [1, -1, D, -D]) if (roadClass[tile + d] >= 0) arms++;
       if (arms <= 1) yardTiles.add(tile);
       fillYard(tile, world.content.industries[world.sites.def[i]].id);
     }
@@ -1179,8 +1244,8 @@ export function App(): JSX.Element {
       for (let tries = 0; tries < wanted * 8 && placed.length < 300; tries++) {
         const x = Math.round(cx + (rand() * 2 - 1) * spread);
         const z = Math.round(cz + (rand() * 2 - 1) * spread);
-        if (x < 1 || z < 1 || x >= DISTRICT - 1 || z >= DISTRICT - 1) continue;
-        const tile = z * DISTRICT + x;
+        if (x < 1 || z < 1 || x >= D - 1 || z >= D - 1) continue;
+        const tile = z * D + x;
         // Not on the road, not in the water, and not on top of another house.
         if (roadClass[tile] >= 0) continue;
         if (world.terrain.height[tile] <= 0) continue;
@@ -1188,7 +1253,7 @@ export function App(): JSX.Element {
         // But *beside* a road, because a house that is not on a street is a
         // shed in a field.
         let touches = false;
-        for (const d of [-1, 1, -DISTRICT, DISTRICT]) {
+        for (const d of [-1, 1, -D, D]) {
           if (roadClass[tile + d] >= 0) touches = true;
         }
         if (!touches) continue;
@@ -1279,7 +1344,7 @@ export function App(): JSX.Element {
      * round a hay bale, which is not how the electricity board works.
      */
     const poles = powerLines({
-      size: DISTRICT,
+      size: D,
       height: (t) => world.terrain.height[t] ?? -1,
       builtUp: (x, z) => {
         // Round settlements rather than through them. A distribution line does
@@ -1316,7 +1381,7 @@ export function App(): JSX.Element {
     /** Tiles the grid has taken, so nothing else is scattered onto a pole. */
     const poleTiles = new Set<number>();
     for (const q of poles) {
-      poleTiles.add(Math.floor(q.z) * DISTRICT + Math.floor(q.x));
+      poleTiles.add(Math.floor(q.z) * D + Math.floor(q.x));
     }
 
     {
@@ -1346,9 +1411,9 @@ export function App(): JSX.Element {
         const p = parcel[t];
         if (p < 0) return false;
         if (x > 0 && parcel[t - 1] !== p) return true;
-        if (x + 1 < DISTRICT && parcel[t + 1] !== p) return true;
-        if (z > 0 && parcel[t - DISTRICT] !== p) return true;
-        if (z + 1 < DISTRICT && parcel[t + DISTRICT] !== p) return true;
+        if (x + 1 < D && parcel[t + 1] !== p) return true;
+        if (z > 0 && parcel[t - D] !== p) return true;
+        if (z + 1 < D && parcel[t + D] !== p) return true;
         return false;
       };
       /*
@@ -1382,9 +1447,9 @@ export function App(): JSX.Element {
        * overhangs the carriageway — the model knows it leans along +X and
        * nothing else has to.
        */
-      for (let z = 1; z < DISTRICT - 1 && trees.length < SCATTER_MAX; z++) {
-        for (let x = 1; x < DISTRICT - 1 && trees.length < SCATTER_MAX; x++) {
-          const t = z * DISTRICT + x;
+      for (let z = 1; z < D - 1 && trees.length < SCATTER_MAX; z++) {
+        for (let x = 1; x < D - 1 && trees.length < SCATTER_MAX; x++) {
+          const t = z * D + x;
           if (roadClass[t] < 0) continue;
           const trunk = roadClass[t] === RoadClass.Spine;
           let near = false;
@@ -1418,9 +1483,9 @@ export function App(): JSX.Element {
         }
       }
 
-      for (let z = 1; z < DISTRICT - 1 && trees.length < SCATTER_MAX; z++) {
-        for (let x = 1; x < DISTRICT - 1 && trees.length < SCATTER_MAX; x++) {
-          const t = z * DISTRICT + x;
+      for (let z = 1; z < D - 1 && trees.length < SCATTER_MAX; z++) {
+        for (let x = 1; x < D - 1 && trees.length < SCATTER_MAX; x++) {
+          const t = z * D + x;
           if (wet(t)) continue;
           if (roadClass[t] >= 0) continue;
           /*
@@ -1505,14 +1570,14 @@ export function App(): JSX.Element {
        * Thin. Twelve daffodil clumps and a handful of blackthorn in a district
        * is enough that the eye finds them; thirty would be municipal planting.
        */
-      for (let z = 1; z < DISTRICT - 1 && trees.length < SCATTER_MAX; z++) {
-        for (let x = 1; x < DISTRICT - 1 && trees.length < SCATTER_MAX; x++) {
-          const t = z * DISTRICT + x;
+      for (let z = 1; z < D - 1 && trees.length < SCATTER_MAX; z++) {
+        for (let x = 1; x < D - 1 && trees.length < SCATTER_MAX; x++) {
+          const t = z * D + x;
           if (wet(t) || roadClass[t] >= 0) continue;
           if (!boundary(t, x, z)) continue;
           // Beside a lane, which is where a verge is.
           let byRoad = false;
-          for (const d of [1, -1, DISTRICT, -DISTRICT]) {
+          for (const d of [1, -1, D, -D]) {
             if (roadClass[t + d] >= 0) byRoad = true;
           }
           if (!byRoad) continue;
@@ -1563,9 +1628,9 @@ export function App(): JSX.Element {
        * ten-tile field reads as a field with bales in it; thirty reads as a
        * warehouse.
        */
-      for (let z = 1; z < DISTRICT - 1 && trees.length < SCATTER_MAX; z++) {
-        for (let x = 1; x < DISTRICT - 1 && trees.length < SCATTER_MAX; x++) {
-          const t = z * DISTRICT + x;
+      for (let z = 1; z < D - 1 && trees.length < SCATTER_MAX; z++) {
+        for (let x = 1; x < D - 1 && trees.length < SCATTER_MAX; x++) {
+          const t = z * D + x;
           if (parcel[t] < 0) continue;
           if (roadClass[t] >= 0 || wet(t)) continue;
           if (boundary(t, x, z)) continue;
@@ -1601,9 +1666,9 @@ export function App(): JSX.Element {
     {
       const parcel = world.terrain.fields.parcel;
       const bounds = new Map<number, { x0: number; z0: number; x1: number; z1: number }>();
-      for (let z = 0; z < DISTRICT; z++) {
-        for (let x = 0; x < DISTRICT; x++) {
-          const p2 = parcel[z * DISTRICT + x];
+      for (let z = 0; z < D; z++) {
+        for (let x = 0; x < D; x++) {
+          const p2 = parcel[z * D + x];
           if (p2 < 0) continue;
           const b = bounds.get(p2);
           if (!b) bounds.set(p2, { x0: x, z0: z, x1: x, z1: z });
@@ -1622,8 +1687,8 @@ export function App(): JSX.Element {
         // and a colour, which means it turns up here looking exactly like a large
         // field — and a combine driving up and down inside a forest is the sort of
         // thing that is funny once.
-        if (isWood(crops[b.z0 * DISTRICT + b.x0])
-          || isWood(crops[Math.round((b.z0 + b.z1) / 2) * DISTRICT
+        if (isWood(crops[b.z0 * D + b.x0])
+          || isWood(crops[Math.round((b.z0 + b.z1) / 2) * D
             + Math.round((b.x0 + b.x1) / 2)])) continue;
         // The nearest road tile to the field's edge, searched outward from the
         // bounding box. Bounded, because a field with no road within six tiles is
@@ -1632,9 +1697,9 @@ export function App(): JSX.Element {
         let entryX = 0;
         let entryZ = 0;
         let bestD = Infinity;
-        for (let z = Math.max(0, b.z0 - 6); z <= Math.min(DISTRICT - 1, b.z1 + 6); z++) {
-          for (let x = Math.max(0, b.x0 - 6); x <= Math.min(DISTRICT - 1, b.x1 + 6); x++) {
-            const t = z * DISTRICT + x;
+        for (let z = Math.max(0, b.z0 - 6); z <= Math.min(D - 1, b.z1 + 6); z++) {
+          for (let x = Math.max(0, b.x0 - 6); x <= Math.min(D - 1, b.x1 + 6); x++) {
+            const t = z * D + x;
             if (roadClass[t] < 0) continue;
             const cx = Math.max(b.x0, Math.min(b.x1, x));
             const cz = Math.max(b.z0, Math.min(b.z1, z));
@@ -1759,7 +1824,7 @@ export function App(): JSX.Element {
 
     const renderer = new Renderer(canvas);
     const farmwork = new Farmwork({
-      size: DISTRICT,
+      size: D,
       usable: (t) => world.influence.usable(t),
       /*
        * Dry land, and it took two goes: the first read `height > 0`, which is sea
@@ -1767,7 +1832,7 @@ export function App(): JSX.Element {
        * See `water.ts` for the measurement and for why both this and `isStream`
        * now come out of the same function.
        */
-      dry: (t) => t >= 0 && t < DISTRICT * DISTRICT
+      dry: (t) => t >= 0 && t < D * D
         && !isWet(world.terrain.flags[t], world.terrain.height[t]),
       route: (from, to) => world.roadRoute(from, to),
       work: (tile) => world.workField(tile),
@@ -1819,10 +1884,12 @@ export function App(): JSX.Element {
      * and sawmills with no dairy anywhere in it.
      */
     const opening = world.planOpening();
-    const inset = DISTRICT * 0.3;
-    const clamp = (v: number): number => Math.max(inset, Math.min(DISTRICT - inset, v));
+    const inset = D * 0.3;
+    const clamp = (v: number): number => Math.max(inset, Math.min(D - inset, v));
     renderer.camX = clamp(opening.x);
     renderer.camZ = clamp(opening.y);
+    // No weather on a model on a table. See `Renderer.diorama`.
+    renderer.diorama = boot.kind === 'menu';
     menuHome.x = renderer.camX;
     menuHome.z = renderer.camZ;
     /*
@@ -2148,9 +2215,9 @@ export function App(): JSX.Element {
      * settled.
      */
     const grazing = new Grazing({
-      size: DISTRICT,
+      size: D,
       grazeable: (t) => {
-        if (t < 0 || t >= DISTRICT * DISTRICT) return false;
+        if (t < 0 || t >= D * D) return false;
         if (roadClass[t] >= 0) return false;
         const h = world.terrain.height[t];
         if (h <= 0) return false;
@@ -2185,7 +2252,7 @@ export function App(): JSX.Element {
       x: world.towns.x[t], y: world.towns.y[t], population: world.towns.population[t],
     }));
     const ambient = new Ambient({
-      size: DISTRICT,
+      size: D,
       isRoad: (t) => roadClass[t] >= 0,
       rank: (t) => (t >= 0 && t < roadClass.length ? roadClass[t] : -1),
       usable: (t) => world.influence.usable(t),
@@ -2201,7 +2268,7 @@ export function App(): JSX.Element {
           if (t >= 0 && world.influence.usable(t)) out.push(t);
         }
         for (let t = 0; t < world.towns.count; t++) {
-          const tile = world.towns.y[t] * DISTRICT + world.towns.x[t];
+          const tile = world.towns.y[t] * D + world.towns.x[t];
           if (world.influence.usable(tile)) out.push(tile);
         }
         return out;
@@ -2384,15 +2451,15 @@ export function App(): JSX.Element {
       // The nearest business to where you clicked, within a couple of tiles.
       // Clicking a farmyard should open the farm, and the farmyard is several
       // tiles wide.
-      const cx = tile % DISTRICT;
-      const cz = Math.floor(tile / DISTRICT);
+      const cx = tile % D;
+      const cz = Math.floor(tile / D);
       let found = -1;
       let bestD = 9;
       for (let i = 0; i < world.sites.count; i++) {
         const at = world.siteAccessTile[i];
         if (at < 0 || !world.influence.usable(at)) continue;
-        const dx = (at % DISTRICT) - cx;
-        const dz = Math.floor(at / DISTRICT) - cz;
+        const dx = (at % D) - cx;
+        const dz = Math.floor(at / D) - cz;
         const d = dx * dx + dz * dz;
         if (d < bestD) { bestD = d; found = i; }
       }
@@ -2421,14 +2488,14 @@ export function App(): JSX.Element {
            */
           const clear = new Set<number>();
           for (const t of world.footprintTiles(def, tile)) {
-            const tx = t % DISTRICT;
-            const tz = Math.floor(t / DISTRICT);
+            const tx = t % D;
+            const tz = Math.floor(t / D);
             for (let dz = -1; dz <= 1; dz++) {
               for (let dx = -1; dx <= 1; dx++) {
                 const nx = tx + dx;
                 const nz = tz + dz;
-                if (nx < 0 || nz < 0 || nx >= DISTRICT || nz >= DISTRICT) continue;
-                clear.add(nz * DISTRICT + nx);
+                if (nx < 0 || nz < 0 || nx >= D || nz >= D) continue;
+                clear.add(nz * D + nx);
               }
             }
           }
@@ -2533,7 +2600,7 @@ export function App(): JSX.Element {
         if (at) {
           const inset = renderer.tilesAcross * 0.3;
           const hold = (v: number): number => Math.max(
-            inset, Math.min(DISTRICT - inset, v),
+            inset, Math.min(D - inset, v),
           );
           renderer.camX = hold(at.x + (renderer.camX - at.x) * k);
           renderer.camZ = hold(at.z + (renderer.camZ - at.z) * k);
@@ -2790,8 +2857,8 @@ export function App(): JSX.Element {
          */
         if (!startedRef.current) {
           renderer.spin = (now / 1000) * 0.042;
-          renderer.camX = DISTRICT / 2;
-          renderer.camZ = DISTRICT / 2;
+          renderer.camX = D / 2;
+          renderer.camZ = D / 2;
         } else if (renderer.spin !== 0) {
           /*
            * And it rights itself as you fall in.
@@ -2824,7 +2891,7 @@ export function App(): JSX.Element {
          * why the first attempt changed nothing: the intro writes the zoom every
          * frame, so an override has to be the last word.
          */
-        if (!startedRef.current) renderer.tilesAcross = 118;
+        if (!startedRef.current) renderer.tilesAcross = DIORAMA_ACROSS;
         fit();
         /*
          * The cloud, written straight to the element's style.
@@ -3132,8 +3199,8 @@ export function App(): JSX.Element {
          * on, which they would rightly read as a bug.
          */
         const n = world.footprintOf(world.sites.def[i]);
-        src.px[pn] = (tile % DISTRICT) + n / 2;
-        src.pz[pn] = Math.floor(tile / DISTRICT) + n / 2;
+        src.px[pn] = (tile % D) + n / 2;
+        src.pz[pn] = Math.floor(tile / D) + n / 2;
         src.pModel[pn] = world.sites.def[i];
         // Square to the world. A works on your own land has no street to face.
         src.pRot[pn] = ((tile * 2654435761) % 4) * 0.25;
@@ -3147,7 +3214,7 @@ export function App(): JSX.Element {
       for (let y = 0; y < world.yards.count && pn < src.px.length; y++) {
         if (world.yards.owner[y] !== world.player) continue;
         // A yard's access is its own tile, like a business's — see `foundYard`.
-        const tile = world.yards.y[y] * DISTRICT + world.yards.x[y];
+        const tile = world.yards.y[y] * D + world.yards.x[y];
         const at = offRoad(tile, world.yards.x[y], world.yards.y[y]);
         src.px[pn] = at.x;
         src.pz[pn] = at.z;
@@ -3212,7 +3279,7 @@ export function App(): JSX.Element {
       let sn = 0;
       for (const q of trees) {
         if (sn >= src.sx.length) break;
-        const tile = Math.round(q.z) * DISTRICT + Math.round(q.x);
+        const tile = Math.round(q.z) * D + Math.round(q.x);
         if (!world.influence.usable(tile)) continue;
         /*
          * Out of season, out of the district.
@@ -3252,7 +3319,7 @@ export function App(): JSX.Element {
       let ln = 0;
       for (const q of lampPosts) {
         if (ln >= src.lx.length) break;
-        const tile = Math.round(q.z) * DISTRICT + Math.round(q.x);
+        const tile = Math.round(q.z) * D + Math.round(q.x);
         if (!world.influence.usable(tile)) continue;
         src.lx[ln] = q.x;
         src.lz[ln] = q.z;
@@ -3345,9 +3412,9 @@ export function App(): JSX.Element {
           // dropping the same chunk forty times would rebuild it forty times.
           const chunks = new Set<number>();
           for (const t of dirty) {
-            const x = t % DISTRICT;
-            const z = (t / DISTRICT) | 0;
-            const key = ((z / CHUNK) | 0) * DISTRICT + ((x / CHUNK) | 0);
+            const x = t % D;
+            const z = (t / D) | 0;
+            const key = ((z / CHUNK) | 0) * D + ((x / CHUNK) | 0);
             if (chunks.has(key)) continue;
             chunks.add(key);
             renderer.dropChunkAt(x, z);
@@ -3386,7 +3453,7 @@ export function App(): JSX.Element {
             : world.liftHere(world.player, hover).ok;
           const tiles = [hover];
           if (ok && held === 'lay') {
-            for (const d of [1, -1, DISTRICT, -DISTRICT]) {
+            for (const d of [1, -1, D, -D]) {
               if (roadClass[hover + d] >= 0) { tiles.push(hover + d); break; }
             }
           }
@@ -4147,7 +4214,23 @@ export function App(): JSX.Element {
            * seed, opening sequence already run — so starting one is releasing the
            * camera, not creating anything.
            */
-          onNew={() => { setMenuPage(null); setStarted(true); }}
+          onNew={() => {
+            /*
+             * Which builds the real district, because the one turning behind the
+             * menu is a sixty-four tile diorama and not the place you are about to
+             * work in.
+             *
+             * Both at once, and the order does not matter: `setBoot` re-runs the
+             * setup effect with a full-size world, `setStarted` releases the
+             * descent, and the descent restarts from the top of the cloud because
+             * the effect it lives in has just been rebuilt. Which is the right
+             * shape anyway — you are not falling into the model on the table, you
+             * are going somewhere else.
+             */
+            setMenuPage(null);
+            setBoot({ kind: 'new' });
+            setStarted(true);
+          }}
           onLoad={(slot) => {
             setMenuPage(null);
             setStarted(true);

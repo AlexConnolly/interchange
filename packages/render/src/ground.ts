@@ -163,11 +163,127 @@ export function groundHeightAt(src: GroundSource, x: number, z: number): number 
  * of it when one field changes is a stall. Everything below writes into one
  * mesh, so a chunk is one draw call.
  */
+/**
+ * How far the ground stands proud of the water as a solid thing.
+ *
+ * The district was a *sheet*: two triangles a tile and nothing underneath, so
+ * from any angle that saw past the coast it read as a painted plane hanging in
+ * the air — "the worlds should have a bit more of cube underneath them so they
+ * don't look like a flat plane". Quite. A model on a table has a side to it.
+ *
+ * In world units, measured down from sea level, and much deeper than it first
+ * looks as though it should be.
+ *
+ * Started at 0.30, which is about the depth of the deepest sea in the district and
+ * therefore the arithmetically tidy answer. On screen it was a *line*: the camera
+ * looks down at 38 degrees, so a vertical face is foreshortened to two thirds, and
+ * a third of a tile of depth on a sixty-four tile block came out six pixels tall.
+ * Colouring it bright blue for one screenshot was the only way to find it.
+ *
+ * So it is set by eye against the thing it has to read beside: the island stands
+ * about 0.85 units at its hills, and a base a little under twice that is what makes
+ * the whole thing look like a piece of ground somebody cut out and carried in,
+ * rather than a map with a rim.
+ */
+export const BASE_DEPTH = 1.55;
+
+/**
+ * The cut face's own two colours, dark on purpose.
+ *
+ * Not `LAND.bedrock` and `LAND.rock`, which is what it used the first time and
+ * which came out white: those are *surface* colours, chosen to sit under a sky in
+ * daylight, and a vertical face at these sun angles catches the light square on
+ * and blows out. A cut edge is the one surface in any diorama that is always in
+ * shade — it is the inside of the ground.
+ *
+ * So they are set two thirds down from the surface colours they are meant to
+ * suggest. Soil directly under the grass, rock below that, and both dark enough
+ * that the slab reads as depth in any light the menu's clock happens to be at.
+ */
+const CUT_SOIL: RGB = [0.243, 0.176, 0.125];
+const CUT_ROCK: RGB = [0.278, 0.267, 0.251];
+
+/**
+ * The two bands the cut edge is drawn in, and why there are two.
+ *
+ * One flat colour under the grass reads as a shadow rather than as a material.
+ * Two — a thin band of soil directly under the surface and rock below it — is
+ * the section drawing everybody has seen, and it is the cheapest possible way to
+ * say "this is a piece of ground" rather than "this is where the mesh stops".
+ */
+const SOIL_BAND = 0.055;
+
+/**
+ * The cut face along the edge of the map.
+ *
+ * Only on the map boundary, which is why it lives inside the tile loop rather
+ * than in a pass of its own: chunks are sixteen tiles square and a skirt drawn
+ * per chunk would put walls through the middle of the district, four of them at
+ * every seam. The test is against the *map* edge, so only the outermost chunks
+ * grow one and every interior chunk is untouched.
+ *
+ * No bottom cap. The camera is fixed at 38 degrees of elevation and can never
+ * get under the district, so a floor would be triangles nobody will ever see —
+ * and this mesh is rebuilt whenever a field changes colour.
+ */
+function skirt(
+  m: Mesh, x: number, y: number, s: number,
+  h00: number, h10: number, h01: number, h11: number,
+): void {
+  const base = -BASE_DEPTH;
+  /*
+   * The cut starts at the waterline, not at the seabed.
+   *
+   * Measured across every size the generator makes: the coast never reaches the
+   * map edge — 0 land tiles on the boundary at 32, 40, 48, 56, 64 and 128 — so the
+   * whole rim of the world is sea, and following the seabed gave the slab a torn
+   * top edge that read as a broken-off piece rather than as a cut one. Clamping to
+   * zero puts a clean line right round it at the water's surface, which is what a
+   * terrarium looks like: a square of ground and water, sliced.
+   *
+   * `Math.max` rather than a flat zero, so that if a district ever does run to the
+   * edge the cut still follows the hill up.
+   */
+  const top = (h: number): number => Math.max(h, 0);
+  /*
+   * One wall, given its two top corners in order. Wound so the outward face is
+   * the one that shows: the triangles are single-sided, and getting this wrong
+   * produces an island you can see straight through from one side and not from
+   * the other.
+   */
+  const wall = (
+    ax: number, az: number, ah0: number,
+    bx: number, bz: number, bh0: number,
+  ): void => {
+    const ah = top(ah0);
+    const bh = top(bh0);
+    const aSoil = Math.max(base, ah - SOIL_BAND);
+    const bSoil = Math.max(base, bh - SOIL_BAND);
+    m.tri(ax, ah, az, bx, bh, bz, ax, aSoil, az, CUT_SOIL);
+    m.tri(bx, bh, bz, bx, bSoil, bz, ax, aSoil, az, CUT_SOIL);
+    m.tri(ax, aSoil, az, bx, bSoil, bz, ax, base, az, CUT_ROCK);
+    m.tri(bx, bSoil, bz, bx, base, bz, ax, base, az, CUT_ROCK);
+  };
+
+  // North, south, west, east. Each pair is ordered so the face points outward.
+  if (y === 0) wall(x + 1, y, h10, x, y, h00);
+  if (y === s - 1) wall(x, y + 1, h01, x + 1, y + 1, h11);
+  if (x === 0) wall(x, y, h00, x, y + 1, h01);
+  if (x === s - 1) wall(x + 1, y + 1, h11, x + 1, y, h10);
+}
+
 export function buildGround(
   src: GroundSource, x0: number, y0: number, x1: number, y1: number,
 ): Mesh {
   const s = src.size;
-  const m = new Mesh((x1 - x0) * (y1 - y0) * 12);
+  /*
+   * Twelve floats a tile, plus the skirt's eight triangles on an edge tile.
+   *
+   * Sized for the worst case rather than measured, because `Mesh` grows by
+   * reallocating and a district's worth of edge tiles reallocating on the first
+   * frame is the one place that cost is visible.
+   */
+  const m = new Mesh((x1 - x0) * (y1 - y0) * 12 + (x1 - x0 + y1 - y0) * 2 * 8 * 3);
 
   for (let y = y0; y < y1; y++) {
     for (let x = x0; x < x1; x++) {
@@ -301,6 +417,11 @@ export function buildGround(
       } else {
         m.tri(x, h00, y, x, h01, y + 1, x + 1, h10, y, colour);
         m.tri(x + 1, h10, y, x, h01, y + 1, x + 1, h11, y + 1, colour);
+      }
+
+      // And the cut face, if this tile is on the edge of the world.
+      if (x === 0 || y === 0 || x === s - 1 || y === s - 1) {
+        skirt(m, x, y, s, h00, h10, h01, h11);
       }
     }
   }

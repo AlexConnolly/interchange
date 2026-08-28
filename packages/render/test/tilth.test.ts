@@ -62,8 +62,18 @@ function source(crop: number, parcel = 2): GroundSource {
   };
 }
 
+/**
+ * Triangles for a six-by-six patch, taken from the *inside* of the map.
+ *
+ * Inside, because the outermost tiles now grow the slab that gives the district a
+ * side — see `slab.test.ts` — and eight triangles a tile of cut face would be
+ * counted here as though tilth had got more expensive. The subject is what a crop
+ * costs to draw, so the sample has to be ground with more ground round it.
+ */
+const PATCH = 6 * 6;
+
 function tris(crop: number, parcel = 2): number {
-  const g = buildGround(source(crop, parcel), 0, 0, 8, 8).build();
+  const g = buildGround(source(crop, parcel), 1, 1, 7, 7).build();
   return g.getAttribute('position').count / 3;
 }
 
@@ -84,7 +94,7 @@ describe('ploughed ground', () => {
 
   it('leaves grass alone', () => {
     // Two triangles a tile, which is what a field of grass should cost.
-    expect(tris(PASTURE)).toBe(8 * 8 * 2);
+    expect(tris(PASTURE)).toBe(PATCH * 2);
   });
 
   it('costs what it is meant to, so the saving cannot be lost quietly', () => {
@@ -96,7 +106,7 @@ describe('ploughed ground', () => {
      * without anything looking different.
      */
     for (const crop of [PLOUGH, RIPE, 7, 8, 9, 10]) {
-      const perTile = tris(crop) / (8 * 8);
+      const perTile = tris(crop) / PATCH;
       expect(perTile, `crop ${crop}`).toBeLessThanOrEqual(30);
     }
   });
