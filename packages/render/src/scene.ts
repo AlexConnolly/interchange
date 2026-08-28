@@ -40,7 +40,9 @@ import {
 import { makeAir, type Air } from './air.ts';
 import { makeBirds, type Birds } from './birds.ts';
 import { makeClouds, type Clouds } from './clouds.ts';
-import { CAMERA_AZIMUTH, CAMERA_DISTANCE, CAMERA_ELEVATION } from './camera.ts';
+import {
+  CAMERA_AZIMUTH, CAMERA_DISTANCE, CAMERA_ELEVATION, DIORAMA_ELEVATION,
+} from './camera.ts';
 import { Mesh } from './geometry.ts';
 import {
   buildRoads, buildCatsEyes, BRIDGE_RISE, type RoadSource,
@@ -738,9 +740,14 @@ export class Renderer {
   diorama = false;
 
   private placeCamera(): void {
-    // From `camera.ts`, which is also what the ground builder asks when it
-    // decides which face of a furrow is the one you can see.
-    const el = CAMERA_ELEVATION;
+    /*
+     * From `camera.ts`, which is also what the ground builder asks when it decides
+     * which face of a furrow is the one you can see. The diorama overrides the
+     * elevation and not that: a furrow is a fraction of a pixel at this distance,
+     * so rebuilding the ground for the menu's benefit would be a lot of work to
+     * change nothing anybody can see.
+     */
+    const el = this.diorama ? DIORAMA_ELEVATION : CAMERA_ELEVATION;
     const az = CAMERA_AZIMUTH + this.spin;
     const d = CAMERA_DISTANCE;
     /*
@@ -2259,9 +2266,24 @@ export class Renderer {
       this.renderer.render(this.scene, this.camera);
       return;
     }
+    /*
+     * The diorama gets the grade and not the glare.
+     *
+     * `scatter` is god-rays off the sun and `bloom` is the light spilling round
+     * bright edges — both of them are the *air* between you and the district, and
+     * on a model a few feet away they read as a lamp pointed at the camera. At
+     * dawn and dusk the menu's clock puts the sun low and behind the block, and
+     * the whole thing went white from the top corner down.
+     *
+     * Not zero, which is what reduced detail does: without any bloom the low sun
+     * loses its warmth and the model looks like a screenshot of a spreadsheet. A
+     * third of it keeps the light and drops the haze.
+     */
     this.composed.apply(this.vfx === 'low'
       ? { ...this.mood, bloom: 0, scatter: 0 }
-      : this.mood);
+      : this.diorama
+        ? { ...this.mood, bloom: this.mood.bloom * 0.34, scatter: 0 }
+        : this.mood);
     this.composed.aim(this.sun, this.camera);
     this.composed.render();
   }

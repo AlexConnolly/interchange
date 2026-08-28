@@ -180,12 +180,18 @@ export function groundHeightAt(src: GroundSource, x: number, z: number): number 
  * a third of a tile of depth on a sixty-four tile block came out six pixels tall.
  * Colouring it bright blue for one screenshot was the only way to find it.
  *
- * So it is set by eye against the thing it has to read beside: the island stands
- * about 0.85 units at its hills, and a base a little under twice that is what makes
- * the whole thing look like a piece of ground somebody cut out and carried in,
- * rather than a map with a rim.
+ * And it is set against the thing it has to read beside, which took a second
+ * measurement to get right. The first guess put the island at "about 0.85 units at
+ * its hills" — picked off a screenshot, and wrong by an order of magnitude. Asking
+ * the terrain instead: the uplands run to a raw height of 1346, which is 8.8 world
+ * units, so a base of a third of that is the proportion that reads as a slab of
+ * ground rather than as a rim round a map.
+ *
+ * Worth naming because both numbers looked plausible on screen. The pale mass in
+ * the near half of the menu that I twice took for the sea, and once for snow, was a
+ * hillside nine units up.
  */
-export const BASE_DEPTH = 1.55;
+export const BASE_DEPTH = 2.9;
 
 /**
  * The cut face's own two colours, dark on purpose.

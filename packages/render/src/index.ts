@@ -1,3 +1,4 @@
+export * from './camera.ts';
 export * from './geometry.ts';
 export * from './palette.ts';
 export * from './ground.ts';

@@ -20,6 +20,22 @@ export const CAMERA_ELEVATION = (38 * Math.PI) / 180;
 export const CAMERA_AZIMUTH = (-32 * Math.PI) / 180;
 
 /**
+ * And the angle the menu's diorama is seen from, which is lower.
+ *
+ * Here rather than on the renderer because the framing depends on it and the
+ * framing is decided in the client: a vertical face projects as `cos(elevation)`
+ * and a run away from the camera as `sin(elevation)`, so this number sets both how
+ * tall the cut edge of the block looks and how much of the screen the block needs.
+ *
+ * Twenty-eight rather than thirty-eight buys both. Sixty-four tiles of depth
+ * project to thirty on screen instead of thirty-nine, which is what brings the near
+ * edge of the block up into frame — measured, at 38 degrees it landed at y=1000 in
+ * a thousand-pixel window, its cut face exactly one pixel below the bottom of the
+ * screen.
+ */
+export const DIORAMA_ELEVATION = (28 * Math.PI) / 180;
+
+/**
  * How far back the orthographic camera sits from what it is looking at.
  *
  * It has to be a long way: an orthographic projection has no perspective to

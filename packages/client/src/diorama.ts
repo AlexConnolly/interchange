@@ -26,6 +26,8 @@
  * rather than by trusting.
  */
 
+import { DIORAMA_ELEVATION } from '@interchange/render';
+
 /**
  * Tiles across the menu's world.
  *
@@ -38,13 +40,78 @@
 export const DIORAMA_SIZE = 64;
 
 /**
- * How wide the frame is, in tiles.
- *
- * A shade more than the world, so the cut edge of the block has air round it on
- * every side as it turns. Exactly the world's width would put the corners through
- * the edge of the screen twice a revolution.
+ * How deep the block is cut, in world units. Mirrors `BASE_DEPTH` in the ground
+ * builder, which the framing has to know about because the bottom of the cut is
+ * the lowest thing on screen.
  */
-export const DIORAMA_ACROSS = 70;
+export const DIORAMA_BASE = 2.9;
+
+/**
+ * The narrowest the frame is allowed to be, in tiles.
+ *
+ * *Narrower* than the world, which looks wrong and is not: the menu camera sits at
+ * 28 degrees rather than the game's 38, so sixty-four tiles of depth project to
+ * about thirty on screen, and the limit on the framing is the width rather than
+ * the diagonal.
+ *
+ * Seventy-two is set from the measurement, not from taste. At 70 across and 38
+ * degrees the near edge of the block projected to y=1000 in a thousand-pixel
+ * window — its cut face was one pixel below the bottom of the screen, which is
+ * what made three separate screenshots look as though the slab had not been built.
+ * Tipping the camera to 28 degrees is what buys that back: sixty-four tiles of
+ * depth project to thirty rather than thirty-nine, so the near edge comes up into
+ * the frame without the view having to back away from the model.
+ *
+ * The far corners of a turning square do pass outside the frame — a square is its
+ * diagonal wide at 45 degrees, which is ninety-one tiles here, and framing for that
+ * would shrink everything by a third to keep two triangles of empty sea on screen.
+ * The corners of this block *are* empty sea. What has to stay in frame is the four
+ * edge midpoints, because that is where the cut face reads, and at 72 they do.
+ */
+export const DIORAMA_ACROSS = 72;
+
+/**
+ * And how wide it actually needs to be for a given window shape.
+ *
+ * A fixed number was wrong and only just wrong, which is the dangerous kind. At
+ * 1600 by 1000 the block fits at 72 with a quarter of the frame to spare; on a
+ * 21:9 window the same 72 tiles gives fifteen and a half tiles of vertical room
+ * where the block needs seventeen and a half, and the near cut face goes off the
+ * bottom of the screen again — the exact bug this was all about, back for anybody
+ * with a wide monitor.
+ *
+ * So the frame is solved from the block rather than chosen. Under an orthographic
+ * camera at elevation `el`, an edge midpoint `size/2` from the centre sits
+ * `(size/2)·sin(el)` from the middle of the screen vertically, and the cut hangs
+ * `base·cos(el)` below the waterline. Double that is what has to fit, and the
+ * window's aspect converts it into tiles across.
+ *
+ * The hills are deliberately not in the sum. A peak poking above the top of the
+ * frame is empty sky lost; the cut edge going off the bottom is the subject lost.
+ */
+export function dioramaAcross(aspect: number): number {
+  const half = (DIORAMA_SIZE / 2) * Math.sin(DIORAMA_ELEVATION)
+    + DIORAMA_BASE * Math.cos(DIORAMA_ELEVATION);
+  // Guarded, because a window one pixel tall would otherwise ask for infinity.
+  return Math.max(DIORAMA_ACROSS, (2 * half) / Math.max(0.25, aspect));
+}
+
+/**
+ * What day of the year the little world sits on.
+ *
+ * High summer, and not the day the game opens on.
+ *
+ * The game starts at day sixty because a seasonal mechanic has to arrive as
+ * something you were warned about rather than as the first thing that happens —
+ * open in January and the one van you own is immobilised for want of tyres. That
+ * argument is about *playing*, and the menu is not playing.
+ *
+ * At day sixty the parish is bare: no leaf on the trees, nothing standing in the
+ * fields, and pale ground on every hill. It photographs like February because it
+ * nearly is. Day 186 is the same district with the hedges in full leaf and corn in
+ * the fields, which is what a model of an English parish is supposed to look like.
+ */
+export const DIORAMA_DAY = 186;
 
 /** How many seeds to try before settling for whatever the last one gave. */
 export const DIORAMA_TRIES = 8;

@@ -41,7 +41,7 @@ import { Owned } from './Owned.tsx';
 import { Contracts } from './Contracts.tsx';
 import { Approval, ApprovalDial } from './Approval.tsx';
 import {
-  DIORAMA_SIZE, DIORAMA_ACROSS, DIORAMA_TRIES, goodEnough, seedFor,
+  DIORAMA_SIZE, DIORAMA_TRIES, DIORAMA_DAY, dioramaAcross, goodEnough, seedFor,
 } from './diorama.ts';
 import { Market } from './Market.tsx';
 import { Land } from './Land.tsx';
@@ -899,7 +899,7 @@ export function App(): JSX.Element {
     const askedDay = Number(params.get('day'));
     world.tick = (params.has('day') && Number.isFinite(askedDay)
       ? Math.max(0, Math.floor(askedDay))
-      : 60) * TICKS_PER_DAY;
+      : boot.kind === 'menu' ? DIORAMA_DAY : 60) * TICKS_PER_DAY;
     const wayNames = world.content.ways.map((w) => w.id);
     const layer = world.layers[Mode.Road];
 
@@ -2891,7 +2891,12 @@ export function App(): JSX.Element {
          * why the first attempt changed nothing: the intro writes the zoom every
          * frame, so an override has to be the last word.
          */
-        if (!startedRef.current) renderer.tilesAcross = DIORAMA_ACROSS;
+        if (!startedRef.current) {
+          // Solved from the window's shape, not fixed. See `dioramaAcross`.
+          renderer.tilesAcross = dioramaAcross(
+            canvas.clientHeight / Math.max(1, canvas.clientWidth),
+          );
+        }
         fit();
         /*
          * The cloud, written straight to the element's style.
