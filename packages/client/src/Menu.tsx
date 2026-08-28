@@ -15,25 +15,35 @@
  *
  * ## The design, and the reasons
  *
- * **Left, not centred.** A centred column over a landscape fights the landscape
- * for the middle of the frame. Pushed to the left third, the two arrange
- * themselves: words on one side, country on the other, which is how a title
- * sequence is composed and not how a dialog is.
+ * **The name in the middle, the choices along the bottom.** It was a column down
+ * the left third, on the argument that "a centred column over a landscape fights
+ * the landscape for the middle of the frame". True of a *column*; not true of a
+ * name. A title belongs in the middle of a title card, and pushing it into a
+ * corner to make room for a list was solving the list's problem at the title's
+ * expense.
  *
- * **A list with hairlines, not a stack of cards.** A card says "press me, I am a
- * control". Four of them in a column say "fill this in". A rule between rows says
- * "this is a list of things", which is what a menu is, and it leaves the district
- * visible between the words instead of boxing it out.
+ * So the two are separated. The name sits centred with nothing beside it, and the
+ * choices go along the bottom — which is also where the dock lives once you are
+ * playing, so the first row of controls a player ever sees is in the place every
+ * later row will be.
+ *
+ * **They are buttons now, not a list.** A vertical list of four with hairlines
+ * between them reads as a menu; four across the bottom have to read as things to
+ * press, so they are pills with an edge, sized like the dock's. Same shape, same
+ * glass, same gold for the one under the pointer.
+ *
+ * **No strapline.** There was a "Haulage in an English parish · 1985" under the
+ * rule, doing the job a book cover does — telling you what the thing is before you
+ * open it. It is not needed here and it never was: the district is *behind the
+ * words*, in summer, with lorries on it, and "Marchford, and one van" under New
+ * game says the rest. A line of explanatory type over a picture that explains
+ * itself is a line that only adds to the count.
  *
  * **No panel behind the words — a scrim.** Text over a bright field needs
- * contrast, and a card is the lazy way to get it. A soft gradient bled from the
- * bottom-left darkens the ground behind the type without drawing an edge round it,
- * so the picture runs under the words rather than stopping at them.
- *
- * **The gold marker is the only ornament.** It is the colour the dock lights up
- * with, so the eye already knows it means "this one". A hover that slides the row
- * four pixels and puts a mark in the margin is the whole of the interaction
- * design, and it is enough.
+ * contrast, and a card is the lazy way to get it. A soft pool of shade behind the
+ * name and a lift from the bottom edge darken the ground under the type without
+ * drawing an edge round it, so the picture runs under the words rather than
+ * stopping at them.
  */
 
 import { useState, type JSX } from 'react';
@@ -51,14 +61,20 @@ function Item({
 }): JSX.Element {
   return (
     <button className="mi" onClick={onClick} disabled={disabled}>
-      {/* The marker lives in the row's own margin so the label does not move to
-          make room for it — a menu whose text jumps on hover is a menu that feels
-          loose. */}
-      <span className="mi-mark" aria-hidden="true" />
       <span className="mi-text">
         <span className="mi-label">{label}</span>
         {sub !== undefined && <span className="mi-sub">{sub}</span>}
       </span>
+      {/*
+        * The gold mark is a bar under the label rather than a tick beside it.
+        *
+        * Beside it was right in a vertical list, where the margin to the left of a
+        * row is empty space nobody is using. In a row of pills that margin is the
+        * gap between two buttons, so a mark there belongs to both of them. Under
+        * the label it belongs to one, and it is the same gold the dock lights up
+        * with — which the eye already reads as "this one".
+        */}
+      <span className="mi-mark" aria-hidden="true" />
     </button>
   );
 }
@@ -138,72 +154,66 @@ export function Menu({
      * makes the type readable over it.
      */
     <div className="menu">
-      <div className="menu-col">
-        <div className="menu-head">
-          {/*
-            * The one place the game's name appears. Deliberately: a wordmark on a
-            * heads-up display is a wordmark you stop seeing in ten seconds, and
-            * this is the only screen with the room to set it properly.
-            *
-            * The rule under it is doing real work — it is what makes the title and
-            * the subtitle read as one object rather than two lines that happen to
-            * be near each other.
-            */}
-          <h1>Interchange</h1>
-          <span className="menu-rule" />
-          <p>Haulage in an English parish &middot; 1985</p>
-        </div>
-
-        {page === 'main' && (
-          <nav className="menu-list">
-            <Item label="New game" sub="Marchford, and one van" onClick={onNew} />
-            <Item
-              label="Load game"
-              sub={slots.length === 0 ? 'Nothing saved yet'
-                : slots.length === 1 ? '1 saved game' : `${slots.length} saved games`}
-              onClick={() => { setSlots(listSaves()); onPage('load'); }}
-              disabled={slots.length === 0}
-            />
-            <Item label="Settings" sub="Sound and detail" onClick={() => onPage('settings')} />
-            {/*
-              * Exit, which cannot work, and says so when pressed.
-              *
-              * `window.close()` is refused for any tab a script did not open — a
-              * platform rule, not an oversight. Greying it out would leave a player
-              * wondering what they had to do first; telling them the truth costs a
-              * line and respects them.
-              */}
-            <Item
-              label="Exit"
-              sub={said || 'Close the game'}
-              onClick={() => setSaid('A browser tab cannot close itself — use its ×.')}
-            />
-          </nav>
-        )}
-
-        {page !== 'main' && (
-          /*
-            * A page of paper over the same view, in the same column. The district
-            * carries on behind it, which is what stops the menu feeling like a
-            * different application from the game.
-            */
-          <div className="menu-panel">
-            <div className="menu-bar">
-              <button className="menu-back" onClick={() => onPage('main')}>
-                &lsaquo; Back
-              </button>
-              <span className="grow">{page === 'load' ? 'Load game' : 'Settings'}</span>
-            </div>
-            {page === 'load' ? (
-              <SaveList
-                slots={slots}
-                onPick={onLoad}
-                onDelete={(s) => { deleteSave(s.id); setSlots(listSaves()); }}
-              />
-            ) : settings}
-          </div>
-        )}
+      {/*
+        * The name, centred, with nothing else in its half of the frame.
+        *
+        * The rule under it used to tie the title to a strapline; with the strapline
+        * gone it is doing a smaller and still real job — it gives the word a base
+        * to sit on, so it reads as a mark rather than as a piece of text that
+        * happens to be large.
+        */}
+      <div className="menu-head">
+        <h1>Interchange</h1>
+        <span className="menu-rule" />
       </div>
+
+      {page === 'main' ? (
+        <nav className="menu-row">
+          <Item label="New game" sub="Marchford, and one van" onClick={onNew} />
+          <Item
+            label="Load game"
+            sub={slots.length === 0 ? 'Nothing saved yet'
+              : slots.length === 1 ? '1 saved game' : `${slots.length} saved games`}
+            onClick={() => { setSlots(listSaves()); onPage('load'); }}
+            disabled={slots.length === 0}
+          />
+          <Item label="Settings" sub="Sound and detail" onClick={() => onPage('settings')} />
+          {/*
+            * Exit, which cannot work, and says so when pressed.
+            *
+            * `window.close()` is refused for any tab a script did not open — a
+            * platform rule, not an oversight. Greying it out would leave a player
+            * wondering what they had to do first; telling them the truth costs a
+            * line and respects them.
+            */}
+          <Item
+            label="Exit"
+            sub={said || 'Close the game'}
+            onClick={() => setSaid('A tab cannot close itself — use its ×.')}
+          />
+        </nav>
+      ) : (
+        /*
+         * A page of paper over the same view, and centred now rather than sitting
+         * in a left-hand column. The district carries on behind it, which is what
+         * stops the menu reading as a different application from the game.
+         */
+        <div className="menu-panel">
+          <div className="menu-bar">
+            <button className="menu-back" onClick={() => onPage('main')}>
+              &lsaquo; Back
+            </button>
+            <span className="grow">{page === 'load' ? 'Load game' : 'Settings'}</span>
+          </div>
+          {page === 'load' ? (
+            <SaveList
+              slots={slots}
+              onPick={onLoad}
+              onDelete={(s) => { deleteSave(s.id); setSlots(listSaves()); }}
+            />
+          ) : settings}
+        </div>
+      )}
     </div>
   );
 }

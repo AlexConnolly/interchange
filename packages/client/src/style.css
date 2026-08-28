@@ -2146,140 +2146,189 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   inset: 0;
   z-index: 3;
   display: flex;
-  align-items: stretch;
+  flex-direction: column;
+  /* The name in the upper middle, the choices on the bottom edge, and the gap
+     between them left to the district. `space-between` rather than centring both,
+     because the whole point of the layout is that they are two separate things in
+     two separate places. */
+  justify-content: space-between;
+  align-items: center;
   pointer-events: none;
-  /* Bled from the bottom-left, where the words are, and gone by the middle of the
-     frame. A card would have been the lazy way to get contrast; a scrim lets the
-     picture run *under* the words rather than stopping at them. */
-  /* Warm and shallow. The first attempt was a cool grey at 52% and it read as
-     dirt on the lens — over pale cloud a neutral scrim greys the *whole* frame,
-     because there is nothing dark for it to sit against. Brown-black at a third,
-     gone by the middle, reads as shade instead. */
+  /*
+   * One lift off the bottom edge, under the buttons, and nothing behind the name.
+   *
+   * It used to be a wash bled from the left, which was right while every word was
+   * in the left third. Moving the words meant moving the shade, so the first go at
+   * this put an ellipse behind the title as well — and that was wrong for a reason
+   * the old comment had already written down and I did not read: over pale cloud a
+   * scrim has nothing dark to sit against, so it reads as dirt on the lens. The
+   * title sits at three tenths of the height, which on most windows is *sky*. On a
+   * tall narrow one the blob was unmissable.
+   *
+   * The name does not need it. It carries two text shadows — a tight one for
+   * legibility and a wide soft one to seat it on the picture — and those work over
+   * cloud, over corn and over a sunlit hillside, which a fixed pool of shade cannot.
+   *
+   * The buttons do need it, because they sit on the bottom edge where the block's
+   * own cut face is, and that is the one part of the frame whose brightness the
+   * spin actually changes.
+   */
   background:
-    linear-gradient(100deg,
-      rgba(34, 30, 24, 0.40) 0%,
-      rgba(34, 30, 24, 0.26) 24%,
-      rgba(34, 30, 24, 0.07) 46%,
-      rgba(34, 30, 24, 0) 62%);
+    linear-gradient(to top,
+      rgba(30, 26, 20, 0.52) 0%,
+      rgba(30, 26, 20, 0.30) 12%,
+      rgba(30, 26, 20, 0.06) 26%,
+      rgba(30, 26, 20, 0) 36%);
 }
 
-/* The column. Left third, vertically centred, and it never grows past a measure
-   that type can be read at. */
-.menu-col {
+/* The name. Centred, and it takes its space off the top rather than the middle:
+   dead centre would sit it on the island, and a little above centre leaves the
+   model the room it needs to read. */
+.menu-head {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 30px;
-  /* Wide enough to set the title on one line. At 430px the measure was narrower
-     than the word and it broke mid-syllable — "Interchan / ge". */
-  width: min(520px, 52vw);
-  min-width: 300px;
-  padding: 40px clamp(24px, 5vw, 68px);
+  align-items: center;
+  padding: clamp(64px, 16vh, 190px) 24px 0;
+  text-align: center;
   pointer-events: auto;
-  overflow-y: auto;
 }
 
 .menu-head h1 {
   margin: 0;
   /* Fluid, because this is the one piece of type in the game that should fill the
-     space it is given rather than sit at a fixed size in the corner of it. */
-  /* Capped so it cannot outrun the column: "Interchange" at 74px is wider than the
-     430px measure and came out as "Interchang". Sixty is the largest that fits at
-     this letter-spacing, and `overflow-wrap` is the belt to that brace. */
-  font-size: clamp(34px, 4.6vw, 60px);
-  /* Never break the word. If it ever outruns the column it runs a little wide,
-     which reads as a title bleeding off a frame; hyphenating the game's own name
-     reads as a bug. */
+     space it is given rather than sit at a fixed size in the corner of it. Larger
+     than it was: it had to fit a 520px column and now it has the whole frame. */
+  font-size: clamp(40px, 7vw, 96px);
+  /* Never break the word. If it ever outruns the frame it runs a little wide,
+     which reads as a title bleeding off it; hyphenating the game's own name reads
+     as a bug. */
   white-space: nowrap;
   font-weight: 800;
   line-height: 0.94;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.035em;
   color: #fdfcf8;
   /* Two shadows: a tight one for legibility against a light field, and a wide soft
      one that seats the word on the picture instead of floating it over. */
   text-shadow:
     0 1px 2px rgba(20, 26, 22, 0.45),
-    0 6px 34px rgba(20, 26, 22, 0.35);
+    0 6px 40px rgba(20, 26, 22, 0.40);
 }
-/* The rule is doing real work: it is what makes the title and the line under it
-   read as one object rather than two lines that happen to be near each other.
-   Gold, and short, and it stops well before the measure — a full-width rule would
-   be a divider, and this is a flourish. */
+
+/* The rule. It used to tie the title to a strapline; with the strapline gone it
+   gives the word a base to sit on, so the name reads as a mark rather than as a
+   piece of text that happens to be large. Centred with it, and short - a
+   full-width rule would be a divider, and this is a flourish. */
 .menu-rule {
   display: block;
-  width: 68px;
+  width: 92px;
   height: 3px;
-  margin: 16px 0 12px;
+  margin: 20px 0 0;
   border-radius: 2px;
   background: #f4c95d;
   box-shadow: 0 1px 10px rgba(244, 201, 93, 0.45);
 }
-.menu-head p {
-  margin: 0;
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: rgba(253, 252, 248, 0.82);
-  text-shadow: 0 1px 10px rgba(20, 26, 22, 0.5);
+
+/*
+ * The choices, along the bottom, where the dock will be.
+ *
+ * Deliberately the same place and nearly the same size as the dock a player will
+ * use for the rest of the game: the first row of controls they ever see is in the
+ * position every later row will be, so the menu teaches the shape of the interface
+ * before it hands it over.
+ *
+ * Wraps, because four pills at their natural width do not fit a narrow window and
+ * a row that scrolls sideways is a row with things hidden in it.
+ */
+.menu-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: stretch;
+  gap: 10px;
+  padding: 0 clamp(16px, 4vw, 48px) clamp(28px, 6vh, 58px);
+  pointer-events: auto;
 }
 
-/* The list. Hairlines rather than cards: a rule between rows says "this is a list
-   of things", where four boxes in a column say "fill this in" — and the hairline
-   leaves the district visible between the words. */
-.menu-list { display: flex; flex-direction: column; }
+/*
+ * One choice. A pill with an edge, because four things across the bottom have to
+ * read as things to press - a hairline between rows says "list" and there are no
+ * rows any more.
+ *
+ * The same glass as the dock, and the same climb on hover. `transform` and
+ * `background` only: this client has been bitten enough times by animating
+ * anything whose visibility matters, and a pill that eased in from nothing would
+ * be the fourth time.
+ */
 .mi {
   display: flex;
-  align-items: baseline;
-  gap: 0;
-  padding: 13px 0 14px;
-  border: 0;
-  border-top: 1px solid rgba(253, 252, 248, 0.16);
-  background: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 148px;
+  padding: 13px 20px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 15px;
+  background: rgba(14, 17, 15, 0.34);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 20px rgba(10, 16, 12, 0.26);
   font: inherit;
-  text-align: left;
+  text-align: center;
   color: #fdfcf8;
   cursor: pointer;
-  /* Transform only — a colour transition on a row over a moving picture is a
-     colour transition you cannot see, and this client has been bitten enough times
-     by animating things that re-render. */
-  transition: transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  transition:
+    transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1),
+    background 160ms ease,
+    border-color 160ms ease;
 }
-.mi:last-child { border-bottom: 1px solid rgba(253, 252, 248, 0.16); }
-.mi:hover:not(:disabled), .mi:focus-visible { transform: translateX(9px); }
-.mi:disabled { cursor: default; color: rgba(253, 252, 248, 0.42); }
+.mi:hover:not(:disabled), .mi:focus-visible {
+  transform: translateY(-4px);
+  background: rgba(12, 15, 13, 0.72);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+.mi:disabled {
+  cursor: default;
+  color: rgba(253, 252, 248, 0.44);
+  background: rgba(14, 17, 15, 0.22);
+}
 
-/* The marker sits in the row's own margin, so the label does not move to make room
-   for it — a menu whose text jumps on hover is a menu that feels loose. Gold,
-   because that is what this game means by "this one" everywhere else. */
-.mi-mark {
-  flex: 0 0 18px;
-  height: 2px;
-  margin-right: 0;
-  border-radius: 2px;
-  background: #f4c95d;
-  opacity: 0;
-  transform: translateX(-18px);
-  transition: opacity 160ms ease, transform 200ms cubic-bezier(0.2, 0.9, 0.3, 1);
-}
-.mi:hover:not(:disabled) .mi-mark,
-.mi:focus-visible .mi-mark { opacity: 1; transform: translateX(0); }
-.mi-text { display: flex; flex-direction: column; gap: 2px; }
+.mi-text { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .mi-label {
-  font-size: 21px;
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: -0.01em;
   text-shadow: 0 1px 12px rgba(20, 26, 22, 0.5);
 }
 .mi-sub {
-  font-size: 11.5px;
-  color: rgba(253, 252, 248, 0.68);
+  font-size: 11px;
+  color: rgba(253, 252, 248, 0.70);
   text-shadow: 0 1px 10px rgba(20, 26, 22, 0.55);
 }
 
-/* A page of paper over the same view, in the same column: load, or settings. The
-   district carries on behind it, which is what stops the menu reading as a
-   different application from the game. */
+/* The mark, under the label rather than beside it: in a row of pills the margin to
+   a button's left is the gap between two buttons, so a mark there would belong to
+   both. Gold, which is what this game means by "this one" everywhere else.
+   Scaled from nothing rather than faded, so it cannot be a half-drawn smudge on a
+   frame the WebGL clock never got round to finishing. */
+.mi-mark {
+  width: 26px;
+  height: 2px;
+  border-radius: 2px;
+  background: #f4c95d;
+  transform: scaleX(0);
+  transition: transform 200ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.mi:hover:not(:disabled) .mi-mark,
+.mi:focus-visible .mi-mark { transform: scaleX(1); }
+
+/* A page of paper over the same view: load, or settings. The district carries on
+   behind it, which is what stops the menu reading as a different application from
+   the game.
+   Centred and margined off the bottom, because the row of buttons it replaces was
+   sitting on that edge and a panel that hugs it reads as having fallen off. */
 .menu-panel {
+  width: min(520px, 92vw);
+  margin: 0 auto clamp(28px, 6vh, 58px);
+  pointer-events: auto;
   padding: 14px 16px 16px;
   border-radius: 14px;
   background: rgba(247, 243, 234, 0.97);
@@ -2356,23 +2405,31 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .pause.bare {
   box-shadow: none;
   background: none;
-  padding: 0;
+  /*
+   * A few pixels off the top, and they are load-bearing.
+   *
+   * `.pause` is `overflow-y: auto`, which makes it a scroll container, and a scroll
+   * container clips. With `padding: 0` the first section heading sat flush against
+   * that top edge and had the top of its S shaved off — "Sound" read as "ound" at
+   * a glance, and only a four-times-DPI crop showed which letter it was.
+   *
+   * It never showed in the pause menu because there the panel has a header above
+   * the first group; the menu drops that header, so the menu is where it appeared.
+   */
+  padding: 4px 0 0;
   max-width: none;
 }
 .pause-row { display: flex; gap: 8px; margin-top: 12px; }
 .pause-row .pause-resume { flex: 1 1 auto; }
 
-/* Narrow: the column becomes the whole frame and the scrim goes vertical, because
-   a left-hand scrim on a phone leaves the type over the brightest part of the sky. */
+/* Narrow: the four pills stack into two rows of two and the name comes down to
+   meet them, because at this width a title held at 16vh from the top and a row on
+   the bottom edge leave a hole in the middle rather than a composition.
+   The scrim it used to override is already vertical, so that override is gone with
+   the left-hand column it was written for. */
 @media (max-width: 620px) {
-  .menu {
-    background:
-      linear-gradient(180deg,
-        rgba(28, 30, 28, 0.14) 0%,
-        rgba(28, 30, 28, 0.42) 46%,
-        rgba(28, 30, 28, 0.62) 100%);
-  }
-  .menu-col { width: 100%; min-width: 0; justify-content: flex-end; padding-bottom: 34px; }
+  .menu-head { padding-top: clamp(40px, 9vh, 90px); }
+  .mi { min-width: calc(50% - 10px); }
 }
 
 /* ------------------------------------------------------ the inbox
