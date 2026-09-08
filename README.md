@@ -2,6 +2,8 @@
 
 A yard, two trucks, and a district you slowly end up owning.
 
+**Play it: [interchange.connolly.cloud](https://interchange.connolly.cloud)**
+
 ![the target](art/reference/TARGET-FRAME.png)
 
 That picture is the goal. It was made before any renderer code and confirmed as
@@ -59,3 +61,22 @@ breach is a bug — the previous build had fifteen buttons in one rail.
 | [`docs/build.md`](docs/build.md) | Architecture and order of work. |
 
 Superseded drafts are in [`docs/archive/`](docs/archive/).
+
+---
+
+## Running it
+
+```bash
+pnpm install
+pnpm dev          # the client, on :5173
+pnpm test         # 357 tests, mostly the sim
+pnpm typecheck
+pnpm build        # packages/client/dist
+```
+
+The art pipeline is separate and needs Blender — see [`docs/art.md`](docs/art.md).
+`art/` is the source for the meshes; `packages/client/public/models/*.glb` is its
+committed output, because the deployed site loads them at runtime and CI has no
+Blender.
+
+Pushing to `main` typechecks, tests, builds and publishes to GitHub Pages.
