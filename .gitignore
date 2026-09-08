@@ -5,7 +5,10 @@ dist/
 coverage/
 art/out/
 art/__pycache__/
-packages/client/public/models/
+# NOT ignored: packages/client/public/models/
+# The .glb files are Blender output, but the deployed site loads them at
+# runtime and CI cannot run Blender. They are ~1.8MB across 84 files, so they
+# are committed as the built artefact they are. art/ remains the source.
 .tunnel-*.log
 packages/tools/src/scratch*
 # Review renders and generated artefacts. The scripts that make them are the
