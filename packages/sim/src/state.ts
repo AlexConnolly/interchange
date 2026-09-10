@@ -173,7 +173,7 @@ const NOT_SAVED = new Set([
   'waySpeed', 'wayUpkeep', 'wayCharge', 'wayWear', 'wayLanes',
   'vehicleSpeed', 'vehicleCapacity', 'vehicleTransfer', 'vehicleRunning',
   'vehicleMode',
-  'townDemandPerThousand', 'townProducePerThousand', 'appetite',
+  'townDemandPerThousand', 'townProducePerThousand',
 ]);
 
 /**

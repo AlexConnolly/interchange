@@ -69,6 +69,14 @@ export interface PlaceActions {
   accept: (contract: number, vehicle: number) => void;
   /** Draw a job on the map: the loaded run, from pickup to drop. */
   preview: (from: number, to: number) => void;
+  /**
+   * Draw a *contract's* loaded run.
+   *
+   * Apart from `preview` because a contract's far end may be a village, and a
+   * town index handed to the site table names whichever business shares its
+   * number. Everything else this panel previews is a run between two businesses.
+   */
+  previewContract: (contract: number) => void;
   /** Draw a driver's whole job: empty out of the yard, then loaded. */
   previewDriver: (contract: number, vehicle: number) => void;
   /** Take the camera to a place. Only ever called for one you can see. */
@@ -370,18 +378,18 @@ export function Place({
           <>
             {running.map((id) => {
               const cargo = C.cargo[board.cargo[id]];
-              const to = C.industries[world.sites.def[board.to[id]]];
+              const toName = world.contractToName(id);
               const v = driverOf(id);
               return (
                 <div
                   key={`r${id}`}
                   className="job taken"
-                  onMouseEnter={() => actions.preview(board.from[id], board.to[id])}
+                  onMouseEnter={() => actions.previewContract(id)}
                   onMouseLeave={() => actions.preview(-1, -1)}
                 >
                   <span className="job-line">
                     <span className="swatch" style={{ background: cargo.colour }} />
-                    <span className="grow">{cargo.name} → {to.name}</span>
+                    <span className="grow">{cargo.name} → {toName}</span>
                     <span className="pay">{money(board.pay[id])}<i>/t</i></span>
                   </span>
                   <span className={`needs ${v >= 0 ? '' : 'cannot'}`}>
@@ -396,13 +404,13 @@ export function Place({
             })}
             {offers.map((id) => {
               const cargo = C.cargo[board.cargo[id]];
-              const to = C.industries[world.sites.def[board.to[id]]];
+              const toName = world.contractToName(id);
               if (assigning === id) {
                 return (
                   <div key={id} className="job open">
                     <span className="job-line">
                       <span className="swatch" style={{ background: cargo.colour }} />
-                      <span className="grow">{cargo.name} → {to.name}</span>
+                      <span className="grow">{cargo.name} → {toName}</span>
                       <span className="pay">{money(board.pay[id])}<i>/t</i></span>
                     </span>
                     <Drivers
@@ -414,7 +422,7 @@ export function Place({
                         actions.preview(-1, -1);
                       }}
                       onHover={(v) => (v < 0
-                        ? actions.preview(board.from[id], board.to[id])
+                        ? actions.previewContract(id)
                         : actions.previewDriver(id, v))}
                       onCancel={() => { setAssigning(-1); actions.preview(-1, -1); }}
                     />
@@ -427,16 +435,16 @@ export function Place({
                 <button
                   key={id}
                   className="job"
-                  onMouseEnter={() => actions.preview(board.from[id], board.to[id])}
+                  onMouseEnter={() => actions.previewContract(id)}
                   onMouseLeave={() => actions.preview(-1, -1)}
                   onClick={() => {
                     setAssigning(id);
-                    actions.preview(board.from[id], board.to[id]);
+                    actions.previewContract(id);
                   }}
                 >
                   <span className="job-line">
                     <span className="swatch" style={{ background: cargo.colour }} />
-                    <span className="grow">{cargo.name} → {to.name}</span>
+                    <span className="grow">{cargo.name} → {toName}</span>
                     {/*
                       * Per hour, not per tonne. A rate per tonne is not
                       * comparable between two offers — a short run in a van and

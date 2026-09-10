@@ -84,7 +84,7 @@ export function Owned({
         <span className="grow">
           <span className="driver-name">{def.name}</span>
           <span className="driver-where">
-            {world.isDepot(s) ? 'Distribution centre' : 'Yours'}
+            {world.isDepot(s) ? 'Distribution yard' : 'Yours'}
           </span>
         </span>
         <span className="driver-no">go</span>

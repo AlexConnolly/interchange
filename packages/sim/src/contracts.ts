@@ -46,6 +46,24 @@ export class ContractBoard {
   /** Site indices. A contract is two places, always. */
   readonly from = new Int32Array(MAX_CONTRACT_OFFERS).fill(NONE);
   readonly to = new Int32Array(MAX_CONTRACT_OFFERS).fill(NONE);
+  /**
+   * Whether `to` is a town index rather than a site index.
+   *
+   * The far end of a contract used to be a business, always, and the near end
+   * still is — a load comes *out of* somewhere that makes something. The far end
+   * is now either a business that consumes it or a town that eats it, because
+   * until this existed there was no way for a player to deliver into a village
+   * at all: the simulation had `deliverToTown` and a stop kind for it, and every
+   * path the interface could reach hard-coded the site kind. So a town's
+   * population sat at whatever its own fields could support for the whole game,
+   * which made the growth model a decoration.
+   *
+   * A parallel flag rather than a signed convention on `to`, because a negative
+   * index that means "town 3" is the kind of cleverness that reads fine in the
+   * function that wrote it and wrong everywhere else. Read it through
+   * `World.contractTo*` rather than here.
+   */
+  readonly toIsTown = new Uint8Array(MAX_CONTRACT_OFFERS);
   readonly cargo = new Int32Array(MAX_CONTRACT_OFFERS).fill(NONE);
   /** Pence per load. */
   readonly pay = new Int32Array(MAX_CONTRACT_OFFERS);
@@ -84,6 +102,9 @@ export class ContractBoard {
   release(id: number): void {
     this.state[id] = ContractState.Closed;
     this.service[id] = NONE;
+    // Cleared on release rather than on alloc, so a recycled slot cannot come
+    // back claiming its old destination was a town.
+    this.toIsTown[id] = 0;
     this.free.push(id);
   }
 
@@ -125,6 +146,20 @@ export class ContractBoard {
   }
 }
 
+/**
+ * Somewhere that wants a load, which is now two kinds of place.
+ *
+ * Tagged rather than resolved to a tile here, because the generator needs the
+ * *identity* for the board and the coordinates for the distance, and the two
+ * tables are indexed separately. `NONE` with `isTown` false means nobody wants
+ * it anywhere you can see.
+ */
+export interface Buyer {
+  /** A site index, or a town index when `isTown`. */
+  place: number;
+  isTown: boolean;
+}
+
 export interface OfferContext {
   tick: number;
   siteCount: number;
@@ -132,14 +167,18 @@ export interface OfferContext {
   siteTile: (site: number) => number;
   siteX: (site: number) => number;
   siteY: (site: number) => number;
+  /** And where a town is, for a contract whose far end is a village. */
+  townTile: (town: number) => number;
+  townX: (town: number) => number;
+  townY: (town: number) => number;
   /** Can the player work here at all? */
   usable: (tile: number) => boolean;
   /** What this site has spare, as (cargo, tonnes) — the reason it wants a
    *  haulier. */
   /** Every cargo this place has spare, not merely its fullest shed. */
   surpluses: (site: number) => { cargo: number; tonnes: number }[];
-  /** Somewhere that wants this cargo. */
-  buyerFor: (cargo: number, notSite: number) => number;
+  /** Somewhere that wants this cargo — a works, or a village. */
+  buyerFor: (cargo: number, notSite: number) => Buyer;
   /** Pence a load, given the cargo and the distance. */
   rate: (cargo: number, distance: number) => number;
   /**
@@ -225,11 +264,18 @@ export function offerContracts(
         if (board.hasOffer(site, spare.cargo)) continue;
         if (pass === 0 && !ctx.canCarry(spare.cargo)) continue;
         const buyer = ctx.buyerFor(spare.cargo, site);
-        if (buyer === NONE) continue;
-        if (!ctx.usable(ctx.siteTile(buyer))) continue;
+        if (buyer.place === NONE) continue;
+        // Either kind of far end has to be somewhere you can see, on the same
+        // rule as ever: a contract you cannot look at is not an offer.
+        const toTile = buyer.isTown
+          ? ctx.townTile(buyer.place)
+          : ctx.siteTile(buyer.place);
+        if (!ctx.usable(toTile)) continue;
 
-        const dx = ctx.siteX(buyer) - ctx.siteX(site);
-        const dy = ctx.siteY(buyer) - ctx.siteY(site);
+        const dx = (buyer.isTown ? ctx.townX(buyer.place) : ctx.siteX(buyer.place))
+          - ctx.siteX(site);
+        const dy = (buyer.isTown ? ctx.townY(buyer.place) : ctx.siteY(buyer.place))
+          - ctx.siteY(site);
         const distance = Math.round(Math.sqrt(dx * dx + dy * dy));
         if (distance < 3) continue;
 
@@ -237,7 +283,8 @@ export function offerContracts(
         if (id === NONE) break;
         board.state[id] = ContractState.Offered;
         board.from[id] = site;
-        board.to[id] = buyer;
+        board.to[id] = buyer.place;
+        board.toIsTown[id] = buyer.isTown ? 1 : 0;
         board.cargo[id] = spare.cargo;
         board.distance[id] = distance;
         board.pay[id] = ctx.rate(spare.cargo, distance);

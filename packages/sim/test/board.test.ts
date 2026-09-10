@@ -40,7 +40,10 @@ function sweep(w: ReturnType<typeof district>): {
       if (b.state[i] === 3) continue;
       cargoes.add(w.content.cargo[b.cargo[i]].id);
       froms.add(b.from[i]);
-      tos.add(b.to[i]);
+      // Site destinations only. A town index is a small integer like a site
+      // index, so counting both would let town 3 stand in for site 3 and the
+      // village-shop assertion below could pass on a contract to a village.
+      if (b.toIsTown[i] === 0) tos.add(b.to[i]);
     }
     for (let d = 0; d < 9; d++) for (let t = 0; t < TICKS_PER_DAY; t++) w.step();
   }

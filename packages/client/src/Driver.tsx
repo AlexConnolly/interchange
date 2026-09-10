@@ -108,7 +108,7 @@ export function Driver({
                 <span className="grow">
                   {C.cargo[board.cargo[contract]].name}
                   {' → '}
-                  {C.industries[world.sites.def[board.to[contract]]].name}
+                  {world.contractToName(contract)}
                 </span>
               </span>
               <span className="needs">

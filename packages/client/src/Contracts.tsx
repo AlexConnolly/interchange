@@ -56,6 +56,8 @@ interface Row {
   /** Where it runs, which a task has to carry because it has no board entry. */
   from: number;
   to: number;
+  /** `to` is a town rather than a business. A task is never one. */
+  toIsTown: boolean;
   cargo: number;
   /** The lorry on it, or -1. */
   vehicle: number;
@@ -128,6 +130,7 @@ function gather(world: World, tab: Tab): Row[] {
       service: b.service[i],
       from: b.from[i],
       to: b.to[i],
+      toIsTown: b.toIsTown[i] === 1,
       cargo: b.cargo[i],
       vehicle,
       away: Math.hypot(world.sites.x[b.from[i]] - at.x, world.sites.y[b.from[i]] - at.z),
@@ -147,6 +150,7 @@ function gather(world: World, tab: Tab): Row[] {
         service: t.service,
         from: t.from,
         to: t.to,
+        toIsTown: false,
         cargo: t.cargo,
         vehicle: t.vehicle,
         away: Math.hypot(world.sites.x[t.from] - at.x, world.sites.y[t.from] - at.z),
@@ -195,12 +199,17 @@ function gather(world: World, tab: Tab): Row[] {
  * The two ends, in words. Off the *row* rather than off the board, because a task
  * has no board entry and its ends are the only place they exist.
  */
-function endsOf(world: World, r: { from: number; to: number; cargo: number }): {
-  from: string; to: string; cargo: number;
-} {
+function endsOf(
+  world: World, r: { from: number; to: number; toIsTown: boolean; cargo: number },
+): { from: string; to: string; cargo: number } {
   return {
     from: C.industries[world.sites.def[r.from]]?.name ?? 'Somewhere',
-    to: C.industries[world.sites.def[r.to]]?.name ?? 'Somewhere',
+    // A village is named, where a business is called what it is: "Creamery"
+    // tells you what the far end does and "Netherby" is the only useful thing
+    // to say about a place that simply wants its beer.
+    to: r.toIsTown
+      ? world.towns.names[r.to] ?? 'the village'
+      : C.industries[world.sites.def[r.to]]?.name ?? 'Somewhere',
     cargo: r.cargo,
   };
 }

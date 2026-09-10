@@ -240,15 +240,15 @@ export class TownTable {
   names: string[] = [];
   /** Rolling 0..100 measure of how well the town is served. Drives growth. */
   readonly served = new Uint8Array(MAX_TOWNS);
-  /** How good the passenger service here is, 0..100. transit.ts. */
-  readonly transitQuality = new Uint8Array(MAX_TOWNS);
-  /** How long this town's circumstances have argued for a different character,
-   *  and which one they are arguing for. towncharacter.ts. */
-  readonly characterDrift = new Int32Array(MAX_TOWNS);
-  readonly characterToward = new Uint8Array(MAX_TOWNS);
-  /** Jobs within a commute, filled by the labour catchment pass. */
-  readonly labourSupplied = new Int32Array(MAX_TOWNS);
-  readonly labourDemand = new Int32Array(MAX_TOWNS);
+  /*
+   * Five columns went from here, each named after a file that does not exist:
+   * `transitQuality` (transit.ts), `characterDrift` and `characterToward`
+   * (towncharacter.ts), and `labourSupplied` / `labourDemand` for a labour
+   * catchment pass. `cut.md` records the last of those as cut and probably right
+   * to stay cut — *"a third network for an effect the growth model already
+   * approximates"*. Nothing read any of them; two were fed to the hash, which is
+   * how five dead columns stayed live-looking for so long.
+   */
   /** Fractional population growth, accumulated so growth can be sub-integer. */
   readonly growthAcc = new Int32Array(MAX_TOWNS);
 
@@ -773,7 +773,6 @@ export function hashSites(h: Hasher, sites: SiteTable, towns: TownTable): void {
   // on the tick it went wrong. It goes in the hash for the same reason
   // population does.
   h.array(towns.character, towns.count);
-  h.array(towns.characterDrift, towns.count);
   h.array(towns.stock, towns.count * towns.cargoCount);
 }
 

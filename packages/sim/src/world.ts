@@ -33,7 +33,7 @@ import {
 } from './economy.ts';
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
 import { Hasher } from './hash.ts';
-import { ContractBoard, ContractState, offerContracts } from './contracts.ts';
+import { ContractBoard, ContractState, offerContracts, type Buyer } from './contracts.ts';
 import { InfluenceField, type InfluenceSource } from './influence.ts';
 import {
   Facility, FACILITY_COST, MAX_YARDS, YardTable, canBase, facilitiesFor, refusalText,
@@ -218,12 +218,13 @@ export class World {
   private cargoRateWeight = new Float64Array(256).fill(1);
   private townDemandPerThousand: Float64Array;
   private townWant: Record<string, number> = {};
-  private townSend: Record<string, number> = {};
   private basketEra = 0;
-  /** Character multipliers, flattened to (character, cargo). */
-  private appetite = new Float64Array(0);
-  private touristCargo = -1;
-  private passengerCargo = -1;
+  /*
+   * Gone with the basket rewrite: `townSend` (two cargoes that never existed),
+   * `appetite` (per-character multipliers, allocated at length zero and never
+   * written), and `touristCargo` / `passengerCargo`, both assigned `-1` in the
+   * constructor and never read again. Four fields and no readers between them.
+   */
   private townProducePerThousand: Float64Array;
   private routeCosts: RouteCosts;
 
@@ -408,31 +409,48 @@ export class World {
      * which is both correct and the thing that makes town growth a reward for
      * running a *varied* network rather than a big one.
      */
+    /*
+     * What a village gets through in a week, per thousand people.
+     *
+     * This was fourteen entries inherited from the two-century spec — goods,
+     * coal, textiles, glass, electronics — of which **two named a cargo that
+     * exists**. The lookup skips an unknown id by design, so nobody noticed: a
+     * town's shopping list was beer and fuel, and the four hundred kilos a
+     * thousand villagers were getting through was hidden behind twelve keys that
+     * resolved to nothing.
+     *
+     * Now it is three, and which three matters more than how many.
+     *
+     * The first pass had six — produce, dairy, meat, beer, parcels, fuel — and it
+     * was **counting the same demand twice.** A village shop takes produce and
+     * parcels and sells them over its counter; a filling station takes fuel. Those
+     * buildings *are* the village being supplied, so a town wanting the same three
+     * directly let the player serve one appetite down two routes, and it put the
+     * shop into a coin-toss with the village behind it for every load. Measured:
+     * the shop stopped being offered as a destination on either test seed.
+     *
+     * What is left is the finished goods nothing in the district retails. Dairy,
+     * meat and beer go to a kitchen, a butcher and a pub, none of which is a
+     * building here — so a town is a genuinely separate customer rather than a
+     * competitor to its own shop.
+     *
+     * It also puts feeding a village where it belongs on the ladder. All three
+     * come out of a creamery, an abattoir or a brewery, which are mid-game
+     * buildings; the opening is still milk to the creamery, and the district's
+     * population only becomes yours to move much later.
+     *
+     * The sum need not reach `ECONOMY_SCALE` — that constant is a normaliser, and
+     * `served` is a *ratio* of what a town wanted to what it got, so a lighter
+     * basket changes how much freight the growth is worth without changing how
+     * hard the growth is to earn.
+     */
     this.townWant = {
-      goods: 6, food: 8, coal: 5, textiles: 2, planks: 2, cement: 2,
-      paper: 1, glass: 1, fuel: 2, electronics: 1, luxury: 1, retail: 3,
-      /*
-       * Beer, which a village wants rather more of than it wants glass.
-       *
-       * Worth saying that most of the keys above no longer name anything: this
-       * basket is inherited from the two-century spec and of its twelve entries
-       * only `fuel` still matches a cargo in the trimmed content, so the lookup
-       * quietly skips the rest. That is not a bug — an unknown id is meant to be
-       * skipped, and the district's economy is deliberately business-to-business
-       * with the village shop as its retail end. But it does mean a town's
-       * shopping list is currently one line long, and beer is the second.
-       */
+      dairy: 5,
+      meat: 4,
       beer: 4,
-      // Visitors, which a town wants far more of in August than in February.
-      // Seasonally scaled where the basket is consumed rather than here, so
-      // the number in this table stays a plain annual average.
-      tourists: 4,
     };
-    this.townSend = { passengers: 9, mail: 2 };
     this.townDemandPerThousand = new Float64Array(content.cargo.length);
     this.townProducePerThousand = new Float64Array(content.cargo.length);
-    this.touristCargo = content.cargoIndex.get('tourists') ?? -1;
-    this.passengerCargo = content.cargoIndex.get('passengers') ?? -1;
     this.rebuildTownBasket(1);
 
     this.routeCosts = { speedLimit: this.waySpeed, valueOfTime: content.balance.valueOfTime };
@@ -546,16 +564,19 @@ export class World {
       }
       this.townDemandPerThousand[i] = want / ECONOMY_SCALE;
     }
-    // And what a town sends out. Passengers are wanted by other towns as well
-    // as produced, so they appear in both tables — which is what makes a
-    // commuter service a round trip that pays in both directions rather than a
-    // full run out and an empty run back.
-    for (const [id, v] of Object.entries(this.townSend)) {
-      const i = this.content.cargoIndex.get(id);
-      if (i === undefined || this.content.cargo[i].fromEra > era) continue;
-      this.townProducePerThousand[i] = v / ECONOMY_SCALE;
-      this.townDemandPerThousand[i] = Math.max(this.townDemandPerThousand[i], (v * 0.8) / ECONOMY_SCALE);
-    }
+    /*
+     * A town used to send passengers and post out as well, which is the half of
+     * this that has gone. `townSend = { passengers: 9, mail: 2 }` named two
+     * cargoes that have never existed in the trimmed content, so
+     * `townProducePerThousand` was all zeros for the whole game: the produce loop
+     * in `stepTowns` was a no-op, `takeFromTown` always returned nothing, and a
+     * town could never be loaded *from*.
+     *
+     * Deleted rather than left hopeful. `cut.md` puts passengers as a business
+     * first in the queue to return, and when it does it wants a real cargo, a
+     * vehicle that carries people and a reason for two towns to be connected —
+     * not two keys and a comment.
+     */
   }
 
 
@@ -890,7 +911,7 @@ export class World {
         const have = this.sites.stockOf(s, cargo);
         if (have <= 0) continue;
 
-        const buyer = this.buyerFor(cargo, s);
+        const buyer = this.siteBuyerFor(cargo, s);
         if (buyer === NONE) continue;
         /*
          * How much they take, which is the smallest of three things: what you
@@ -2107,75 +2128,36 @@ export class World {
   }
 
 
-  /**
-   * Choose an origin that has stock piling up and a destination that wants it.
-   * Contracts generated at random over the cargo table produce a board full of
-   * things nobody can do, which reads as the game being broken rather than as
-   * the player being bad at it.
-   */
-  private pickContractSeed(): {
-    cargo: number; fromSite: number; fromIsTown: boolean;
-    toSite: number; toIsTown: boolean; distanceTiles: number; basePrice: number;
-  } | null {
-    const cargoCount = this.content.cargo.length;
-    for (let attempt = 0; attempt < 60; attempt++) {
-      const from = this.rng.int(this.sites.count);
-      if (this.sites.state[from] === SiteState.Dead) continue;
-      const outs = this.recipes.outputs[this.sites.def[from]];
-      if (outs.length === 0) continue;
-      const cargo = outs[this.rng.int(outs.length >> 1) * 2];
-      if (this.recipes.cargoFromEra[cargo] > this.era) continue;
-
-      // Destinations: a site that consumes it, or a town that wants it.
-      const wantsTown = this.townDemandPerThousand[cargo] > 0 && this.rng.chance(1, 2);
-      if (wantsTown && this.towns.count > 0) {
-        const to = this.rng.int(this.towns.count);
-        const d = Math.hypot(this.towns.x[to] - this.sites.x[from], this.towns.y[to] - this.sites.y[from]);
-        if (!this.plausibleHaul(d)) continue;
-        return {
-          cargo, fromSite: from, fromIsTown: false, toSite: to, toIsTown: true,
-          distanceTiles: Math.round(d), basePrice: this.cargoPrice[cargo],
-        };
-      }
-      const candidates: number[] = [];
-      for (let s = 0; s < this.sites.count; s++) {
-        if (s === from || this.sites.state[s] === SiteState.Dead) continue;
-        const ins = this.recipes.inputs[this.sites.def[s]];
-        for (let i = 0; i < ins.length; i += 2) {
-          if (ins[i] === cargo) {
-            candidates.push(s);
-            break;
-          }
-        }
-      }
-      if (candidates.length === 0) continue;
-      const to = candidates[this.rng.int(candidates.length)];
-      const d = Math.hypot(this.sites.x[to] - this.sites.x[from], this.sites.y[to] - this.sites.y[from]);
-      if (!this.plausibleHaul(d)) continue;
-      return {
-        cargo, fromSite: from, fromIsTown: false, toSite: to, toIsTown: false,
-        distanceTiles: Math.round(d), basePrice: this.cargoPrice[cargo],
-      };
-    }
-    return null;
-  }
-
-  /**
-   * Is this a haul the current era's vehicles could actually run?
+  /*
+   * `pickContractSeed` stood here and had no callers.
    *
-   * A board full of two-hundred-tile contracts in 1861 reads as the game being
-   * broken rather than as the player being bad at it, because a horse dray
-   * physically cannot make the deadline. The ceiling rises with the era, which
-   * is also how the map opens up as the roster improves.
+   * It was the only generator in the repo that could aim a contract at a town —
+   * it even flipped a coin between a works and a village, which is the rule
+   * `buyerFor` uses now — and nothing ever called it. The live generator is
+   * `offerContracts`, which walks each site's *surpluses*, so the two are
+   * different shapes rather than two versions of one thing: reviving the seed
+   * would have meant replacing every offer in the game to gain a feature that
+   * fits in the generator already there. So the town half moved into `buyerFor`
+   * and the seed is gone.
    */
-  private plausibleHaul(tiles: number): boolean {
-    if (tiles < 6) return false;
-    const ceiling = 34 + this.era * 26;
-    if (tiles <= ceiling) return true;
-    // Beyond the ceiling, offered occasionally — a stretch contract is a fine
-    // thing to have on the board, just not the whole board.
-    return this.rng.chance(1, 4) && tiles < ceiling * 2.2;
-  }
+
+  /*
+   * And `plausibleHaul` went with it, which leaves a rule worth writing down.
+   *
+   * It capped how far a generated contract could reach — *"a board full of
+   * two-hundred-tile contracts reads as the game being broken rather than as the
+   * player being bad at it, because a horse dray physically cannot make the
+   * deadline"* — with a ceiling that rose with the era, which was also how the map
+   * opened up as the roster improved. Good rule; it was only ever applied by the
+   * generator nobody called.
+   *
+   * `offerContracts` has no upper bound at all: it rejects anything under three
+   * tiles and offers the rest. That was survivable while every buyer was the works
+   * with the emptiest shed, and it is worth a second look now, because the far end
+   * can be a village. If a board full of cross-district hauls turns up, this is
+   * the missing half.
+   */
+
 
 
 
@@ -4404,6 +4386,40 @@ export class World {
     return answer;
   }
 
+  /**
+   * Where a contract's far end is, and what it is called.
+   *
+   * Three accessors rather than eight copies of `sites.def[b.to[id]]`, which is
+   * what the interface had and what made a town destination impossible to add
+   * safely: the panel, the driver row, the place bubble and the route preview all
+   * looked the index up in the site table themselves, so a town index would have
+   * named whichever business happened to share its number. The branch lives here
+   * once and every caller goes through it.
+   */
+  contractToTile(id: number): number {
+    const b = this.contractBoard;
+    if (id < 0 || id >= b.count || b.to[id] === NONE) return NONE;
+    return b.toIsTown[id] === 1
+      ? this.townAccessTile[b.to[id]]
+      : this.siteAccessTile[b.to[id]];
+  }
+
+  contractToName(id: number): string {
+    const b = this.contractBoard;
+    if (id < 0 || id >= b.count || b.to[id] === NONE) return '';
+    if (b.toIsTown[id] === 1) return this.towns.names[b.to[id]] ?? 'the village';
+    return this.content.industries[this.sites.def[b.to[id]]]?.name ?? '';
+  }
+
+  contractToAt(id: number): { x: number; y: number } {
+    const b = this.contractBoard;
+    if (id < 0 || id >= b.count || b.to[id] === NONE) return { x: 0, y: 0 };
+    const i = b.to[id];
+    return b.toIsTown[id] === 1
+      ? { x: this.towns.x[i], y: this.towns.y[i] }
+      : { x: this.sites.x[i], y: this.sites.y[i] };
+  }
+
   private readonly perHourCache = new Map<number, number>();
 
   private computePerHour(contract: number, vehicle: number): number {
@@ -4414,7 +4430,7 @@ export class World {
     const to = b.to[contract];
     if (from < 0 || to < 0) return 0;
 
-    const there = this.roadRoute(this.siteAccessTile[from], this.siteAccessTile[to]);
+    const there = this.roadRoute(this.siteAccessTile[from], this.contractToTile(contract));
     if (there.length < 2) return 0;
     // Tiles per tick, from the way classes actually on the route: a lane and a
     // trunk road are not the same journey, and the whole point of the widening
@@ -5527,6 +5543,9 @@ export class World {
     const b = this.contractBoard;
     for (let i = 0; i < b.count; i++) {
       if (b.state[i] === ContractState.Closed) continue;
+      // A town index and a site index are both small integers, so without this
+      // buying site 3 would absorb every contract bound for town 3.
+      if (b.toIsTown[i] === 1) continue;
       if (b.to[i] !== site) continue;
       const svc = b.service[i];
       // A running job keeps running, as a standing supply run of your own.
@@ -5535,7 +5554,42 @@ export class World {
     }
   }
 
-  private buyerFor(cargo: number, notSite: number): number {
+  /**
+   * Somewhere that wants a load of this — a works that consumes it, or a village
+   * that eats it.
+   *
+   * The village half is new, and it is the half that makes the growth model mean
+   * anything. `stepTowns` has always grown a town that is fed and shrunk one that
+   * is not, and `deliverToTown` has always accepted a load; there was simply no
+   * route from the interface to either, so every town in the district sat for ever
+   * at whatever its own fields could support. A player could not affect the
+   * population of anywhere, which made the one number the district grows by a
+   * decoration.
+   *
+   * When both kinds of buyer exist the choice is a coin, which is what the
+   * abandoned `pickContractSeed` did before it and is the right shape: a village
+   * wanting its beer is a real job competing with the brewery's other customers,
+   * not a lesser one to be offered only when nobody else is interested.
+   */
+  private buyerFor(cargo: number, notSite: number): Buyer {
+    const town = this.townBuyerFor(cargo, notSite);
+    const site = this.siteBuyerFor(cargo, notSite);
+    if (town !== NONE && (site === NONE || this.rng.chance(1, 2))) {
+      return { place: town, isTown: true };
+    }
+    return { place: site, isTown: false };
+  }
+
+  /**
+   * A works that consumes this, chosen by the emptiest shed.
+   *
+   * Split out of `buyerFor` because `settleStandingOrders` needs *this* one and
+   * cannot use the other: the standing order reads the buyer's recipe to work out
+   * what it gets through in a week, and a village has no recipe. A town collecting
+   * its own beer from your brewery at the farm gate would also be a different
+   * mechanic from the one that pays for it.
+   */
+  private siteBuyerFor(cargo: number, notSite: number): number {
     let best = NONE;
     let room = 0;
     const cargoCount = this.content.cargo.length;
@@ -5586,6 +5640,38 @@ export class World {
   }
 
   /**
+   * The nearest village that wants this and has somewhere to put it.
+   *
+   * Nearest rather than emptiest, which is the opposite of how the works branch
+   * chooses, and deliberately: a works is a customer that will pay for a haul
+   * from anywhere, and a village shop's shelves are stocked from up the lane. The
+   * emptiest-shed rule applied to towns would offer a brewery on one coast the
+   * job of supplying a village on the other, which is a plausible number and an
+   * implausible job.
+   *
+   * `roomFor` is the same acceptance test the delivery itself goes through, so an
+   * offer cannot be made against a town that would refuse the load.
+   */
+  private townBuyerFor(cargo: number, notSite: number): number {
+    if (this.townDemandPerThousand[cargo] <= 0) return NONE;
+    let best = NONE;
+    let bestD = Infinity;
+    const fromX = notSite === NONE ? 0 : this.sites.x[notSite];
+    const fromY = notSite === NONE ? 0 : this.sites.y[notSite];
+    for (let t = 0; t < this.towns.count; t++) {
+      if (this.roomFor(true, t, cargo) <= 0) continue;
+      const tile = this.townAccessTile[t];
+      if (tile === NONE || !this.influence.usable(tile)) continue;
+      const d = Math.hypot(this.towns.x[t] - fromX, this.towns.y[t] - fromY);
+      if (d < bestD) {
+        bestD = d;
+        best = t;
+      }
+    }
+    return best;
+  }
+
+  /**
    * Put work on the board now.
    *
    * Public because the game must not open with an empty board: the first thing
@@ -5622,6 +5708,9 @@ export class World {
       siteTile: (s) => this.siteAccessTile[s],
       siteX: (s) => this.sites.x[s],
       siteY: (s) => this.sites.y[s],
+      townTile: (t) => this.townAccessTile[t],
+      townX: (t) => this.towns.x[t],
+      townY: (t) => this.towns.y[t],
       usable: (tile) => tile !== NONE && this.influence.usable(tile),
       surpluses: (s) => this.surplusesAt(s),
       buyerFor: (cargo, not) => this.buyerFor(cargo, not),
@@ -5776,6 +5865,24 @@ export class World {
     const b = this.siteAccessTile[toSite];
     if (a === NONE || b === NONE) return [];
     return this.roadRoute(a, b);
+  }
+
+  /**
+   * The loaded run a contract would have you drive.
+   *
+   * Its own function rather than `previewRoute(from, to)` because the far end may
+   * be a town, and a town index handed to `siteAccessTile` names whichever works
+   * happens to share its number — a route drawn confidently to the wrong end of
+   * the district. Every other caller of `previewRoute` is arranging a run between
+   * two businesses of yours and can keep it.
+   */
+  previewContract(id: number): number[] {
+    const b = this.contractBoard;
+    if (id < 0 || id >= b.count || b.from[id] === NONE) return [];
+    const a = this.siteAccessTile[b.from[id]];
+    const z = this.contractToTile(id);
+    if (a === NONE || z === NONE) return [];
+    return this.roadRoute(a, z);
   }
 
   /**
@@ -5951,7 +6058,15 @@ export class World {
     );
     if (svc === NONE) return false;
     this.services.addStop(svc, from, 0, StopAction.LoadFull, b.cargo[id]);
-    this.services.addStop(svc, to, 0, StopAction.Unload, b.cargo[id]);
+    /*
+     * Kind 1 when the far end is a town, which is the whole of what was missing.
+     *
+     * `stepStops` has branched on this since the beginning — `deliverToTown` at
+     * one side of the `if`, `sites.addStock` at the other — and every path the
+     * interface could reach passed 0. The one caller in the repo that passed 1
+     * was a screenshot script.
+     */
+    this.services.addStop(svc, to, b.toIsTown[id], StopAction.Unload, b.cargo[id]);
     this.services.active[svc] = 1;
     b.service[id] = svc;
     b.state[id] = ContractState.Idle;

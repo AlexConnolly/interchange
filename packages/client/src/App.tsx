@@ -784,6 +784,15 @@ export function App(): JSX.Element {
         live.src,
       );
     }, [live]),
+    previewContract: useCallback((contract: number): void => {
+      if (!live) return;
+      live.renderer.showRoute(
+        contract < 0 ? [] : [{
+          tiles: live.world.previewContract(contract), colour: RUN.loaded,
+        }],
+        live.src,
+      );
+    }, [live]),
     previewDriver: useCallback((contract: number, vehicle: number): void => {
       if (!live) return;
       const { world, renderer, src } = live;
@@ -794,7 +803,7 @@ export function App(): JSX.Element {
       // two yards is choosing between two amounts of unpaid driving.
       renderer.showRoute([
         { tiles: world.routeFromYard(yard, b.from[contract]), colour: RUN.empty },
-        { tiles: world.previewRoute(b.from[contract], b.to[contract]), colour: RUN.loaded },
+        { tiles: world.previewContract(contract), colour: RUN.loaded },
       ], src);
     }, [live]),
     goTo: useCallback((site: number): void => {
