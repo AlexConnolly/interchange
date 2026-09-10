@@ -104,8 +104,11 @@ describe('what building costs', () => {
   it('comes out level with buying one, once the field is paid for', () => {
     /*
      * The rule the whole price exists to satisfy. Checked against every business
-     * that exists in the district, at the spot the existing one stands on, so the
-     * density multiplier is identical on both sides and cannot flatter either.
+     * that exists in the district, at the spot the existing one stands on.
+     *
+     * It used to be satisfied by two matching curves — build and buy both doubled
+     * at a town gate — and it is now satisfied by two flat figures, which is the
+     * same rule with the survey taken out of it. `foundPrice` says why.
      */
     const w = landed();
     const sale = w.landForSale();
@@ -113,7 +116,7 @@ describe('what building costs', () => {
     let checked = 0;
     for (let s = 0; s < w.sites.count; s++) {
       const buy = w.priceOf(s);
-      const build = w.foundPriceAt(w.sites.def[s], w.sites.tile[s]);
+      const build = w.foundPrice(w.sites.def[s]);
       const ratio = (build + field) / buy;
       expect(ratio, w.content.industries[w.sites.def[s]].name)
         .toBeGreaterThan(0.9);
@@ -125,23 +128,38 @@ describe('what building costs', () => {
   });
 
   it('never comes out cheaper than buying, so building is not the loophole', () => {
-    // Building alone is a shade under the purchase price — the ground is the
-    // difference — and the field makes up the rest. Both halves matter, so both
-    // are stated: the building is cheaper, the building plus the ground is not.
+    /*
+     * And it is level or above rather than below, which is the direction that
+     * matters: "the big value in building is having it exactly where you want it",
+     * so a player should pay for that rather than save by it. The field is then on
+     * top, which is where the whole of the position premium now lives.
+     *
+     * Level, not above, against a fully fed works — the flat build price is exactly
+     * what the market asks for a going concern nobody is starving. Every real
+     * comparison a player makes is against something less than perfectly supplied,
+     * and the field is the rest of the answer.
+     */
     const w = landed();
     const sale = w.landForSale();
     const field = sale.map((s) => s.price).sort((a, b) => a - b)[sale.length >> 1];
     for (let s = 0; s < w.sites.count; s++) {
       const buy = w.priceOf(s);
-      expect(w.foundPriceAt(w.sites.def[s], w.sites.tile[s])).toBeLessThan(buy);
-      expect(w.foundPriceAt(w.sites.def[s], w.sites.tile[s]) + field)
-        .toBeGreaterThan(buy);
+      expect(w.foundPrice(w.sites.def[s])).toBeGreaterThanOrEqual(buy);
+      expect(w.foundPrice(w.sites.def[s]) + field).toBeGreaterThan(buy);
     }
   });
 
-  it('costs more where it is built up', () => {
-    // The standard multiplier, and the same shape land and businesses already
-    // use: what you pay for position, you pay at the town gate.
+  it('costs the same where it is built up as it does up a lane', () => {
+    /*
+     * The town premium is gone, and this is where it used to be pinned.
+     *
+     * It was the land-value gradient applied to the building, and the objection to
+     * it is that the player has already paid that gradient once, on the field, at
+     * the land market. Charging it again for standing a shed on ground that is by
+     * then their own is a second bill for the same thing — and because the tray has
+     * to quote a price before a spot is chosen, it was also a quote the checkout
+     * did not honour. See `foundPrice`.
+     */
     const w = district();
     const shop = defOf(w, 'village-shop');
     let nearTown = -1;
@@ -159,8 +177,8 @@ describe('what building costs', () => {
     }
     expect(nearTown).toBeGreaterThanOrEqual(0);
     expect(farOut).toBeGreaterThanOrEqual(0);
-    expect(w.foundPriceAt(shop, nearTown))
-      .toBeGreaterThan(w.foundPriceAt(shop, farOut));
+    expect(w.canPlaceSite(w.player, shop, nearTown).price)
+      .toBe(w.canPlaceSite(w.player, shop, farOut).price);
   });
 });
 

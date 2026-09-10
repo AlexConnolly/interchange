@@ -2377,11 +2377,42 @@ export class Renderer {
    * at every zoom and this has to read at fourteen tiles across and at seventy.
    */
   showPlots(
-    regions: { tiles: readonly number[]; wash: RGB; edge: RGB }[],
+    regions: {
+      tiles: readonly number[];
+      /** Omitted only by an `edgeOnly` region, which has nothing to fill. */
+      wash?: RGB;
+      edge: RGB;
+      /**
+       * Draw the outline and skip the wash.
+       *
+       * For a region that is a *limit* rather than a selection. The edge of what
+       * you can reach covers a fifth of the district, and washing all of it would
+       * tint the whole playable map to say one thing about its border — where the
+       * border alone says it exactly. Everything else about the two layers holds:
+       * see the note above on why the outline is the union's and not each tile's.
+       */
+      edgeOnly?: boolean;
+      /**
+       * Raise the whole region clear of whatever is built on the tile.
+       *
+       * The wash normally lies *on the ground*, sampled at the four corners so it
+       * follows the hillside with no seams (see below). That is right for a field
+       * and wrong for a road: the road's own surface is the highest of its corners
+       * plus two hundredths, so a wash at the corner heights is buried under the
+       * tarmac on any slope at all — and a highlight over the road network came out
+       * as an outline with nothing inside it.
+       *
+       * A lifted region is therefore flat per tile, at the top of the tile plus this
+       * much: the same shape the route line uses to lie over a road, and the seams
+       * are not a problem on a one-tile-wide ribbon the way they were on a holding.
+       */
+      lift?: number;
+    }[],
     src: RenderSource,
   ): void {
     const key = regions
-      .map((r) => `${r.tiles.length}:${r.tiles[0] ?? -1}:${r.wash[0]}`)
+      .map((r) => `${r.tiles.length}:${r.tiles[0] ?? -1}:${(r.wash ?? r.edge)[0]}`
+        + `:${r.edgeOnly ? 1 : 0}:${r.lift ?? 0}`)
       .join('|');
     if (key === this.plotKey) return;
     this.plotKey = key;
@@ -2394,7 +2425,7 @@ export class Renderer {
 
     const sz = src.size;
     let quads = 0;
-    for (const r of regions) quads += r.tiles.length * 5;
+    for (const r of regions) quads += r.tiles.length * (r.edgeOnly === true ? 4 : 5);
     const m = new Mesh(quads * 6);
     const w = 0.16;
 
@@ -2418,13 +2449,41 @@ export class Renderer {
          * exactly, so the quads meet with no step and no gap, and the sheet follows
          * the ground rather than approximating it in squares.
          */
-        const h00 = groundHeightAt(src, x, z) + 0.03;
-        const h10 = groundHeightAt(src, x + 1, z) + 0.03;
-        const h11 = groundHeightAt(src, x + 1, z + 1) + 0.03;
-        const h01 = groundHeightAt(src, x, z + 1) + 0.03;
-        m.quad(
-          x, h00, z, x + 1, h10, z, x + 1, h11, z + 1, x, h01, z + 1, r.wash,
+        /*
+         * And on a levelled tile the ground is not the surface either.
+         *
+         * An embankment or a bridge deck stands at `level` and the road sits two
+         * hundredths above *that*, while the ground underneath can be a valley
+         * floor — so a wash sampled from the ground is buried, and a highlight over
+         * the road network showed a gap at every crossing. A gap in a marking that
+         * means "this is a road" reads as "this is not a road".
+         *
+         * Both exceptions are flat across the tile, and honestly so: a levelled tile
+         * is a deck rather than a hillside, and a lifted one is sitting on top of
+         * something rather than following anything.
+         */
+        const lv = src.level[t];
+        const flat = lv !== 0 || r.lift !== undefined;
+        /*
+         * Computed only when it is going to be used. `groundTop` is sixteen height
+         * lookups, and the reach outline is two and a half thousand tiles that do
+         * not want it — a plate computed for every tile of every region was the
+         * whole boundary paying for a case it never takes.
+         */
+        const plate = !flat ? 0
+          : (lv !== 0 ? HEIGHT_TO_WORLD(lv) : this.groundTop(src, x + 0.5, z + 0.5))
+            + 0.03 + (r.lift ?? 0);
+        const on = (px: number, pz: number): number => (
+          flat ? plate : groundHeightAt(src, px, pz) + 0.03
         );
+        if (r.edgeOnly !== true) {
+          m.quad(
+            x, on(x, z), z,
+            x + 1, on(x + 1, z), z,
+            x + 1, on(x + 1, z + 1), z + 1,
+            x, on(x, z + 1), z + 1, r.wash ?? r.edge,
+          );
+        }
 
         /*
          * One strip per edge that faces out of the set. A tile in the middle of a
@@ -2462,8 +2521,7 @@ export class Renderer {
         // The border sits a whisker above the wash, sampled the same way so the
         // two follow the same surface instead of crossing it.
         const lift = 0.02;
-        const at = (px: number, pz: number): number =>
-          groundHeightAt(src, px, pz) + 0.03 + lift;
+        const at = (px: number, pz: number): number => on(px, pz) + lift;
         if (out(0, -1)) {
           m.quad(
             x, at(x, z), z,

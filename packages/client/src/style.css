@@ -1603,6 +1603,43 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .tool-btn:hover { background: rgba(0, 0, 0, 0.05); color: #3a352c; }
 .tool-btn.on { background: #f4c95d; color: #4a3c14; }
 
+/*
+ * A building you cannot put up yet, with the wall named in the corner.
+ *
+ * Reported from play: "it was not obvious that I did not have enough influence."
+ * The row gave every building the same face, so the only way to find out was to
+ * pick one, aim it at forty tiles and read forty red squares. Dimming the ones
+ * that are behind something, and saying in one word what that something is, moves
+ * the answer to before the choice.
+ *
+ * Dimmed rather than disabled, and still clickable: the tool comes into hand and
+ * says why out loud. A button that does nothing when pressed is the thing that
+ * reads as broken, which is the bug this is fixing rather than a second copy of
+ * it. The selected state wins over the dimming, because "this is what is in my
+ * hand" has to survive being the awkward choice.
+ */
+.tool-btn { position: relative; }
+.tool-blocked { opacity: 0.52; }
+.tool-blocked.on { opacity: 1; }
+.tool-btn .tool-stop {
+  display: block;
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  padding: 0 4px 1px;
+  border-radius: 999px;
+  background: #cc5148;
+  color: #fff4f0;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+  /* Out of the line-clamp the names use: a one-word badge is not a label that
+     might run to two lines, and the clamp turns it into a flex item that shrinks. */
+  -webkit-line-clamp: none;
+  overflow: visible;
+}
+
 /* A hairline, because the ✕ is not a third tool and should not sit in the row
    as though it were one. */
 .tool-rule {

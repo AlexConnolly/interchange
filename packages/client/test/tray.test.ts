@@ -16,7 +16,8 @@
 import { describe, expect, it } from 'vitest';
 import { loadContent } from '@interchange/data';
 import {
-  TRAY_CATEGORIES, BUILDING_PAGES, trayPageFor, type TrayPage,
+  TRAY_CATEGORIES, BUILDING_PAGES, trayPageFor, blockerFor,
+  type TrayPage, type Reach,
 } from '../src/tray.ts';
 
 const C = loadContent();
@@ -154,6 +155,119 @@ describe('the category page', () => {
     for (const cat of TRAY_CATEGORIES) {
       expect(cat.label.length, `${cat.label} is long`).toBeLessThanOrEqual(14);
       expect(cat.hint.length, `${cat.page} has no hint`).toBeGreaterThan(10);
+    }
+  });
+});
+
+/**
+ * And why a thing in the row cannot be built yet.
+ *
+ * Reported from play: "it was not obvious that I did not have enough influence."
+ * The row gave every building the same face, so the only way to find out was to
+ * pick one, aim it at forty tiles and read forty red squares — and the squares say
+ * *where*, never *why not at all*.
+ *
+ * What is pinned here is that the reasons are complete and that they are the right
+ * reasons, because a badge is a promise about the district and a wrong one sends a
+ * player hunting for a spot that does not exist.
+ */
+describe('why you cannot build a thing yet', () => {
+  const rich: Reach = { cash: 100_000_000_00, ownedTiles: 400, bestApproval: 100 };
+  const shop = { approvalNeed: 0 };
+  const depot = { approvalNeed: 55 };
+
+  it('says nothing when nothing is in the way', () => {
+    expect(blockerFor(rich, shop, 1_000_00)).toBeNull();
+    expect(blockerFor(rich, depot, 1_000_00)).toBeNull();
+  });
+
+  it('names the ground first, because the rest cannot be judged without it', () => {
+    /*
+     * You cannot be refused for approval on land you do not hold, and you cannot
+     * spend money on a building you have nowhere to put. A player with no fields
+     * needs one sentence, not three.
+     */
+    const none = { ...rich, ownedTiles: 0, bestApproval: 0 };
+    const stop = blockerFor(none, depot, 1_000_00);
+    expect(stop?.badge).toBe('land');
+    expect(stop?.note).toContain('Buy a field');
+    expect(stop?.note).not.toContain('approval');
+  });
+
+  it('names the parish, with both figures, when that is the wall', () => {
+    /*
+     * Both figures rather than "the parish will not have it", because the gap is
+     * the actionable part: 30 against 55 is a village green and a shop away, and
+     * 54 against 55 is one delivery.
+     */
+    const stop = blockerFor({ ...rich, bestApproval: 31.8 }, depot, 1_000_00);
+    expect(stop?.badge).toBe('parish');
+    expect(stop?.note).toContain('55');
+    expect(stop?.note).toContain('31');
+  });
+
+  it('does not invoke the parish for a building nobody objects to', () => {
+    expect(blockerFor({ ...rich, bestApproval: 0 }, shop, 1_000_00)).toBeNull();
+  });
+
+  it('names the money in full, and says both sides of it', () => {
+    /*
+     * The complaint this half answers is the other one from the same session — told
+     * there was not enough money when there was. Printing what you have beside what
+     * it costs is what makes that checkable rather than arguable.
+     *
+     * In full pounds, not the row's rounded figure. The row says "£30k" because it
+     * is for choosing between buildings, and a refusal that read "it costs £30k and
+     * you have £30k" would be the same complaint with a sentence wrapped round it.
+     */
+    const stop = blockerFor({ ...rich, cash: 40_000_00 }, shop, 132_000_00);
+    expect(stop?.badge).toBe('cash');
+    expect(stop?.note).toContain('£132,000');
+    expect(stop?.note).toContain('£40,000');
+  });
+
+  it('does not round the two figures together', () => {
+    // The exact case: £30,400 to build and £30,000 in the bank. Both are "£30k".
+    const stop = blockerFor({ ...rich, cash: 30_000_00 }, shop, 30_400_00);
+    expect(stop?.badge).toBe('cash');
+    expect(stop?.note).toContain('£30,400');
+    expect(stop?.note).toContain('£30,000');
+  });
+
+  it('carries every reason at once, badging the most fundamental', () => {
+    // They are independent, and a player told only about the money will fix the
+    // money and walk straight into the parish.
+    const stop = blockerFor({ cash: 0, ownedTiles: 400, bestApproval: 30 }, depot, 132_000_00);
+    expect(stop?.badge).toBe('parish');
+    expect(stop?.note).toContain('55');
+    expect(stop?.note).toContain('£132,000');
+  });
+
+  it('keeps every badge short enough for the corner of the button', () => {
+    // A 62px button with a 34px render in it. A badge that wrapped would push the
+    // name out of the row, which is a worse bug than the one it is reporting.
+    const cases: Reach[] = [
+      { cash: 0, ownedTiles: 0, bestApproval: 0 },
+      { cash: 0, ownedTiles: 400, bestApproval: 0 },
+      { cash: 100_000_000_00, ownedTiles: 400, bestApproval: 0 },
+    ];
+    for (const reach of cases) {
+      const stop = blockerFor(reach, depot, 132_000_00);
+      expect(stop).not.toBeNull();
+      expect(stop?.badge.length, stop?.badge).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it('is honest about every building in the game at a standing start', () => {
+    /*
+     * The opening state: a yard, a lorry, no fields and the parish indifferent. Not
+     * one thing in the row should look available, and that is the first minute of
+     * the game the badge exists for.
+     */
+    const start: Reach = { cash: 40_000_00, ownedTiles: 0, bestApproval: 30 };
+    for (const ind of C.industries) {
+      const stop = blockerFor(start, ind, 100_000_00);
+      expect(stop?.badge, ind.id).toBe('land');
     }
   });
 });

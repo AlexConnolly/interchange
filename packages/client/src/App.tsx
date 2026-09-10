@@ -45,7 +45,8 @@ import {
   DIORAMA_SIZE, DIORAMA_TRIES, DIORAMA_DAY, dioramaAcross, goodEnough, seedFor,
 } from './diorama.ts';
 import {
-  TRAY_CATEGORIES, BUILDING_PAGES, trayPageFor, type TrayPage,
+  TRAY_CATEGORIES, BUILDING_PAGES, trayPageFor, blockerFor,
+  type TrayPage, type Reach,
 } from './tray.ts';
 import { Market } from './Market.tsx';
 import { Land } from './Land.tsx';
@@ -60,7 +61,7 @@ import {
 } from './intro.ts';
 import { Advisor, type Letter } from './advisor.ts';
 import { Inbox, InboxButton, Toast } from './Inbox.tsx';
-import { PLOT, groundHeightAt, type RGB } from '@interchange/render';
+import { PLOT, groundHeightAt } from '@interchange/render';
 
 import { Status } from './Status.tsx';
 import { Driver } from './Driver.tsx';
@@ -137,6 +138,20 @@ const SCATTER_MAX = 7000;
  * to `tree_pine` and none to anything else.
  */
 const SCATTER_BATCH = 2600;
+
+/**
+ * How far above a road surface the green highlight sits.
+ *
+ * A road stands two hundredths above the highest of its ground corners and its
+ * lane lines another six thousandths above that, so anything meant to be seen on
+ * a road has to clear about three hundredths. Four is clear of it with room for
+ * the camber and is still flat against the district at every zoom the wheel
+ * allows — the marking has to look painted on rather than hovering over.
+ *
+ * The square under the cursor takes twice this, because the commonest thing a
+ * road tool is pointed at is a road.
+ */
+const ROAD_LIFT = 0.04;
 
 /**
  * One audio engine for the page.
@@ -3472,15 +3487,73 @@ export function App(): JSX.Element {
          * a single tile under the cursor and threw the context away.
          */
         if (tray || held === 'lay' || held === 'lift' || held === 'place') {
-          const regions: { tiles: readonly number[]; wash: RGB; edge: RGB }[] = [];
+          const regions: Parameters<typeof renderer.showPlots>[0] = [];
           /*
            * Recomputed every frame, which sounds wasteful and is not — it is a walk
            * over the parcels you hold, and it means buying a field with the tray
            * open lights it up immediately.
            */
           const owned = world.landOwnedTiles();
-          if (owned.length > 0) {
+          const putting = held === 'place' ? placeDefRef.current : -1;
+          /*
+           * And, when there is a building in hand, the blue splits in two.
+           *
+           * "Make it obvious you have not got the approval to build something." The
+           * blue used to be the whole answer — this is your ground — which is the
+           * right answer to "have I anywhere to put anything" and no answer at all
+           * to "why does it say no everywhere I point". So the ground the parish
+           * would refuse this particular building on is washed in its own colour,
+           * and the objection has a shape you can see from where you are standing.
+           *
+           * Only for a building that is actually gated: splitting a field of blue
+           * into a field of blue for a village shop nobody objects to would be a
+           * mechanic announcing itself for no reason.
+           */
+          const gated = putting >= 0
+            && (world.content.industries[putting]?.approvalNeed ?? 0) > 0;
+          if (gated) {
+            const yes: number[] = [];
+            const no: number[] = [];
+            for (const t of owned) (world.approvalAllows(putting, t) ? yes : no).push(t);
+            if (yes.length > 0) {
+              regions.push({ tiles: yes, wash: PLOT.ownWash, edge: PLOT.ownEdge });
+            }
+            if (no.length > 0) {
+              regions.push({ tiles: no, wash: PLOT.gateWash, edge: PLOT.gateEdge });
+            }
+          } else if (owned.length > 0) {
             regions.push({ tiles: owned, wash: PLOT.ownWash, edge: PLOT.ownEdge });
+          }
+
+          /*
+           * Where the road already is, whenever a road tool is in hand.
+           *
+           * "He tried to build a road and it said already a road" — the tool being
+           * right and the picture being no help. A made-up lane at this camera is a
+           * stone ribbon on green ground, and a farm track is a browner ribbon on
+           * the same ground, so finding the network with the cursor is a hunt. The
+           * whole of it lights up instead.
+           *
+           * Under the square rather than over it: this is the standing state of the
+           * district, and what pressing the button would do outranks it.
+           */
+          if (held === 'lay' || held === 'lift') {
+            /*
+             * Rebuilt per frame like the blue is, and for the same reason: the walk
+             * is 16,384 cheap tests and the answer has to be right the frame after
+             * you lay something. `showPlots` keys off the tile count, so an
+             * identical list costs nothing beyond the walk.
+             */
+            const laid = world.roadTilesInReach();
+            if (laid.length > 0) {
+              regions.push({
+                tiles: laid,
+                wash: PLOT.roadWash,
+                edge: PLOT.roadEdge,
+                // Over the tarmac rather than under it. `lift` says why.
+                lift: ROAD_LIFT,
+              });
+            }
           }
 
           /*
@@ -3508,6 +3581,14 @@ export function App(): JSX.Element {
               tiles,
               wash: ok ? PLOT.yesWash : PLOT.noWash,
               edge: ok ? PLOT.yesEdge : PLOT.noEdge,
+              /*
+               * Higher again than the green, because the commonest thing a road
+               * tool is pointed at is a road — that is the whole reason the green
+               * exists — and the answer to the press has to be on top of it. A red
+               * square hidden under the highlight would be the "already a road"
+               * refusal arriving with no picture, which is where this started.
+               */
+              lift: ROAD_LIFT * 2,
             });
           }
 
@@ -3536,17 +3617,17 @@ export function App(): JSX.Element {
             const gate = world.approvalForBuild(placeDefRef.current, hover);
             const impact = world.content.industries[placeDefRef.current]?.approvalImpact ?? 0;
             /*
-             * What it costs here, and how much of that is the location.
+             * What it costs, which is now the same figure the tray quoted and the
+             * same figure everywhere on the map.
              *
-             * The premium in brackets rather than a second total, because the
-             * question a player is asking while moving the cursor is not "what is
-             * the price" — the tray already told them roughly — it is "what am I
-             * paying for *this spot*". A bare figure that silently doubles as you
-             * approach a town answers neither.
+             * This used to carry the location premium in brackets — "£189,560
+             * (+£59,540)" — to make a price that doubled as you approached a town
+             * legible while you moved the cursor. The premium is gone (see
+             * `foundPrice`), so there is nothing to break out, and printing the
+             * total anyway is worth keeping: it is the confirmation that pointing
+             * somewhere expensive-looking has not changed it.
              */
-            const premium = world.foundPremiumAt(placeDefRef.current, hover);
-            const cost = money(verdict.price)
-              + (premium > 0 ? ` (+${money(premium)})` : '');
+            const cost = money(verdict.price);
             if (!ok) {
               /*
                * Why not, in the simulation's own words.
@@ -3905,6 +3986,30 @@ export function App(): JSX.Element {
      */
   }, [boot]);
 
+  /*
+   * What you could build with, for the tray's badges.
+   *
+   * One walk over the ground you hold, shared by every button on the open page,
+   * rather than a `canPlaceSite` sweep per building — which would be sixteen
+   * scans of the district on every render and would still only answer about the
+   * tile it happened to be looking at. See `blockerFor` for why a coarse answer
+   * is the right one here.
+   *
+   * Computed only while the tray has buildings on it. `bump` re-renders on every
+   * purchase, so it is as fresh as the money in the corner.
+   */
+  const blockers = ((): Reach | null => {
+    if (!live || !BUILDING_PAGES.includes(buildAt as TrayPage)) return null;
+    const w = live.world;
+    const held = w.landOwnedTiles();
+    let best = 0;
+    for (const t of held) {
+      const a = w.approvalAt(t % w.config.size, (t / w.config.size) | 0);
+      if (a > best) best = a;
+    }
+    return { cash: w.companies.cash[w.player], ownedTiles: held.length, bestApproval: best };
+  })();
+
   return (
     <div
       className={`app${panelLeaving ? ' panel-leaving' : ''}`
@@ -4171,22 +4276,37 @@ export function App(): JSX.Element {
                * which works right up until a third page arrives or a kind is
                * renamed, and then a building is on neither.
                */
-              live.world.content.industries.map((def, i) => (
-                trayPageFor(def.kind, def.deposit) !== buildAt ? null : (
+              live.world.content.industries.map((def, i) => {
+                if (trayPageFor(def.kind, def.deposit) !== buildAt) return null;
+                const stop = blockers === null
+                  ? null
+                  : blockerFor(blockers, def, live.world.foundPrice(i));
+                return (
                   <button
                     key={def.id}
-                    className={`tool-btn ${tool === 'place' && placeDef === i ? 'on' : ''}`}
+                    className={`tool-btn ${tool === 'place' && placeDef === i ? 'on' : ''}`
+                      + (stop === null ? '' : ' tool-blocked')}
                     onClick={() => {
                       setPlaceDef(i);
                       setTool('place');
-                      setNote('');
+                      /*
+                       * And say the reason out loud, rather than letting the player
+                       * discover it by pointing at forty tiles.
+                       *
+                       * The tool still comes into hand when it is blocked — a button
+                       * that does nothing is the thing that reads as broken — but the
+                       * refusal it is going to give is stated at the moment of the
+                       * press, where a player is looking.
+                       */
+                      setNote(stop === null ? '' : stop.note);
                     }}
                     title={`${def.name} - ${def.footprint} by ${def.footprint} tiles`
                       + (def.approvalNeed > 0
                         ? `, and the parish wants ${def.approvalNeed} approval` : '')
                       + (def.approvalImpact > 0
                         ? `, and is worth ${def.approvalImpact} to the parish round it`
-                        : '')}
+                        : '')
+                      + (stop === null ? '' : `. ${stop.note}`)}
                   >
                     {/*
                       * The building, rendered, rather than a glyph of its category.
@@ -4198,28 +4318,36 @@ export function App(): JSX.Element {
                     <img className="tool-thumb" src={placeThumb(def.id)} alt="" />
                     <span>{def.name}</span>
                     {/*
-                      * What it costs, from.
+                      * What it costs — and it is the price, not a "from".
                       *
-                      * Short money — "£130k" rather than "£130,020" — because this
-                      * is a figure for *choosing between* buildings and the exact
-                      * pounds are neither knowable yet nor useful: the price depends
-                      * on where you put it, and the same creamery is twice the money
-                      * at a town gate as it is up a lane. Measured on seed 1985, that
-                      * spread is exactly 100% for every building in the game.
+                      * It used to quote the cheapest the building could be, because
+                      * the price depended on where you put it and the same creamery
+                      * was twice the money at a town gate as up a lane. A quote you
+                      * can only ever be charged more than is how a player ends up
+                      * being told they cannot afford something they can afford. The
+                      * price is flat now (see `foundPrice`), so this figure is the
+                      * figure and the checkout honours it.
                       *
-                      * So the tray quotes the country price, which is the cheapest it
-                      * can be, and the premium for standing it somewhere useful shows
-                      * up in brackets when you point at the ground. A quote a player
-                      * can only ever be charged *more* than would be a nasty
-                      * surprise; one they can only be charged less than is a
-                      * decision.
+                      * Still short money — "£130k" rather than "£130,020" — because
+                      * this is a row for *choosing between* buildings, and the exact
+                      * pounds are on the hint the moment you point at the ground.
                       */}
                     <em className="tool-price">
-                      {roughMoney(live.world.foundPriceBase(i))}
+                      {roughMoney(live.world.foundPrice(i))}
                     </em>
+                    {/*
+                      * And, when there is one, the thing standing in the way.
+                      *
+                      * "It was not obvious that I did not have enough influence" —
+                      * and it was not, because a building you cannot put up looked
+                      * exactly like one you could until you had chosen it, aimed it,
+                      * and been refused. A badge on the button is the earliest point
+                      * this can be said.
+                      */}
+                    {stop !== null && <span className="tool-stop">{stop.badge}</span>}
                   </button>
-                )
-              ))
+                );
+              })
             )}
           </div>
           <span className="tool-rule" />

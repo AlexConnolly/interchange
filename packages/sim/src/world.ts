@@ -3712,125 +3712,39 @@ export class World {
   }
 
   /**
-   * What it costs to build a business here, rather than buy one somewhere else.
+   * What it costs to build a business, which is one figure and the same figure
+   * everywhere.
    *
-   * The rule this has to satisfy is that "land plus building should always cost
-   * roughly the same" as buying the equivalent going concern - otherwise one of
-   * the two routes is simply the right answer and the other is decoration.
+   * It used to be a curve. The going-concern value of one *here* — doubling at a
+   * town gate, falling away over thirty tiles — minus the worth of the ground it
+   * stood on, because you had bought that ground yourself. The arithmetic was
+   * careful and the rule it satisfied was a good one: land plus building came out
+   * level with buying the equivalent works down the lane, so neither route was
+   * simply the right answer.
    *
-   * So the price is not a share of the business. It is the whole going-concern
-   * value of one *here*, minus the worth of the ground it stands on, because you
-   * bought that ground yourself and paid the land price for it. Build the building
-   * and buy the field and you have spent, near enough, what the works down the
-   * lane would have cost you.
+   * It was still wrong, for a reason that has nothing to do with balance. **You
+   * have already paid for the land.** A player who bought the field at the town
+   * gate paid the town-gate price for it, and then paid a second town-gate premium
+   * to stand a shed on ground that was by then their own. Told plainly, nobody
+   * thinks that is how building works — and the deduction meant to answer it
+   * answered it invisibly, halfway down a formula.
    *
-   * A flat share was the first attempt and it does not hold across the range: at
-   * 78% a dairy farm came out level with buying one and a creamery came out a
-   * fifth cheaper, because the field costs the same few thousand either way and a
-   * fifth of a creamery is a great deal more than a fifth of a farm. Taking the
-   * ground out instead scales correctly by construction.
+   * And it broke the one promise the interface has to keep. The tray quotes a
+   * price before you have chosen a spot, so it could only ever quote the cheapest
+   * the thing could be, and every real spot then charged more: point at a village
+   * and the figure silently doubles. Reported from play as "it said I did not have
+   * enough money when I did" — which is exactly what a quote the checkout does not
+   * honour feels like from the outside. The premium in brackets was an attempt to
+   * make the same formula legible rather than to stop it happening.
    *
-   * It lands *slightly* above buying rather than slightly below, and that is
-   * deliberate. You have to buy a whole field to put a village shop on one tile
-   * of it, so building tends to cost a little more - which is the right way for
-   * the error to fall. "The big value in building is having it exactly where you
-   * want it", and a player should be paying for that rather than saving by it.
-   *
-   * `going` is not in the product: what you build is new, and a new works is by
-   * definition a fed one. The density multiplier is the same shape `priceOf` and
-   * `landPriceOf` use, so building at the town gate costs what land at the town
-   * gate costs.
+   * One flat price fixes both. The tray's figure is the figure, the gradient lives
+   * in the land market where the player pays it once and can see it on the ground,
+   * and `foundYard` has priced yards this way all along.
    */
-  /**
-   * What one of these costs out in the country, away from every town.
-   *
-   * The figure the Build tray quotes before you have chosen a spot, and it is
-   * deliberately the *cheapest* it can be rather than an average: an estimate a
-   * player can be under-charged against is a nasty surprise, and one they can only
-   * be over-charged against is a decision they can make. So the tray says "from",
-   * and the premium for standing it somewhere useful shows up when they point at
-   * the ground.
-   *
-   * Written as `foundPriceAt` with the town distance sent to infinity rather than
-   * as its own arithmetic, because the two must not be able to disagree. The
-   * previous version of this idea in another game quoted a list price the checkout
-   * did not honour; there is one formula here and both callers go through it.
-   */
-  foundPriceBase(defIndex: number): number {
-    /*
-     * The cheapest point on the curve, which is *not* at infinity.
-     *
-     * The site premium runs out at 30 tiles from a town and the ground premium at
-     * 34 — two constants owned by two different systems, and nobody had noticed they
-     * disagree. Between those distances the site price has stopped falling while the
-     * ground being deducted is still worth a town premium, so the subtraction dips
-     * *below* the country price: measured, a dairy farm at 31 tiles out costs
-     * £29,491 where the same farm in the middle of nowhere costs £29,520.
-     *
-     * Twenty-eight pounds, and it would not matter at all except that this figure is
-     * a promise. A tray quoting "from £29,520" against a district containing a spot
-     * at £29,491 is quoting an average with a floor's face on. So the floor is the
-     * minimum of the two places it can be, rather than the value at one of them.
-     */
-    return Math.min(
-      this.foundPriceFrom(defIndex, 30),
-      this.foundPriceFrom(defIndex, Infinity),
-    );
-  }
-
-  /**
-   * The premium for putting it *here* rather than in the middle of nowhere.
-   *
-   * Always positive or zero, and shown in brackets while you hover. It is the whole
-   * of the land-value gradient made visible: the same creamery is half again as dear
-   * at the town gate as it is up a lane, and until now the only way to find that out
-   * was to move the cursor and watch a single total change.
-   */
-  foundPremiumAt(defIndex: number, tile: number): number {
-    return Math.max(0, this.foundPriceAt(defIndex, tile) - this.foundPriceBase(defIndex));
-  }
-
-  /**
-   * The price at a given distance from the nearest town, which is the shape both
-   * the quote and the actual charge are computed from.
-   *
-   * Split out of `foundPriceAt` so that `foundPriceBase` is the same function with
-   * one argument changed. See the note there for why that matters.
-   */
-  private foundPriceFrom(defIndex: number, nearest: number): number {
+  foundPrice(defIndex: number): number {
     const def = this.content.industries[defIndex];
     if (!def) return 0;
-    const full = def.foundCost * (1 + Math.max(0, 1 - nearest / 30)) * SITE_PRICE_SCALE;
-
-    // The ground under it, at the same rate the land market charges for a field
-    // in the same place. Not the whole field: only the part the works covers.
-    const n = this.footprintOf(defIndex);
-    const town = 1
-      + Math.max(0, 1 - nearest / LAND_TOWN_REACH) * (LAND_TOWN_PREMIUM - 1);
-    const ground = LAND_PER_TILE * n * n * town;
-
-    /*
-     * And a floor, because the subtraction must not be allowed to make anything
-     * nearly free. A one-tile shop at the town gate is the case that gets close:
-     * cheap to found, dear ground. Half is well clear of it and still leaves the
-     * ground deduction doing the work everywhere it matters.
-     */
-    return Math.round(Math.max(full * 0.5, full - ground));
-  }
-
-  foundPriceAt(defIndex: number, tile: number): number {
-    const size = this.config.size;
-    const x = tile % size;
-    const y = (tile / size) | 0;
-    let nearest = 1e9;
-    for (let t = 0; t < this.towns.count; t++) {
-      const dx = this.towns.x[t] - x;
-      const dy = this.towns.y[t] - y;
-      const d = Math.sqrt(dx * dx + dy * dy)
-        / Math.max(1, Math.sqrt(this.towns.population[t] / 400));
-      if (d < nearest) nearest = d;
-    }
-    return this.foundPriceFrom(defIndex, nearest);
+    return Math.round(def.foundCost * SITE_PRICE_SCALE);
   }
 
   /**
@@ -3956,7 +3870,7 @@ export class World {
     company: number, defIndex: number, tile: number,
   ): { ok: boolean; reason: string; price: number } {
     const def = this.content.industries[defIndex];
-    const price = this.foundPriceAt(defIndex, tile);
+    const price = this.foundPrice(defIndex);
     const no = (reason: string): { ok: boolean; reason: string; price: number } => (
       { ok: false, reason, price }
     );
@@ -4108,20 +4022,27 @@ export class World {
     return { ok: true, reason: '', site };
   }
 
+  /**
+   * What an existing business costs to buy.
+   *
+   * This carried a town premium too — doubling at the gate, gone by thirty tiles —
+   * and it had to, because `foundPrice` carried the same one. The pair was the
+   * whole of "land plus building should cost roughly what buying costs": break the
+   * symmetry and one of the two routes becomes simply the right answer.
+   *
+   * So flattening the build price flattens this one with it. Left alone, a creamery
+   * near Marchford would cost £257,000 to buy and £132,000 to build, and nobody
+   * would ever buy anything again within sight of a town.
+   *
+   * What is left is the going-concern factor, which is the lever worth keeping, and
+   * a story that is finally one story: **position is priced in the land market and
+   * nowhere else.** You pay the town-gate price for the field, once, on the ground,
+   * where you can see it — and a building costs what a building costs.
+   */
   priceOf(site: number): number {
     const def = this.content.industries[this.sites.def[site]];
-    let nearest = 1e9;
-    for (let t = 0; t < this.towns.count; t++) {
-      const dx = this.towns.x[t] - this.sites.x[site];
-      const dy = this.towns.y[t] - this.sites.y[site];
-      const d = Math.sqrt(dx * dx + dy * dy);
-      const weighted = d / Math.max(1, Math.sqrt(this.towns.population[t] / 400));
-      if (weighted < nearest) nearest = weighted;
-    }
-    // Doubles at the town gate, falls away to nothing by about thirty tiles.
-    const premium = 1 + Math.max(0, 1 - nearest / 30);
     /*
-     * And what it is currently worth as a going concern.
+     * What it is currently worth as a going concern.
      *
      * A works nobody supplies is not worth what a works with lorries queuing
      * outside is worth, and pricing them the same made the whole of ownership a
@@ -4138,7 +4059,7 @@ export class World {
      * before you make it.
      */
     const going = 0.5 + (this.sites.fed[site] / 100) * 0.5;
-    return Math.round(def.foundCost * premium * going * SITE_PRICE_SCALE);
+    return Math.round(def.foundCost * going * SITE_PRICE_SCALE);
   }
 
   /**
@@ -6456,6 +6377,56 @@ export class World {
   landOwnedTiles(): number[] {
     const out: number[] = [];
     for (const p of this.landOwned()) out.push(...this.land.tiles[p]);
+    return out;
+  }
+
+  /**
+   * Every tile inside your reach, for drawing the line round it.
+   *
+   * Influence is drawn as a soft fade into a pale mist, deliberately: "a hard line
+   * on the ground reads as a game rule and a soft one reads as distance". That is
+   * the right choice for the district you are looking at and the wrong one for the
+   * district you are shopping in — reported from play as not being able to tell
+   * that a field was out of reach rather than simply not for sale, because a field
+   * beyond your standing shows *nothing at all*, and an absence is the one answer a
+   * player cannot read.
+   *
+   * So the boundary is a line only while a tool is in hand, which is the moment the
+   * question changes from "what is over there" to "may I have it". `usable` is the
+   * same test `landVisible` and every offer go through, so the line is exactly
+   * where the refusals start rather than near it.
+   */
+  reachTiles(): number[] {
+    const out: number[] = [];
+    for (let t = 0; t < this.influence.value.length; t++) {
+      if (this.influence.usable(t)) out.push(t);
+    }
+    return out;
+  }
+
+  /**
+   * Every road tile you can reach, for lighting the network up.
+   *
+   * Reported from play: "he tried to build a road and it said already a road." The
+   * tool was right and the picture was no help — a made-up lane at this camera is a
+   * stone ribbon on green ground and a farm track is a browner ribbon on the same
+   * ground, so finding the network with the cursor is a hunt rather than a glance.
+   * Both road tools turn this on.
+   *
+   * Inside your reach only. Beyond it the district is scenery painted into the
+   * mist: you can lay nothing out there and lift nothing either, and a bright green
+   * ribbon through the fog would be advertising a road you may not touch.
+   *
+   * Read from the live road layer rather than from a cached copy, because the thing
+   * it is answering is "what is already here" and the moment that matters most is
+   * the moment after you have laid something.
+   */
+  roadTilesInReach(): number[] {
+    const cls = this.layers[Mode.Road].cls;
+    const out: number[] = [];
+    for (let t = 0; t < cls.length; t++) {
+      if (cls[t] !== NO_WAY && this.influence.usable(t)) out.push(t);
+    }
     return out;
   }
 

@@ -86,7 +86,24 @@ export function Land({
    * region per field would draw a hedgerow down the middle of your own land.
    */
   const ownedTiles = world.landOwnedTiles();
+  /*
+   * And a line round the far edge of what you can reach.
+   *
+   * The chips stop where your standing stops, and until now there was nothing to
+   * say so — a field just beyond the boundary is not marked as too far out, it
+   * simply has no price on it, exactly like the water and exactly like somebody
+   * else's farm. Reported from play as not realising influence was the thing in
+   * the way at all.
+   *
+   * An outline with no wash: this is a *limit*, and the reachable ground is most of
+   * what is on screen. Tinting all of it to say one thing about its border would
+   * put a colour over the district to describe its edge.
+   */
+  const inReach = world.reachTiles();
   const plots = [
+    ...(inReach.length > 0
+      ? [{ tiles: inReach, edge: PLOT.reachEdge, edgeOnly: true }]
+      : []),
     ...(ownedTiles.length > 0
       ? [{ tiles: ownedTiles, wash: PLOT.ownWash, edge: PLOT.ownEdge }]
       : []),
@@ -94,7 +111,7 @@ export function Land({
       ? [{ tiles: world.land.tiles[chosen], wash: PLOT.wash, edge: PLOT.edge }]
       : []),
   ];
-  const plotKey = `${ownedTiles.length}:${chosen}`;
+  const plotKey = `${inReach.length}:${ownedTiles.length}:${chosen}`;
   useEffect(() => {
     renderer.showPlots(plots, src);
     return () => renderer.showPlots([], src);

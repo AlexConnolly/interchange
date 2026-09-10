@@ -318,6 +318,47 @@ export const PLOT = {
    *  two states of the same thing rather than two unrelated markings. */
   ownWash: hex('#7fb6f0'),
   ownEdge: hex('#2e86f0'),
+  /**
+   * Where the road already is.
+   *
+   * Reported from play: "he tried to build a road and it said already a road."
+   * Which is the tool being right and the picture being unhelpful — a made-up lane
+   * at this camera is a stone-coloured ribbon over a green field, and finding it
+   * with the cursor is a hunt. So the whole network lights up the moment a road
+   * tool comes into hand.
+   *
+   * A green, because that was the ask and because it is the right one: this is the
+   * same class of marking as the selection wash — the ground, lit up — and not a
+   * signal. Deeper and bluer than `yesWash` so the square under the cursor still
+   * reads on top of it, which matters most in the one case the highlight exists
+   * for: pointing at a road you already have, and being refused in red.
+   */
+  roadWash: hex('#3fbf78'),
+  roadEdge: hex('#12e06a'),
+  /**
+   * Ground of yours the parish would not let you build this on.
+   *
+   * The other half of "make it obvious you have not the approval". The blue says
+   * where you *could* — it is the ground you hold — and until now that was the
+   * whole overlay, so a player holding a depot the parish will not have anywhere
+   * saw a field of blue and a red square wherever they pointed. This colours the
+   * refusal in, so the shape of the parish's objection is on the ground and the
+   * answer is legible without moving the cursor at all.
+   *
+   * Paler than `noWash`, because it is a standing condition rather than the answer
+   * to a click, and the answer to the click is drawn on top of it.
+   */
+  gateWash: hex('#d9a09c'),
+  gateEdge: hex('#c46a64'),
+  /**
+   * The far edge of what you can reach.
+   *
+   * Drawn as an outline and nothing else, so this is the only colour it needs. A
+   * warm off-white rather than a signal colour: the boundary is a fact about how
+   * far you have got and not a refusal, and it has to read over the pale mist just
+   * outside it as well as over the ground just inside.
+   */
+  reachEdge: hex('#fff0c4'),
 };
 
 export const SEMANTIC = {

@@ -26,6 +26,8 @@
  * not a model in the way a creamery is.
  */
 
+import { money } from './format.ts';
+
 /** Every page the tray can show. `cats` is the category page itself. */
 export type TrayPage =
   | 'cats' | 'roads' | 'farms' | 'ground' | 'works' | 'trade' | 'parish';
@@ -121,3 +123,84 @@ export function trayPageFor(kind: string, deposit = 0): TrayPage {
 /** The pages that hold buildings, for the tests and for the renderer's loop. */
 export const BUILDING_PAGES: readonly TrayPage[] =
   ['farms', 'ground', 'works', 'trade', 'parish'];
+
+/**
+ * What is standing between you and a building, before you have aimed it.
+ *
+ * ## Why this exists
+ *
+ * Reported from play: "it was not obvious that I did not have enough influence."
+ * It was not, and the reason is structural rather than a matter of wording. Every
+ * refusal in the game arrives *after* a click — you choose the depot, you move the
+ * cursor over your fields, and a red square tells you no, one tile at a time. A
+ * player who has not yet worked out that approval is local, or that land beyond
+ * their reach is simply not for sale, reads that as the tool being broken.
+ *
+ * So the three walls a building can be behind are named on the button itself, at
+ * the earliest moment they can be known: before a spot has been chosen at all.
+ *
+ * ## Why it is advisory
+ *
+ * `canPlaceSite` is the authority and it answers about *one tile*. This answers
+ * about the whole of what you hold, which is a different question and a coarser
+ * one: the parish reading is sampled per tile rather than at each footprint's
+ * centre, so a four-by-four depot standing on the edge of your holding may be
+ * refused where this says the parish would have it. That is the right way for the
+ * error to fall — this is here to stop a player hunting for a spot that does not
+ * exist, not to promise them one.
+ */
+export interface Reach {
+  /** What you have to spend, in pence. */
+  cash: number;
+  /** How much ground you hold at all, in tiles. */
+  ownedTiles: number;
+  /** The best the parish thinks of you anywhere you hold ground. */
+  bestApproval: number;
+}
+
+export interface Blocker {
+  /** One word, for the corner of the button. */
+  badge: string;
+  /** The whole of it, for the hint and the tooltip. */
+  note: string;
+}
+
+/**
+ * Every reason you cannot build this, or `null` when there is none.
+ *
+ * All of them rather than the first, because they are independent and a player
+ * told only about the money will fix the money and meet the parish. The badge
+ * takes the most fundamental — you cannot be refused for approval on ground you
+ * do not hold — and the note carries the rest.
+ */
+export function blockerFor(
+  reach: Reach,
+  def: { approvalNeed: number },
+  price: number,
+): Blocker | null {
+  const notes: string[] = [];
+  let badge = '';
+  if (reach.ownedTiles === 0) {
+    badge = 'land';
+    notes.push('You hold no ground yet. Buy a field, then build on it.');
+  } else if (def.approvalNeed > 0 && reach.bestApproval < def.approvalNeed) {
+    badge = 'parish';
+    notes.push(
+      `The parish wants ${def.approvalNeed} approval for this and thinks `
+      + `${Math.floor(reach.bestApproval)} of you at best on ground you hold.`,
+    );
+  }
+  if (reach.cash < price) {
+    if (badge === '') badge = 'cash';
+    /*
+     * Both figures in full, and `money` rather than the tray's own `roughMoney`.
+     *
+     * The row rounds to "£30k" because it is for choosing between buildings, and
+     * rounding here would produce the sentence "it costs £30k and you have £30k" —
+     * which is the complaint this is answering, restated as an argument the player
+     * cannot win. A refusal has to be checkable.
+     */
+    notes.push(`It costs ${money(price)} and you have ${money(reach.cash)}.`);
+  }
+  return badge === '' ? null : { badge, note: notes.join(' ') };
+}
