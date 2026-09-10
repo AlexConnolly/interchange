@@ -54,8 +54,15 @@
 import type { World } from './world.ts';
 import type { WorldConfig } from './terrain.ts';
 
-/** Bumped when the shape changes in a way an old save cannot survive. */
-export const STATE_VERSION = 1;
+/**
+ * Bumped when the shape changes in a way an old save cannot survive.
+ *
+ * 2: housing. A field carries `use`, `plots` and `made`, and a town carries the
+ * `capacity` that gates its growth. A version-1 save has none of them, so every
+ * field would load as farmland and every town as having room for nobody — which
+ * would read as a district that had stopped growing for no reason.
+ */
+export const STATE_VERSION = 2;
 
 /**
  * The objects whose fields get saved, by the name they are stored under.
@@ -96,7 +103,7 @@ const ROOTS = [
  */
 const SCALARS = [
   'tick', 'speed', 'player', 'focusX', 'focusY', 'dayOffset',
-  'approval', 'standing', 'landRevision', 'seasonRevision',
+  'approval', 'standing', 'landRevision', 'seasonRevision', 'housingRevision',
 ] as const;
 /*
  * `era` is deliberately not here. It is a getter over the year, and the year is a

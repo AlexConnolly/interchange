@@ -63,6 +63,86 @@ export const APPROVAL_CELL = 4;
 export const APPROVAL_REST = 30;
 
 /**
+ * What the parish wants of you before anybody will buy a house you have built.
+ *
+ * Forty-two: above the resting thirty by enough to be work, and well below the
+ * fifty-five a distribution yard or a freight terminal wants. Housing sits on the
+ * rung between being tolerated and being trusted, which is the point of it —
+ * every *other* way through the approval gate can be bought on the spot. Three
+ * village shops are +27, cost £62,400 and turn a profit, so a £336,000
+ * distribution yard is currently unlocked by buying more businesses. That is not
+ * a door.
+ *
+ * This one cannot be rushed. It reads the same `approvalAt` the building gate
+ * reads — one door, one key — but the thing it gates *pays you*, so it is a
+ * reward for a parish already doing well rather than a way into one that is not.
+ */
+export const HOUSING_APPROVAL = 42;
+
+/**
+ * What a house sells for, against the ground it stands on.
+ *
+ * Four times the land, so a plot of four tiles bought as grass and released as
+ * housing returns about sixteen tiles' worth. That difference *is* the
+ * development, and pricing it off the land rather than as a flat figure keeps the
+ * one gradient the game has: a house at the town gate is worth more than one up a
+ * lane because the ground under it is.
+ *
+ * It also keeps housing honest as an investment. A field near a town costs more to
+ * buy *and* returns more, so the decision is never "which field is cheapest" — it
+ * is whether the parish there will have you.
+ */
+export const HOUSE_MARGIN = 4;
+
+/**
+ * How many people one released plot houses.
+ *
+ * Forty, and the number is only surprising if you read a plot as one house. It is
+ * four tiles — a hundred and twenty metres square — and the art kit built for
+ * this is terraces and villas, so a plot is a *street*: fifteen-odd dwellings at
+ * the 2.7 people a household of the period.
+ *
+ * It has to be a street rather than a house for the mechanic to mean anything. A
+ * town of fourteen hundred has room for sixteen-eighty; twelve houses would add
+ * thirty-six people to that and the player would never see it move. Twelve
+ * streets add four hundred and eighty, which is the difference between a village
+ * and a small town and is visible in a season.
+ */
+export const PEOPLE_PER_PLOT = 40;
+
+/**
+ * What a crowded parish costs you, at its worst, and how far the feeling reaches.
+ *
+ * This is the ceiling the whole housing loop is built around. A district you serve
+ * well grows, and a district that grows runs out of room — so *your own success*
+ * is what turns the parish against you, and the fix is on the land market. Nothing
+ * anywhere says "build houses"; you read it off the approval panel when the depot
+ * you wanted stops being allowed.
+ *
+ * Eighteen at its worst, which is a creamery's worth of resentment and enough to
+ * shut a fifty-five gate on its own. Reached at half again over capacity, so a
+ * town merely full is barely bothered and a town badly overcrowded is a problem.
+ * Fourteen tiles is a creamery's radius: far enough to cover the town and the
+ * ground a player would want to build on beside it.
+ */
+export const CROWDING_MAX = 18;
+export const CROWDING_AT = 1.5;
+export const CROWDING_RADIUS = 14;
+
+/**
+ * And what a street of new houses is worth while there is still room for it.
+ *
+ * Capped at a village shop's +9, so a full field of twelve is welcome and not
+ * decisive. It is deliberately *not* a way to buy your way past the gate: the
+ * houses only go up once the parish already thinks well enough of you, and the
+ * people who move into them are what crowds the place. The gain arrives first and
+ * the cost follows, which is the shape of every real development.
+ */
+export const HOUSING_WELCOME_PER_PLOT = 1.5;
+export const HOUSING_WELCOME_MAX = 9;
+export const HOUSING_RADIUS = 12;
+
+/**
  * How fast regard falls back toward indifference — as a *share* of the distance,
  * not a fixed number of points a day.
  *
@@ -167,6 +247,15 @@ export interface ApprovalSource {
   radius: number;
   /** Which site it is, so the interface can say what it is looking at. */
   site: number;
+  /**
+   * What to call it, when it is not a building.
+   *
+   * A crowded parish and a street of new houses both shape local opinion and
+   * neither is a site, so the panel cannot name them by looking one up. Given
+   * here rather than inferred, because the alternative is a second naming
+   * function that has to stay in step with this list.
+   */
+  label?: string;
 }
 
 /**
@@ -313,7 +402,7 @@ export function reasonsAt(
     if (d > radius) continue;
     const points = s.impact * (1 - d / radius);
     if (Math.abs(points) < 0.05) continue;
-    out.push({ label: nameOf(s.site), points, site: s.site });
+    out.push({ label: s.label ?? nameOf(s.site), points, site: s.site });
   }
   out.sort((a, b) => a.points - b.points);
   return out;

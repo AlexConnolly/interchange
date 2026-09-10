@@ -19,7 +19,7 @@ import {
 } from './constants.ts';
 import {
   LandRegister, LAND_PER_TILE, LAND_TOWN_PREMIUM, LAND_ROAD_PREMIUM,
-  LAND_TOWN_REACH,
+  LAND_TOWN_REACH, LandUse, TILES_PER_PLOT, MAX_PLOTS_PER_FIELD,
   NO_OWNER,
 } from './land.ts';
 import { Cmd, CommandQueue, type Command } from './commands.ts';
@@ -45,7 +45,9 @@ import { AmenityField, stepAmenity, REMEDIATION_PRICE, REMEDIATION_FROM_ERA } fr
 import {
   ApprovalField, type ApprovalSource, type ApprovalReason, reasonsAt, COUNTED_AT,
   WIDEN_APPROVAL, APPROVAL_DECAY_PER_DAY, noticePerLoad, APPROVAL_REST,
-  PARISH_PER_DAY,
+  PARISH_PER_DAY, HOUSING_APPROVAL, HOUSE_MARGIN, PEOPLE_PER_PLOT,
+  CROWDING_MAX, CROWDING_AT, CROWDING_RADIUS,
+  HOUSING_WELCOME_PER_PLOT, HOUSING_WELCOME_MAX, HOUSING_RADIUS,
 } from './approval.ts';
 import {
   AssetTable, Graph, NONE, NO_WAY, WayLayer, hashNetwork, rebuildGraph,
@@ -59,6 +61,7 @@ import { Heap } from './heap.ts';
 import { Rng } from './rng.ts';
 import {
   IndustryKind, SiteState, SiteTable, TownTable, hashSites, stepSiteDecay, ageSites,
+  crowding,
   stepSites, stepTowns, type RecipeTables,
 } from './sites.ts';
 import { DEPOSIT_NAMES, TileFlag, generateTerrain, SEA_LEVEL, type Terrain, type WorldConfig } from './terrain.ts';
@@ -239,6 +242,8 @@ export class World {
    * rises by being useful, and drifts back if you stop. See planning.ts.
    */
   approval = APPROVAL_REST;
+  /** Bumped when a house goes up, so the client knows to lay one out. */
+  housingRevision = 0;
   /**
    * Money the player has just been paid, and where the lorry was standing.
    *
@@ -1454,6 +1459,12 @@ export class World {
 
     if (this.dayOfMonth === 0 && this.day > 0) this.companies.closeMonth();
     this.syncCargoRibbons();
+    /*
+     * Developers, monthly, and *after* `refreshApproval` above so the gate reads a
+     * settled figure rather than yesterday's. Before `stepAmenityField`, which is
+     * a slower loop again and only ever moves the ground under all of this.
+     */
+    if (this.dayOfMonth === 0) this.stepDevelopers();
     if (this.dayOfMonth === 0) this.stepAmenityField();
     if (this.day % DAYS_PER_WEEK === 0) this.stepContractBoard();
   }
@@ -3757,14 +3768,75 @@ export class World {
       if (this.sites.owner[s] !== this.player) continue;
       if (this.sites.state[s] === SiteState.Dead) continue;
       const def = this.sites.def[s];
-      const impact = this.recipes.approvalImpact[def];
+      let impact = this.recipes.approvalImpact[def];
       if (impact === 0) continue;
+      /*
+       * And a school is only worth anything while it is supplied.
+       *
+       * `servesParish` in the content, read here rather than inferred, so the
+       * gratitude scales with `fed` — the same seven-to-one average every other
+       * part of the game judges a place by. An unsupplied school is a building the
+       * parish walks past, which is the point of it: the answer to a crowded
+       * village is a thing that needs a lorry rather than an ornament you buy once
+       * and forget.
+       *
+       * Only ever applied downward, and only to a positive impact. Scaling a
+       * *penalty* by how well fed it is would mean starving your own abattoir to
+       * make people mind it less.
+       */
+      if (impact > 0 && this.content.industries[def]?.servesParish === true) {
+        impact = (impact * this.sites.fed[s]) / 100;
+        if (impact < 0.05) continue;
+      }
       out.push({
         x: this.sites.x[s],
         y: this.sites.y[s],
         impact,
         radius: this.recipes.approvalRadius[def],
         site: s,
+      });
+    }
+
+    /*
+     * And two things that are not buildings.
+     *
+     * A crowded parish, which is the cost of your own success — you served the
+     * district, it grew, and now there is nowhere to put anybody. And the streets
+     * you released land for, which are welcome while there is still room for them.
+     *
+     * Sources rather than a separate system because `ApprovalField` already sums an
+     * arbitrary list and `reasonsAt` already explains one, so a crowded village
+     * arrives on the panel as a row beside the creamery it is complaining about,
+     * adding up to the figure on the dial. Which is what "fold it into the parish
+     * dial" has to mean to be worth anything: no second number, no second screen.
+     */
+    for (let t = 0; t < this.towns.count; t++) {
+      const over = crowding(this.towns, t) - 1;
+      if (over <= 0) continue;
+      const impact = -Math.min(CROWDING_MAX, (over / (CROWDING_AT - 1)) * CROWDING_MAX);
+      out.push({
+        x: this.towns.x[t],
+        y: this.towns.y[t],
+        impact,
+        radius: CROWDING_RADIUS,
+        site: NONE,
+        label: `${this.towns.names[t] ?? 'The village'} is crowded`,
+      });
+    }
+
+    for (let p = 0; p < this.land.owner.length; p++) {
+      if (!this.land.housing(p) || this.land.made[p] <= 0) continue;
+      if (this.land.owner[p] !== this.player) continue;
+      const c = this.land.centres[p];
+      out.push({
+        x: c.x,
+        y: c.y,
+        impact: Math.min(
+          HOUSING_WELCOME_MAX, this.land.made[p] * HOUSING_WELCOME_PER_PLOT,
+        ),
+        radius: HOUSING_RADIUS,
+        site: NONE,
+        label: `New houses ${this.landPlaceName(p).toLowerCase()}`,
       });
     }
     return out;
@@ -6593,6 +6665,197 @@ export class World {
     this.landRevision++;
     this.refreshInfluence();
     return { ok: true, reason: '' };
+  }
+
+  /**
+   * How many houses a field would take, and whether it will take any.
+   *
+   * The rules are the ones a developer would apply and every one of them is
+   * already computed for something else: your land, dry, level enough to stand
+   * on, nothing built there, and **a road along it or beside it** — a field with
+   * no frontage is a field with no street, and the whole point of the shipped
+   * housing kit is that a placement rule can deal a street out of it.
+   *
+   * Deliberately *not* gated on approval. What the parish thinks decides whether
+   * anybody buys the houses, which is `stepDevelopers`; whether the field is a
+   * plausible place to put them is a fact about the ground and does not change
+   * with the parish's mood. Two different questions, and the panel says both.
+   */
+  canReleaseForHousing(parcel: number): {
+    ok: boolean; reason: string; plots: number;
+  } {
+    const no = (reason: string): { ok: boolean; reason: string; plots: number } => (
+      { ok: false, reason, plots: 0 }
+    );
+    if (parcel < 0 || parcel >= this.land.owner.length) return no('No such field.');
+    if (this.land.owner[parcel] !== this.player) return no('Not your land.');
+    if (this.land.housing(parcel)) return no('Already given over to housing.');
+
+    const tiles = this.land.tiles[parcel];
+    if (!tiles || tiles.length === 0) return no('Nothing there to build on.');
+
+    let dry = 0;
+    let road = 0;
+    let lo = Infinity;
+    let hi = -Infinity;
+    const size = this.config.size;
+    for (const t of tiles) {
+      if (this.built.has(t)) return no('Somebody already lives on it.');
+      if (this.terrain.height[t] <= 0) continue;
+      dry++;
+      lo = Math.min(lo, this.terrain.height[t]);
+      hi = Math.max(hi, this.terrain.height[t]);
+      if (this.layers[Mode.Road].cls[t] !== NO_WAY) { road++; continue; }
+      // Or a road along the edge of it, which is what frontage usually means.
+      for (const d of [1, -1, size, -size]) {
+        const n = t + d;
+        if (n < 0 || n >= this.layers[Mode.Road].cls.length) continue;
+        if (this.layers[Mode.Road].cls[n] !== NO_WAY) { road++; break; }
+      }
+    }
+    if (dry < TILES_PER_PLOT) return no('Too small to be worth a street.');
+    if (road === 0) return no('No road along it. Lay a track first.');
+    /*
+     * Level enough, on the same measure `canPlaceSite` uses for a works. A
+     * hillside will take a farm and will not take a terrace.
+     */
+    if (hi - lo > SITE_LEVEL_PER_TILE * 6) return no('Too steep to build a street on.');
+
+    const plots = Math.max(1, Math.min(
+      MAX_PLOTS_PER_FIELD, Math.floor(dry / TILES_PER_PLOT),
+    ));
+    return { ok: true, reason: '', plots };
+  }
+
+  /**
+   * Give a field over to housing.
+   *
+   * Nothing is built and nothing is charged. You have already bought the land;
+   * this says what it is for, and then developers decide — see `stepDevelopers`
+   * for the part where the parish gets a say. Releasing a field into a district
+   * nobody wants to live in is how your capital ends up in the mud, and that is
+   * the risk that makes the timing a decision rather than a button.
+   */
+  releaseForHousing(parcel: number): { ok: boolean; reason: string } {
+    const verdict = this.canReleaseForHousing(parcel);
+    if (!verdict.ok) return { ok: false, reason: verdict.reason };
+    this.land.use[parcel] = LandUse.Housing;
+    this.land.plots[parcel] = verdict.plots;
+    this.land.made[parcel] = 0;
+    this.layDownToGrass(parcel);
+    this.landRevision++;
+    return { ok: true, reason: '' };
+  }
+
+  /**
+   * What the parish wants of you before anybody will buy a house here.
+   *
+   * The same `approvalAt` the building gate reads, deliberately: one door, one
+   * key. A player who has earned the right to put a depot up has earned the right
+   * to sell houses, and both numbers move for the same reasons.
+   *
+   * Above the resting 30 by enough to be work, and below the 55 the big buildings
+   * want. Housing is the rung *between* being tolerated and being trusted.
+   */
+  housingWants(): number {
+    return HOUSING_APPROVAL;
+  }
+
+  /** Will anybody buy a house on this field yet, and what the parish thinks. */
+  housingGate(parcel: number): { here: number; need: number; ok: boolean } {
+    const c = this.land.centres[parcel] ?? { x: 0, y: 0 };
+    const here = this.approvalAt(c.x, c.y);
+    return { here, need: HOUSING_APPROVAL, ok: here >= HOUSING_APPROVAL };
+  }
+
+  /** What one house on this field sells for. */
+  housePrice(parcel: number): number {
+    /*
+     * The ground it stands on, times over. A plot is four tiles and a house is
+     * worth a good deal more than four tiles of grass — that difference *is* the
+     * development, and pricing it off the land keeps the gradient the land market
+     * already has: a house at the town gate is worth more than one up a lane
+     * because the ground under it is, which is the one place in the game position
+     * is priced.
+     */
+    const perTile = this.land.acres(parcel) > 0
+      ? this.landPriceOf(parcel) / this.land.acres(parcel)
+      : LAND_PER_TILE;
+    return Math.round(perTile * TILES_PER_PLOT * HOUSE_MARGIN);
+  }
+
+  /**
+   * Developers, once a month.
+   *
+   * They build one house on one field per pass and only where the parish thinks
+   * well enough of you, which is the whole mechanic: housing **pays you for work
+   * you have already done.** Every other way through the approval gate can be
+   * bought on the spot — three village shops cost £62,400, turn a profit and
+   * unlock a £336,000 distribution yard — and a door you can buy on the spot is
+   * not a door. This one you cannot rush.
+   *
+   * One at a time and one a month on purpose. A field of nine going up at once
+   * would be a purchase with a delay on it; nine arriving over nine months is a
+   * thing you watch happen, and the parish's regard can fall out from under it
+   * halfway through.
+   */
+  private stepDevelopers(): void {
+    for (let p = 0; p < this.land.owner.length; p++) {
+      if (!this.land.housing(p)) continue;
+      if (this.land.owner[p] !== this.player) continue;
+      if (this.land.made[p] >= this.land.plots[p]) continue;
+      if (!this.housingGate(p).ok) continue;
+      this.land.made[p]++;
+      const price = this.housePrice(p);
+      this.companies.post(this.player, Line.AssetTrade, price);
+      this.note(NONE, MoneyKind.Land, price);
+      /*
+       * And the nearest town has room for forty more people.
+       *
+       * Incremented rather than recomputed from a base, because houses do not come
+       * down: a running total needs no second array to remember what the town
+       * started at, and it survives a save as one more column.
+       *
+       * Nearest by straight line, the same rule `landPlaceName` uses to describe a
+       * field, so the village the panel says the houses are near is the village
+       * that grows.
+       */
+      const near = this.nearestTown(this.land.centres[p]);
+      if (near !== NONE) this.towns.capacity[near] += PEOPLE_PER_PLOT;
+      this.landRevision++;
+      this.housingRevision++;
+      // The parish notices immediately: new houses are welcome, and the people
+      // who fill them are what crowds the place later.
+      this.refreshApproval();
+      // One a month across the whole district, so a player with six fields
+      // released does not get six houses a month for nothing.
+      return;
+    }
+  }
+
+  /** The village a point belongs to, by straight line. */
+  private nearestTown(at: { x: number; y: number }): number {
+    let best = NONE;
+    let bestD = Infinity;
+    for (let t = 0; t < this.towns.count; t++) {
+      const d = Math.hypot(this.towns.x[t] - at.x, this.towns.y[t] - at.y);
+      if (d < bestD) { bestD = d; best = t; }
+    }
+    return best;
+  }
+
+  /** How crowded a village is, 1.0 being exactly full. For the panel. */
+  crowdingAt(town: number): number {
+    return crowding(this.towns, town);
+  }
+
+  /** Every house standing on land you released, for the parish and the picture. */
+  housesBuilt(): number {
+    let n = 0;
+    for (let p = 0; p < this.land.owner.length; p++) {
+      if (this.land.housing(p)) n += this.land.made[p];
+    }
+    return n;
   }
 
   /**

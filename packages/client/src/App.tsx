@@ -154,6 +154,29 @@ const SCATTER_BATCH = 2600;
 const ROAD_LIFT = 0.04;
 
 /**
+ * How many places the renderer can hold at once.
+ *
+ * The village lays out up to three hundred at startup and the businesses and
+ * yards take the rest of the old three hundred and twenty, so the pool was full
+ * before the player had built anything. Housing puts streets up during play, so
+ * it had to move.
+ */
+const PLACE_MAX = 640;
+
+/**
+ * How many buildings one released plot draws as.
+ *
+ * A plot houses forty people — fifteen-odd dwellings of the period — and drawing
+ * fifteen would be a grey mass at this camera. Three reads as a terrace and a
+ * pair of villas, which is what forty people in 1985 looked like from the air.
+ * A judgement about reading, not arithmetic.
+ */
+const BUILDINGS_PER_PLOT = 3;
+
+/** How much of the place pool the generated village may spend. */
+const VILLAGE_MAX = 300;
+
+/**
  * One audio engine for the page.
  *
  * Outside the component because an `AudioContext` is a scarce resource — a
@@ -986,11 +1009,20 @@ export function App(): JSX.Element {
       vStopped: new Uint8Array(512),
       vMotor: new Uint8Array(512),
       placeCount: 0,
-      px: new Float32Array(320),
-      pz: new Float32Array(320),
-      pModel: new Uint8Array(320),
-      pRot: new Float32Array(320),
-      pLamp: new Float32Array(320 * 3),
+      /*
+       * Six hundred and forty, up from three hundred and twenty.
+       *
+       * The village lays out up to three hundred at startup and the businesses and
+       * yards take the rest, so the pool was full before the player had built
+       * anything. Housing puts streets up *during play* — twelve plots a field and
+       * a plot is several buildings — so the ceiling had to move. Doubling is a
+       * megabyte of nothing and leaves headroom for the rest of the ladder.
+       */
+      px: new Float32Array(PLACE_MAX),
+      pz: new Float32Array(PLACE_MAX),
+      pModel: new Uint8Array(PLACE_MAX),
+      pRot: new Float32Array(PLACE_MAX),
+      pLamp: new Float32Array(PLACE_MAX * 3),
       scatterCount: 0,
       sPitch: new Float32Array(SCATTER_MAX),
       sStretch: new Float32Array(SCATTER_MAX).fill(1),
@@ -1023,17 +1055,40 @@ export function App(): JSX.Element {
      * are within your influence, and that is the fog of war rather than the
      * geometry.
      */
+    /*
+     * Appended, always, because the model index *is* the index into this array.
+     * Inserting anything would silently repaint every building after it.
+     */
     const placeNames = [
       ...world.content.industries.map((i) => `plc_${i.id.replace(/-/g, '_')}`),
       'plc_yard',
       'vil_cottage_a', 'vil_cottage_b', 'vil_cottage_stone', 'vil_church',
       'vil_barn',
+      /*
+       * The housing kit, which has been built and shipped and referenced by
+       * nothing since it was made. `art/build_town.py` says why it exists and why
+       * it was not used: *"You do not place houses in this game — town growth is
+       * influenced and never authored — so what a town needs from the art side is
+       * not a set of buildings but a kit that a placement rule can deal from and
+       * get a street out of."*
+       *
+       * That is now exactly what happens to it. Terraces first because a released
+       * field reads as a street when most of it is terraces, and the villas are
+       * what stop the street being one shape repeated.
+       */
+      'town_terrace_2', 'town_terrace_3', 'town_terrace_stone',
+      'town_villa', 'town_villa_large',
     ];
     const YARD_MODEL = world.content.industries.length;
     const VILLAGE_FIRST = YARD_MODEL + 1;
+    /** The five village models, then the five town ones. */
+    const TOWN_FIRST = VILLAGE_FIRST + 5;
+    const TOWN_MODELS = 5;
 
     interface Placed {
       x: number; z: number; model: number; rot: number; tile: number; evening: Evening;
+      /** The field it was dealt onto, or -1 for the generated village. */
+      parcel?: number;
     }
     const trees: Scattered[] = [];
     /**
@@ -1157,6 +1212,8 @@ export function App(): JSX.Element {
      */
     let ownedParcels = new Set<number>();
     let landAt = -1;
+    /** The housing revision the streets were last dealt for. */
+    let housedAt = -1;
     let hedgeAt = -1;
 
     const yardTiles = new Set<number>();
@@ -1268,7 +1325,15 @@ export function App(): JSX.Element {
         return ((h >>> 8) & 0xffff) / 0x10000;
       };
       const wanted = 5 + spread * 2;
-      for (let tries = 0; tries < wanted * 8 && placed.length < 300; tries++) {
+      /*
+       * Capped so the generated village leaves room for what the player builds.
+       *
+       * It was three hundred against a pool of three hundred and twenty, which was
+       * fine while the pool only ever held the village and the businesses. The pool
+       * is six hundred and forty now and this keeps its old share of it, so a
+       * district of released fields cannot be crowded out by scenery.
+       */
+      for (let tries = 0; tries < wanted * 8 && placed.length < VILLAGE_MAX; tries++) {
         const x = Math.round(cx + (rand() * 2 - 1) * spread);
         const z = Math.round(cz + (rand() * 2 - 1) * spread);
         if (x < 1 || z < 1 || x >= D - 1 || z >= D - 1) continue;
@@ -1318,6 +1383,101 @@ export function App(): JSX.Element {
     world.registerBuildings(
       placed.filter((q) => q.model >= VILLAGE_FIRST).map((q) => q.tile),
     );
+
+    /*
+     * And the streets the player releases land for, laid out as they are built.
+     *
+     * The comment above is explicit that registering the village only works
+     * *because* the layout is fixed — "if houses ever moved this would be a cache
+     * with no invalidation". Houses move now, so this is the invalidation: the
+     * whole list is re-registered every time a plot goes up, which `registerBuildings`
+     * is already shaped for since it clears before it adds.
+     *
+     * Deterministic from the parcel index and nothing else, so the same field
+     * always produces the same street and a reload does not rearrange somebody's
+     * garden. Same trick the village uses, one seed along.
+     *
+     * How many *buildings* a plot is worth is a judgement about reading rather
+     * than about arithmetic: a plot houses forty people, which is fifteen-odd
+     * dwellings, and drawing fifteen would be a grey mass at this camera. Three
+     * reads as a terrace and a pair of villas, which is what forty people in 1985
+     * actually looked like from the air.
+     */
+    const housedFields = new Set<number>();
+    const layStreets = (): void => {
+      let laid = false;
+      for (let parcel = 0; parcel < world.land.owner.length; parcel++) {
+        const made = world.land.housing(parcel) ? world.land.made[parcel] : 0;
+        const key = parcel * 100 + made;
+        if (made === 0 || housedFields.has(key)) continue;
+        // Drop whatever this field had, so a field going from two plots to three
+        // is re-dealt rather than accumulating.
+        for (let i = placed.length - 1; i >= 0; i--) {
+          if (placed[i].parcel === parcel) placed.splice(i, 1);
+        }
+        for (const k of [...housedFields]) {
+          if (Math.floor(k / 100) === parcel) housedFields.delete(k);
+        }
+        housedFields.add(key);
+        laid = true;
+
+        let h = (parcel * 2654435761 + 104729) | 0;
+        const rand = (): number => {
+          h = (h * 1103515245 + 12345) | 0;
+          return ((h >>> 16) & 0x7fff) / 0x7fff;
+        };
+        const tiles = world.land.tiles[parcel];
+        const want = made * BUILDINGS_PER_PLOT;
+        const taken = new Set<number>();
+        let put = 0;
+        for (let attempt = 0; attempt < tiles.length * 4 && put < want; attempt++) {
+          const tile = tiles[Math.floor(rand() * tiles.length)];
+          if (taken.has(tile)) continue;
+          if (world.terrain.height[tile] <= 0) continue;
+          if (roadClass[tile] >= 0) continue;
+          // Facing the lane, like the village: a house with no road in front of
+          // it is a house nobody could have built.
+          let touches = false;
+          for (const d of [1, -1, D, -D]) {
+            if (roadClass[tile + d] >= 0) touches = true;
+          }
+          if (!touches) continue;
+          taken.add(tile);
+          /*
+           * And the wood comes down where the street goes.
+           *
+           * The scatter is laid out once at startup, which is right for trees and
+           * wrong the moment something is built among them — the same reason
+           * `clearScatterAt` exists for a road. Without it a released field grew
+           * its houses *inside* a plantation, which reads as the trees having been
+           * built round rather than cleared.
+           */
+          clearScatterAt(tile);
+          const x = tile % D;
+          const z = (tile / D) | 0;
+          placed.push({
+            x: x + 0.5,
+            z: z + 0.5,
+            model: TOWN_FIRST + Math.floor(rand() * TOWN_MODELS),
+            rot: Math.floor(rand() * 4) / 4,
+            tile,
+            evening: eveningFor(x + 0.5, z + 0.5, seed),
+            parcel,
+          });
+          put++;
+        }
+      }
+      if (!laid) return;
+      /*
+       * Re-registered whole, because a street is somewhere somebody lives and the
+       * simulation refuses to sell the ground under a house or stand a works on
+       * it. Without this you could put a creamery on your own new estate.
+       */
+      world.registerBuildings(
+        placed.filter((q) => q.model >= VILLAGE_FIRST).map((q) => q.tile),
+      );
+      renderer.dropChunks();
+    };
 
     /*
      * The trees, laid out once and never again.
@@ -3416,6 +3576,17 @@ export function App(): JSX.Element {
         renderer.dropChunks();
       }
 
+      /*
+       * Streets, when a plot has gone up.
+       *
+       * Its own revision rather than `landRevision`, which moves whenever any
+       * field changes hands and would re-deal every estate in the district each
+       * time the player bought a hedge.
+       */
+      if (world.housingRevision !== housedAt) {
+        housedAt = world.housingRevision;
+        layStreets();
+      }
       if (world.landRevision !== landAt) {
         landAt = world.landRevision;
         ownedParcels = world.ownedParcels(world.player);

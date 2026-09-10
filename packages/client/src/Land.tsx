@@ -63,7 +63,19 @@ export function Land({
     .sort((a, b) => a.d - b.d)
     .slice(0, CHIPS);
 
-  const verdict = chosen >= 0 ? world.canBuyLand(world.player, chosen) : null;
+  /*
+   * Two things a selected field can be: for sale, or already yours.
+   *
+   * It could only ever be the first, because the only chips on the ground were
+   * prices — so land you held was drawn blue and had nothing you could do to it.
+   * Releasing a field for housing is the second thing, and it belongs here rather
+   * than in the Build tray: what you are choosing is *which field*, and this is
+   * the one screen in the game where the map is the list.
+   */
+  const mine = chosen >= 0 && world.land.owner[chosen] === world.player;
+  const verdict = chosen >= 0 && !mine ? world.canBuyLand(world.player, chosen) : null;
+  const release = mine ? world.canReleaseForHousing(chosen) : null;
+  const gate = mine ? world.housingGate(chosen) : null;
 
   /*
    * The squares on the ground: blue for what you hold, green for what you are
@@ -86,6 +98,10 @@ export function Land({
    * region per field would draw a hedgerow down the middle of your own land.
    */
   const ownedTiles = world.landOwnedTiles();
+  const built: number[] = [];
+  for (let p = 0; p < world.land.owner.length; p++) {
+    if (world.land.housing(p)) built.push(...world.land.tiles[p]);
+  }
   /*
    * And a line round the far edge of what you can reach.
    *
@@ -110,8 +126,19 @@ export function Land({
     ...(chosen >= 0
       ? [{ tiles: world.land.tiles[chosen], wash: PLOT.wash, edge: PLOT.edge }]
       : []),
+    /*
+     * And the fields given over to housing, in their own colour.
+     *
+     * Blue is "yours" and this is "yours, and settled" — a field you cannot put a
+     * works on any more, because there are streets on it. Worth its own wash for
+     * the same reason the parish gate got one: the shape of what you have already
+     * committed is a thing you plan against.
+     */
+    ...(built.length > 0
+      ? [{ tiles: built, wash: PLOT.builtWash, edge: PLOT.builtEdge }]
+      : []),
   ];
-  const plotKey = `${inReach.length}:${ownedTiles.length}:${chosen}`;
+  const plotKey = `${inReach.length}:${ownedTiles.length}:${built.length}:${chosen}`;
   useEffect(() => {
     renderer.showPlots(plots, src);
     return () => renderer.showPlots([], src);
@@ -194,6 +221,74 @@ export function Land({
               }}
             >Buy it</button>
           </div>
+        </div>
+      )}
+
+      {mine && release && gate && chosen >= 0 && (
+        /*
+         * A field of yours, and the one thing you can do with it.
+         *
+         * Two separate answers on purpose, because they fail for different reasons
+         * and only one of them is fixable today. Whether the ground will take a
+         * street is a fact about the ground — frontage, slope, size. Whether
+         * anybody will *buy* a house on it is what the parish thinks of you, and
+         * that is the whole mechanic: developers will not build where the district
+         * is not already doing well, so housing pays you for work you have already
+         * done and cannot be rushed.
+         *
+         * Releasing into a parish that is not ready is allowed, and the plots then
+         * sit empty until it is. That is the risk that makes the timing a decision
+         * rather than a button.
+         */
+        <div className="plot-buy">
+          <div className="plot-title">{world.landPlaceName(chosen)}</div>
+          {world.land.housing(chosen) ? (
+            <>
+              <div className="plot-sub">
+                {world.land.made[chosen]} of {world.land.plots[chosen]} plots
+                {' \u00b7 '}
+                {money(world.housePrice(chosen))} each
+              </div>
+              {world.land.made[chosen] >= world.land.plots[chosen]
+                ? <div className="plot-note">Finished. The street is up.</div>
+                : gate.ok
+                  ? <div className="plot-note">Building, a plot a month.</div>
+                  : (
+                    <div className="why">
+                      Nobody is buying out here yet. The parish is at
+                      {` ${Math.floor(gate.here)} and wants ${gate.need}.`}
+                    </div>
+                  )}
+              <div className="plot-row">
+                <button className="btn" onClick={() => setChosen(-1)}>Back</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="plot-sub">{world.land.acres(chosen)} tiles · yours</div>
+              {release.ok
+                ? (
+                  <div className="plot-note">
+                    {release.plots} plots at {money(world.housePrice(chosen))} each
+                    {gate.ok ? '' : `, once the parish is at ${gate.need}`}
+                  </div>
+                )
+                : <div className="why">{release.reason}</div>}
+              <div className="plot-row">
+                <button className="btn" onClick={() => setChosen(-1)}>Back</button>
+                <button
+                  className="btn go"
+                  disabled={!release.ok}
+                  onClick={() => {
+                    if (world.releaseForHousing(chosen).ok) {
+                      setChosen(-1);
+                      onBought();
+                    }
+                  }}
+                >Release for housing</button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </>

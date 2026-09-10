@@ -607,6 +607,78 @@ def playing_field():
     return p
 
 
+def _schoolhouse(name, w=0.58, d=0.30, wall=0.32, rise=0.15, body=BRICK, roof=SLATE):
+    """A single classroom under a steep slate roof, with a bell cote riding
+    the ridge near one gable end.
+
+    Everything else with a bell in this file hangs it on a tower that stands
+    on the ground (`tower`, for the church). A board school could not afford
+    one, so the bell went up on the roof instead - two stone piers, a lintel
+    and a lead-capped cap - and that is the one silhouette move nothing else
+    in the parish makes, which is the whole reason it is worth the five
+    extra parts.
+    """
+    made = pitched(name, w, d, wall, rise, body, roof)
+    # Tall windows down the yard-facing wall. A board school built its walls
+    # this much taller than a cottage's for exactly one reason - daylight,
+    # before there was any other kind in a classroom - and a short window
+    # would waste the height the wall was built for.
+    wh = wall * 0.66
+    wz = wall * 0.12 + wh / 2
+    for i, x in enumerate((-0.20, -0.0667, 0.0667, 0.20)):
+        made.append(_paint(
+            lib.box('%s_win%d' % (name, i), (0.05, 0.02, wh),
+                    loc=(x, -d / 2 - 0.004, wz)),
+            GLASS, name + '_winmat', rough=0.2))
+    bx = 0.20
+    ridge_z = wall + rise
+    # The cote: two piers with a gap between them, not one solid shaft, so the
+    # bell shows as an actual notch in the silhouette rather than a shape
+    # painted onto a block.
+    for i, sx in enumerate((-1, 1)):
+        made.append(_paint(
+            lib.box('%s_pier%d' % (name, i), (0.014, 0.035, 0.075),
+                    loc=(bx + sx * 0.022, 0, ridge_z + 0.0375)),
+            STONE, name + '_cotemat'))
+    made.append(_paint(
+        lib.box(name + '_lintel', (0.05, 0.035, 0.014),
+                loc=(bx, 0, ridge_z + 0.082)),
+        STONE, name + '_cotemat'))
+    made.append(_paint(
+        lib.box(name + '_bell', (0.02, 0.03, 0.03),
+                loc=(bx, 0, ridge_z + 0.035)),
+        DARK, name + '_bellmat'))
+    made.append(_paint(
+        lib.cyl(name + '_cap', 0.045, 0.006, 0.05,
+                loc=(bx, 0, ridge_z + 0.114), segments=4),
+        LEAD, name + '_capmat', rough=0.5, metal=0.3))
+    return made
+
+
+def village_school():
+    """The parish's other civic building: a schoolroom behind a low wall and
+    a gate, with a bit of hard standing to play on.
+
+    It sits in the same family as the green and the park - turf, trees, a
+    path - and has almost none of that in it. That absence is the point: a
+    school is the one place in the parish that is built rather than planted,
+    so the ground is paved, not turfed, and the boundary is a wall a child
+    cannot get through rather than a hedge one could.
+    """
+    p = pad('scp', 1.00, 0.90, body=PATH)
+    p += moved(_schoolhouse('sch'), 0.0, 0.20)
+    # The wall, broken for the gate - the same idiom as the park's rails,
+    # which only fence the two sides the camera can see: the near edge is
+    # what says this ground is kept, and the gap is where the children go in.
+    for i, sx in enumerate((-1, 1)):
+        p += [_paint(lib.box('scw%d' % i, (0.34, 0.02, 0.05),
+                             loc=(sx * 0.25, -0.45, 0.025)), STONE, 'scw_mat')]
+        p += [_paint(lib.box('scg%d' % i, (0.03, 0.03, 0.075),
+                             loc=(sx * 0.08, -0.45, 0.0375)), STONE, 'scg_mat')]
+    p += _tree('sct', at=(0.38, -0.30), h=0.24, spread=0.10)
+    return p
+
+
 def village_shop():
     p = pad('vsp', 0.80, 0.66)
     p += moved(house('vsh', w=0.42, d=0.34, wall=0.34, body=RENDER, roof=PANTILE),
@@ -733,6 +805,7 @@ BUILDS = [
     ('plc_village_green', village_green),
     ('plc_park', park),
     ('plc_playing_field', playing_field),
+    ('plc_village_school', village_school),
     ('plc_yard', yard),
     ('plc_distribution_centre', distribution_centre),
     # Three cottages, and the point of three is that no two next to each other

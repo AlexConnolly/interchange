@@ -1475,7 +1475,21 @@ export class Renderer {
    * that everything standing up in it puts something dark on the ground beside
    * it.
    */
-  setPlaceModels(models: Model[], capacity = 64): void {
+  /**
+   * `capacity` is per *model index*, not in total.
+   *
+   * A hundred and twenty rather than sixty-four, because housing deals from five
+   * town models and a district full of released fields can easily want more than
+   * sixty-four terraces. The old figure was sized for a fixed village where no
+   * single cottage model was drawn more than a few dozen times; the moment the
+   * player can put streets up during play, the binding number is how many of the
+   * *commonest* model there are and not how many there are altogether.
+   *
+   * An `InstancedMesh` allocates its matrices up front, so this is paid whether or
+   * not the instances exist — one small buffer per model, which at this model count
+   * is nothing.
+   */
+  setPlaceModels(models: Model[], capacity = 120): void {
     for (const b of [...this.placeBatches, ...this.placeLamps]) {
       if (!b) continue;
       this.places.remove(b);

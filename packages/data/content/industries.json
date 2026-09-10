@@ -512,5 +512,30 @@
   "fromEra": 1,
   "kit": "pitch",
   "colour": "#86a95f"
+ },
+ {
+  "id": "village-school",
+  "name": "Village school",
+  "kind": "terminal",
+  "deposit": 0,
+  "recipe": {
+   "inputs": { "parcels": 2 },
+   "outputs": {},
+   "period": 40
+  },
+  "footprint": 2,
+  "foundCost": 1100000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 0,
+  "amenityRadius": 0,
+  "approvalImpact": 20,
+  "approvalRadius": 16,
+  "approvalNeed": 0,
+  "servesParish": true,
+  "fromEra": 1,
+  "kit": "green",
+  "colour": "#8a7f6a"
  }
 ]

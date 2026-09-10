@@ -24,6 +24,31 @@
 export const NO_OWNER = -1;
 
 /**
+ * What a field is for.
+ *
+ * Farmland is the default and the only thing a field was until now. `Housing` is
+ * land you have released to developers — you keep the title, they put the houses
+ * up, and the parish gets bigger. It is deliberately not a *building* the player
+ * places: the verb is "release this field", and the moment a player is choosing
+ * where each house goes the game has stopped being about haulage.
+ */
+export const LandUse = {
+  Farmland: 0,
+  Housing: 1,
+} as const;
+export type LandUse = (typeof LandUse)[keyof typeof LandUse];
+
+/**
+ * How many tiles of a released field one house takes up, and the cap.
+ *
+ * Four, which at 32 m a tile is a generous plot with a garden and a lane. The cap
+ * matters more than the divisor: the renderer draws places out of a fixed pool and
+ * a single large field could otherwise fill it on its own.
+ */
+export const TILES_PER_PLOT = 4;
+export const MAX_PLOTS_PER_FIELD = 12;
+
+/**
  * The land register: who owns which field, and where each field is.
  *
  * The tile lists are built once from the parcel map and never change — parcels are
@@ -35,6 +60,27 @@ export const NO_OWNER = -1;
 export class LandRegister {
   readonly owner: Int16Array;
 
+  /**
+   * What a field of yours has been given over to. `LandUse`.
+   *
+   * Three typed arrays rather than one array of objects, and that is a
+   * persistence requirement rather than a taste: `state.ts` walks a table's
+   * fields and keeps **only typed arrays and scalars**, so anything else here
+   * would vanish on save with no error — and the round-trip test covers `World`'s
+   * own arrays, not a table's, so it would pass while doing it.
+   */
+  readonly use: Int8Array;
+
+  /**
+   * How many houses the field would take, once released, and how many are up.
+   *
+   * Fixed at release rather than recomputed, because the answer is a promise: the
+   * panel says "nine plots" and the player is entitled to nine of them however
+   * the road network changes afterwards.
+   */
+  readonly plots: Int16Array;
+  readonly made: Int16Array;
+
   /** Tiles making up each parcel. */
   readonly tiles: number[][];
 
@@ -42,7 +88,11 @@ export class LandRegister {
   readonly centres: { x: number; y: number }[];
 
   constructor(parcelMap: Int32Array, parcelCount: number, size: number) {
-    this.owner = new Int16Array(Math.max(1, parcelCount)).fill(NO_OWNER);
+    const n = Math.max(1, parcelCount);
+    this.owner = new Int16Array(n).fill(NO_OWNER);
+    this.use = new Int8Array(n);
+    this.plots = new Int16Array(n);
+    this.made = new Int16Array(n);
     this.tiles = Array.from({ length: Math.max(1, parcelCount) }, () => [] as number[]);
     for (let t = 0; t < parcelMap.length; t++) {
       const p = parcelMap[t];
@@ -90,6 +140,11 @@ export class LandRegister {
   /** How many tiles this field covers. */
   acres(parcel: number): number {
     return this.tiles[parcel]?.length ?? 0;
+  }
+
+  /** Has this field been given over to housing? */
+  housing(parcel: number): boolean {
+    return this.use[parcel] === LandUse.Housing;
   }
 }
 

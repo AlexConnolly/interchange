@@ -359,6 +359,16 @@ export const PLOT = {
    * outside it as well as over the ground just inside.
    */
   reachEdge: hex('#fff0c4'),
+  /**
+   * Land of yours that has streets on it.
+   *
+   * Blue is "yours" and this is "yours, and settled": a field you have given over
+   * to housing and cannot put a works on any more. Warmer and browner than the
+   * blue, because it is built-up ground rather than ground you are considering —
+   * the same argument the blue and the green make to each other, one rung along.
+   */
+  builtWash: hex('#d8b48c'),
+  builtEdge: hex('#b07840'),
 };
 
 export const SEMANTIC = {

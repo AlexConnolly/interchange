@@ -251,6 +251,19 @@ export class TownTable {
    */
   /** Fractional population growth, accumulated so growth can be sub-integer. */
   readonly growthAcc = new Int32Array(MAX_TOWNS);
+  /**
+   * How many people the town has room for.
+   *
+   * Seeded from what it started at and raised by every house the player releases
+   * land for. Which is the whole of the housing loop: haulage makes a town *want*
+   * to grow and only houses let it, so a district doing well runs out of room and
+   * the answer is on the land market.
+   *
+   * Not a hard ceiling — see `crowding`. A town over its capacity is crowded and
+   * unhappy, not full. People do double up, and a rule that simply stopped the
+   * number would be a wall with no explanation attached to it.
+   */
+  readonly capacity = new Int32Array(MAX_TOWNS);
 
   stock: Int32Array;
   demand: Int32Array;
@@ -290,6 +303,31 @@ export class TownTable {
     this.y[id] = y;
     this.tile[id] = tile;
     this.population[id] = population;
+    /*
+     * Room for the size the town would reach on its own, and a little over.
+     *
+     * A multiple of the *starting* population cannot work, and both attempts at
+     * one failed for the same reason: a town below `LOCAL_SUPPLY_POP` is fed by
+     * its own fields whatever anybody hauls, so it grows with no player in the
+     * game at all — and it grows toward a figure that has nothing to do with
+     * where it started. Measured with a fifth of headroom, Oxwell went 647 to
+     * 1009 in six months and Kirholm 455 to 1.38 times capacity, each earning
+     * most of an eighteen-point approval penalty for doing nothing.
+     *
+     * So the ceiling is derived from the growth model instead of guessed at.
+     * Growth stops when `served` falls through sixty, and for an unhauled town
+     * `served` is `100 * LOCAL_SUPPLY_POP / pop` — so it settles at
+     * `LOCAL_SUPPLY_POP / 0.6`, about 1270 people, whether it began at four
+     * hundred or nine. That is the district's natural carrying capacity and it is
+     * what a town has room for before anybody does anything.
+     *
+     * A tenth on top so arriving there is not itself a penalty. Everything past
+     * it is the player's doing: a town already larger than that is *not*
+     * self-supplying — its service rate sits in the dead band — so it holds still
+     * until somebody hauls food in, and every person over capacity from then on
+     * is growth you caused and room you have to find.
+     */
+    this.capacity[id] = Math.round(Math.max(population, NATURAL_POP) * 1.1);
     this.character[id] = character;
     this.served[id] = 60;
     this.names[id] = name;
@@ -630,6 +668,19 @@ export function stepSiteDecay(
  */
 export const LOCAL_SUPPLY_POP = 760;
 
+/**
+ * The size a town reaches on its own, with nothing hauled to it.
+ *
+ * Not a tuning knob — it falls out of the two numbers above it. Growth turns off
+ * when `served` drops through sixty, and an unhauled town's service rate is
+ * `100 * LOCAL_SUPPLY_POP / pop` because what it wants and what its hinterland
+ * supplies are linear in the same per-thousand weight and cancel. Set the one
+ * equal to the other and the town settles here.
+ *
+ * It exists so `capacity` can be seeded from it. See `TownTable.alloc`.
+ */
+export const NATURAL_POP = Math.round(LOCAL_SUPPLY_POP / 0.6);
+
 /** Years before a works is noticeably behind the times. */
 export const MODERN_LIFE_YEARS = 45;
 
@@ -652,6 +703,30 @@ export function ageSites(sites: SiteTable, year: number): void {
     const wear = Math.min(100 - MIN_MODERNITY, Math.round((age / MODERN_LIFE_YEARS) * (100 - MIN_MODERNITY)));
     sites.modernity[s] = 100 - wear;
   }
+}
+
+/**
+ * How crowded a town is, as a share of its capacity. 1.0 is exactly full.
+ *
+ * A ratio rather than a stored number, because it is a division of two figures the
+ * town already carries and a third copy could disagree with them.
+ */
+export function crowding(towns: TownTable, t: number): number {
+  const cap = towns.capacity[t];
+  if (cap <= 0) return 1;
+  return towns.population[t] / cap;
+}
+
+/**
+ * What is left of a town's growth as it approaches its capacity: 1 with room to
+ * spare, nothing once it is half again over.
+ *
+ * Linear from full, so the last of the growth goes gradually. Past 1.5 the town
+ * has as many people as it can hold and then some, and the only thing that moves
+ * it is somewhere for them to live.
+ */
+export function roomLeft(towns: TownTable, t: number): number {
+  return Math.max(0, Math.min(1, (1.5 - crowding(towns, t)) / 0.5));
 }
 
 export function stepTowns(
@@ -751,6 +826,18 @@ export function stepTowns(
     let delta = 0;
     if (served > 60) delta = ((served - 60) * growthPerDay) / 40;
     else if (served < 40) delta = -((40 - served) * growthPerDay) / 40;
+    /*
+     * And growth slows as the town fills up.
+     *
+     * Tapered rather than capped, and it is the difference between a mechanic and
+     * a wall. A hard ceiling would stop the number dead with nothing on screen to
+     * say why; a taper means a town at capacity still creeps, still wants its
+     * deliveries, and the *reason* it has stopped moving is a crowded parish that
+     * the player can read off the approval panel and fix with a field.
+     *
+     * Shrinking is never tapered. A town losing people is not short of room.
+     */
+    if (delta > 0) delta *= roomLeft(towns, t);
     towns.growthAcc[t] += Math.round(delta * 100);
     const whole = (towns.growthAcc[t] / 100) | 0;
     if (whole !== 0) {
@@ -773,6 +860,10 @@ export function hashSites(h: Hasher, sites: SiteTable, towns: TownTable): void {
   // on the tick it went wrong. It goes in the hash for the same reason
   // population does.
   h.array(towns.character, towns.count);
+  // Capacity is slow and it gates growth, so a client that disagreed about it
+  // would diverge on population a decade later rather than on the tick it went
+  // wrong. Same argument as `character`.
+  h.array(towns.capacity, towns.count);
   h.array(towns.stock, towns.count * towns.cargoCount);
 }
 

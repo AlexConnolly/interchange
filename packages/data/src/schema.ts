@@ -170,6 +170,20 @@ export const IndustryDef = z.object({
    * and the heavy end of the list wants a neighbourhood you have actually improved.
    */
   approvalNeed: z.number().int().min(0).max(100).default(0),
+  /**
+   * Its approval impact has to be *earned* by keeping it supplied.
+   *
+   * A school, a surgery — anything the parish is grateful for only while it is
+   * actually working. A green needs nothing and is welcome for ever; a school
+   * with no supplies is a building, and the difference is the whole reason to
+   * have one: it makes the answer to a crowded parish a thing that needs a lorry
+   * rather than an ornament you buy once.
+   *
+   * A flag rather than a rule inferred from "has inputs and a positive impact",
+   * because the village shop is also both of those and quietly changing what a
+   * shop is worth is a balance change nobody asked for.
+   */
+  servesParish: z.boolean().optional().default(false),
   fromEra: z.number().int().min(1).max(8).default(1),
   /** Kit id in the art package; three visual states come from the same kit. */
   kit: z.string(),

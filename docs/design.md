@@ -263,6 +263,24 @@ is the answer to "how big are you". Everything scales off it:
 People are below the resolution of this game. A town is a place with
 requirements, not a population figure — and a requirement is measured in loads.
 
+**Amended, once, for housing.** A town does carry a population, it always has,
+and `stepTowns` has grown and shrunk it since the first build — so the rule above
+was already bent in the code and not in the document. Housing bends it on purpose
+and stops there:
+
+- The player still never reads a population or a happiness figure. A town's size
+  and how crowded it is are **inputs to the approval dial** and appear as reasons
+  behind it — "Marchford is crowded, −8" — beside the depot they are complaining
+  about. No second number, no second screen.
+- The player's verb is **"release this field for housing"**, and that is all of
+  it. They do not place a house, choose a street or zone anything. The moment
+  they do, this stops being a haulage game.
+- Labour catchment and commuting stay cut (`cut.md`), for the reason given there:
+  a third network for an effect the growth model already approximates.
+
+So the noun count goes up by one — housing — and the unit of measurement is still
+a vehicle.
+
 ### Why this matters more than it looks
 
 Two nouns means two screens, one table each, and no third concept to explain.

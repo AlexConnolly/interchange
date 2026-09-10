@@ -3096,6 +3096,18 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
 .plot-row { display: flex; gap: 6px; margin-top: 9px; }
 .plot-row .btn { flex: 1; }
 
+/* What will happen, where `.why` is what will not.
+   Green rather than the brown of a refusal, because "nine plots at £3,500 each"
+   is the reason to press the button and reading it in the colour of a warning
+   would make an offer look like a problem. */
+.plot-note {
+  color: #3f7a52;
+  font-size: 11.5px;
+  margin-top: 3px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Somewhere to click that means "not that one". Over the world and under the
    chips, so a press on open country deselects and a press on a price does not. */
 .plot-away {
