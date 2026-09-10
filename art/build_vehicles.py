@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bpy  # noqa: E402
 import lib  # noqa: E402
+import livery  # noqa: E402
 from boxmodel import Form  # noqa: E402
 
 TILE = 1.0
@@ -96,15 +97,15 @@ def lamps(name, nose, tail, half_width, height):
     as a lamp *on* something rather than as a light in the air.
     """
     made = []
-    white = lib.material(lib.LAMP, LAMP_WHITE, emissive=3.0, rough=0.25)
-    red = lib.material(lib.LAMP + '_red', LAMP_RED, emissive=2.6, rough=0.25)
+    white = lib.material(livery.LAMP, LAMP_WHITE, emissive=3.0, rough=0.25)
+    red = lib.material(livery.LAMP + '_red', LAMP_RED, emissive=2.6, rough=0.25)
     # A dim, wide halo round each lamp. The glow mesh is blended *additively*, so
     # a darker colour over a larger area is a softer light — no second material,
     # no second draw, just a bigger box painted fainter. It is what turns a lamp
     # from a lit pixel into something that reads as shining.
-    halo_w = lib.material(lib.LAMP + '_halo', (0.22, 0.20, 0.15, 1.0),
+    halo_w = lib.material(livery.LAMP + '_halo', (0.22, 0.20, 0.15, 1.0),
                           emissive=1.0, rough=0.4)
-    halo_r = lib.material(lib.LAMP + '_halor', (0.24, 0.02, 0.01, 1.0),
+    halo_r = lib.material(livery.LAMP + '_halor', (0.24, 0.02, 0.01, 1.0),
                           emissive=1.0, rough=0.4)
     for i, side in enumerate((-1, 1)):
         f = lib.box('%s_head%d' % (name, i),
@@ -163,7 +164,7 @@ def beam(name, nose, tail, half_width, length):
         # stops the far end reading as a hard edge.
         bright = (1 - g) ** 2.4
         mat = lib.material(
-            lib.LAMP + '_b%d' % i,
+            livery.LAMP + '_b%d' % i,
             (0.26 * bright, 0.22 * bright, 0.14 * bright, 1.0),
             emissive=1.0, rough=0.5,
         )
@@ -188,7 +189,7 @@ def beam(name, nose, tail, half_width, length):
         g = (i + 1) / 2
         bright = (1 - g) ** 2
         mat = lib.material(
-            lib.LAMP + '_r%d' % i,
+            livery.LAMP + '_r%d' % i,
             (0.34 * bright, 0.03 * bright, 0.02 * bright, 1.0),
             emissive=1.0, rough=0.5,
         )
@@ -211,13 +212,13 @@ def cab(name, length, half_width, height, floor):
     """
     f = Form(size=(length, half_width * 2, height), at=(0, 0, floor + height / 2))
     # Pull the roof back off the nose so there is a bonnet line.
-    roof = f.faces(normal='up')
+    roof = f.faces(normal='+z')
     f.scale_faces(roof, (0.86, 0.96, 1.0))
     f.move(roof, (-length * 0.05, 0, 0))
     f.bevel(amount=0.006)
     obj = f.build(name)
     lib.repaint(obj, [
-        (lib.livery_material(), lambda c: True),
+        (livery.livery_material(), lambda c: True),
         (lib.material('glass', GLASS, rough=0.2),
          lambda c: c.z > floor + height * 0.55 and c.x > length * 0.18),
         (lib.material('chassis', CHASSIS, rough=0.7), lambda c: c.z < floor + 0.012),
@@ -240,7 +241,7 @@ def box_body(name, length, half_width, height, floor, colour=BOX):
     f.bevel(amount=0.005)
     obj = f.build(name)
     lib.repaint(obj, [
-        (lib.livery_material(), lambda c: True),
+        (livery.livery_material(), lambda c: True),
         (lib.material('boxroof', colour, rough=0.6),
          lambda c: c.z > floor + height * 0.94),
     ])
@@ -258,13 +259,13 @@ def flat_body(name, length, half_width, floor):
 def tipper_body(name, length, half_width, height, floor):
     """A skip, tapered so it reads as open at the top."""
     f = Form(size=(length, half_width * 2, height), at=(0, 0, floor + height / 2))
-    top = f.faces(normal='up')
+    top = f.faces(normal='+z')
     inner = f.inset(top, thickness=0.022)
     f.move(inner, (0, 0, -height * 0.55))
     f.bevel(amount=0.005)
     obj = f.build(name)
     lib.repaint(obj, [
-        (lib.livery_material(), lambda c: True),
+        (livery.livery_material(), lambda c: True),
         (lib.material('skip', (0.32, 0.33, 0.35, 1), rough=0.75),
          lambda c: c.z < floor + height * 0.55),
     ])
@@ -346,14 +347,14 @@ def car(estate=False):
     L = TILE * 0.30
     hw = 0.062
     f = Form(size=(L, hw * 2, 0.062), at=(0, 0, 0.052))
-    roof = f.faces(normal='up')
+    roof = f.faces(normal='+z')
     # Pull the cabin in and up: a bonnet, a windscreen line, a boot.
     f.scale_faces(roof, (0.54 if not estate else 0.72, 0.86, 1.0))
     f.move(roof, (-L * 0.06, 0, 0.036))
     f.bevel(amount=0.005)
     obj = f.build('car_body')
     lib.repaint(obj, [
-        (lib.livery_material(), lambda c: True),
+        (livery.livery_material(), lambda c: True),
         (lib.material('carglass', GLASS, rough=0.18),
          lambda c: c.z > 0.088),
     ])
@@ -467,7 +468,7 @@ def combine():
     # The body: long, tall at the front, tapering back over the small rear wheels.
     body = lib.box('cb_body', (L * 0.72, hw * 1.9, 0.096),
                    loc=(-L * 0.06, 0, 0.116), chamfer=0.006)
-    lib.repaint(body, [(lib.livery_material(), lambda c: True)])
+    lib.repaint(body, [(livery.livery_material(), lambda c: True)])
     parts.append(body)
 
     # The grain tank, sitting on top and behind the cab.
@@ -554,7 +555,7 @@ def tractor_body():
     # Bonnet: low and narrow, forward of the cab.
     bonnet = lib.box('tr_bonnet', (L * 0.44, hw * 1.15, 0.072),
                      loc=(L * 0.20, 0, 0.088), chamfer=0.005)
-    lib.repaint(bonnet, [(lib.livery_material(), lambda c: True)])
+    lib.repaint(bonnet, [(livery.livery_material(), lambda c: True)])
     parts.append(bonnet)
 
     # Cab: tall, glazed, set back.
@@ -605,11 +606,11 @@ def tractor_lamps(L, hw):
     dark is lit from the cab roof, not from the front axle.
     """
     made = []
-    white = lib.material(lib.LAMP, LAMP_WHITE, emissive=3.0, rough=0.25)
-    red = lib.material(lib.LAMP + '_red', LAMP_RED, emissive=2.6, rough=0.25)
-    halo_w = lib.material(lib.LAMP + '_halo', (0.22, 0.20, 0.15, 1.0),
+    white = lib.material(livery.LAMP, LAMP_WHITE, emissive=3.0, rough=0.25)
+    red = lib.material(livery.LAMP + '_red', LAMP_RED, emissive=2.6, rough=0.25)
+    halo_w = lib.material(livery.LAMP + '_halo', (0.22, 0.20, 0.15, 1.0),
                           emissive=1.0, rough=0.4)
-    halo_r = lib.material(lib.LAMP + '_halor', (0.24, 0.02, 0.01, 1.0),
+    halo_r = lib.material(livery.LAMP + '_halor', (0.24, 0.02, 0.01, 1.0),
                           emissive=1.0, rough=0.4)
 
     # Scaled to the tractor rather than reused from the lorries.
@@ -689,7 +690,7 @@ def main():
         lib.reset()
         parts = build()
         lib.merge_into(name, parts, None)
-        lib.export(name, [], report)
+        lib.export(name, report)
     # Raised from 240 after looking at the renders. Four lamps cost about ninety
     # triangles between them and they are the single best thing in the model at
     # night, which is exactly the trade a budget is for: it is a question, not a

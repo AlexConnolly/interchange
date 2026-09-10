@@ -249,7 +249,7 @@ def main():
         lib.reset()
         parts = build()
         lib.merge_into(name, parts, None)
-        lib.export(name, [], report)
+        lib.export(name, report)
     # A hundred and forty, against the fleet's four-eighty and the buildings'
     # nine hundred. Lowest budget in the project and correctly so: this is the
     # only model drawn a thousand times in one frame, so its cost is the only

@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bpy  # noqa: E402
 import lib  # noqa: E402
+import livery  # noqa: E402
 
 STRAW = (0.784, 0.678, 0.400, 1)
 STRAW_DARK = (0.647, 0.541, 0.310, 1)
@@ -207,8 +208,8 @@ def lamp_post():
     # a flagpole; a bent one reads as a street lamp even at four pixels.
     made.append(_paint(lib.box('lp_arm', (0.105, 0.013, 0.011),
                                loc=(0.046, 0, h - 0.006)), POST, 'lamppost'))
-    lit = lib.material(lib.LAMP + '_na', SODIUM, emissive=3.2, rough=0.3)
-    halo = lib.material(lib.LAMP + '_nah', SODIUM_DIM, emissive=1.0, rough=0.4)
+    lit = lib.material(livery.LAMP + '_na', SODIUM, emissive=3.2, rough=0.3)
+    halo = lib.material(livery.LAMP + '_nah', SODIUM_DIM, emissive=1.0, rough=0.4)
     # Bigger than the fitting would be, on the same argument as the vehicle
     # lamps: at playing zoom a truthfully sized lantern is two pixels, and a
     # lamp post whose lamp you cannot see is a dark stick.
@@ -227,7 +228,7 @@ def lamp_post():
         f = i / steps
         g = (i + 1) / steps
         bright = (1 - g) ** 2.2
-        mat = lib.material(lib.LAMP + '_np%d' % i,
+        mat = lib.material(livery.LAMP + '_np%d' % i,
                            # Dimmer and narrower than the first go: with a real
                            # sodium light also on the nearest posts, a wide drawn
                            # pool on top of it turned the whole village into one
@@ -659,7 +660,7 @@ def main():
         lib.reset()
         parts = build()
         lib.merge_into(name, parts, None)
-        lib.export(name, [], report)
+        lib.export(name, report)
     # The tree budget, for the tree reason: drawn hundreds of times, so this is
     # the cost that actually multiplies.
     # 180. The lamp post is the one thing here that carries its own pool of

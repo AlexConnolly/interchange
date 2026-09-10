@@ -19,3 +19,9 @@ artefacts/
 
 # Screenshots of the running game. Artifacts of packages/tools/src/shots.ts.
 shots/
+
+# The blender-model skill's own documentation images. The skill itself is
+# vendored — `art/lib.py` and `art/shots.py` *are* its toolkit, so its
+# reference material belongs with the project — but three megabytes of example
+# renders of a lighthouse and a sports car are not this game's art.
+.claude/skills/*/images/

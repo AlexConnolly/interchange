@@ -1404,6 +1404,29 @@ export function App(): JSX.Element {
      * actually looked like from the air.
      */
     const housedFields = new Set<number>();
+    /**
+     * The front-row tile a back-rank house takes its bearing from.
+     *
+     * So a whole estate faces one way. Without it the ranks behind the frontage
+     * have no road beside them to square up to and default to north, which puts
+     * the second row at right angles to the first — the one arrangement that
+     * looks less like a street than a random scatter does.
+     */
+    const nearestFrontTile = (
+      tile: number, rank: Map<number, number>, size: number,
+    ): number => {
+      let best = tile;
+      let bestD = Infinity;
+      const x = tile % size;
+      const z = (tile / size) | 0;
+      for (const [t, r] of rank) {
+        if (r !== 0) continue;
+        const d = Math.abs((t % size) - x) + Math.abs(((t / size) | 0) - z);
+        if (d < bestD) { bestD = d; best = t; }
+      }
+      return best;
+    };
+
     const layStreets = (): void => {
       let laid = false;
       for (let parcel = 0; parcel < world.land.owner.length; parcel++) {
@@ -1428,42 +1451,92 @@ export function App(): JSX.Element {
         };
         const tiles = world.land.tiles[parcel];
         const want = made * BUILDINGS_PER_PLOT;
-        const taken = new Set<number>();
-        let put = 0;
-        for (let attempt = 0; attempt < tiles.length * 4 && put < want; attempt++) {
-          const tile = tiles[Math.floor(rand() * tiles.length)];
-          if (taken.has(tile)) continue;
-          if (world.terrain.height[tile] <= 0) continue;
-          if (roadClass[tile] >= 0) continue;
-          // Facing the lane, like the village: a house with no road in front of
-          // it is a house nobody could have built.
-          let touches = false;
-          for (const d of [1, -1, D, -D]) {
-            if (roadClass[tile + d] >= 0) touches = true;
+
+        /*
+         * A street, not a queue along the verge.
+         *
+         * The first version required every house to touch a road, which sounds
+         * like frontage and produces a conga line: measured on a forty-nine tile
+         * field, three tiles carry a lane and eighteen touch one, so a dozen plots
+         * came out as a single file of boxes marching down the hedge. Nothing about
+         * that reads as a development.
+         *
+         * So frontage is the *seed* rather than the rule. The tiles that touch a
+         * lane are the front row and are filled first; then it works back off them
+         * a rank at a time, which is how an estate is actually laid out — and it
+         * gives the picture the two things it was missing: depth, and a front row
+         * that all faces the same way.
+         */
+        const size = world.config.size;
+        const inField = new Set(tiles);
+        const rank = new Map<number, number>();
+        const queue: number[] = [];
+        for (const t of tiles) {
+          if (world.terrain.height[t] <= 0) continue;
+          if (roadClass[t] >= 0) continue;
+          for (const d of [1, -1, size, -size]) {
+            if (roadClass[t + d] >= 0) { rank.set(t, 0); queue.push(t); break; }
           }
-          if (!touches) continue;
-          taken.add(tile);
+        }
+        for (let i = 0; i < queue.length; i++) {
+          const t = queue[i];
+          const r = rank.get(t) as number;
+          for (const d of [1, -1, size, -size]) {
+            const n = t + d;
+            if (!inField.has(n) || rank.has(n)) continue;
+            if (world.terrain.height[n] <= 0 || roadClass[n] >= 0) continue;
+            rank.set(n, r + 1);
+            queue.push(n);
+          }
+        }
+        /*
+         * Front row first, and within a rank in tile order so the row is a row.
+         * Shuffling the front row would scatter the houses that most want to line
+         * up, which is the half of "street" that costs nothing to get right.
+         */
+        const order = [...rank.keys()].sort((a, b) => {
+          const d = (rank.get(a) as number) - (rank.get(b) as number);
+          return d !== 0 ? d : a - b;
+        });
+
+        let put = 0;
+        for (const tile of order) {
+          if (put >= want) break;
+          const r = rank.get(tile) as number;
           /*
-           * And the wood comes down where the street goes.
-           *
-           * The scatter is laid out once at startup, which is right for trees and
-           * wrong the moment something is built among them — the same reason
-           * `clearScatterAt` exists for a road. Without it a released field grew
-           * its houses *inside* a plantation, which reads as the trees having been
-           * built round rather than cleared.
+           * A gap here and there off the front row, so the back of the estate is
+           * gardens and a turning space rather than a solid block. Never on the
+           * front row: a hole in the frontage reads as a house that failed to
+           * build.
            */
-          clearScatterAt(tile);
+          if (r > 0 && rand() > 0.72) continue;
           const x = tile % D;
           const z = (tile / D) | 0;
+          /*
+           * Facing the lane rather than any of four ways.
+           *
+           * The village can get away with a random quarter turn because a cottage
+           * is a cottage from any side and they sit in a loose cluster. A terrace
+           * at forty-five degrees to the road it fronts is the single thing that
+           * made these read as sheds dropped in a field. Squared to whichever
+           * neighbour carries the road, and the ranks behind copy the front.
+           */
+          let facing = 0;
+          const from = r === 0 ? tile : nearestFrontTile(tile, rank, size);
+          for (let i = 0; i < 4; i++) {
+            const d = [size, 1, -size, -1][i];
+            if (roadClass[from + d] >= 0) { facing = i / 4; break; }
+          }
           placed.push({
             x: x + 0.5,
             z: z + 0.5,
             model: TOWN_FIRST + Math.floor(rand() * TOWN_MODELS),
-            rot: Math.floor(rand() * 4) / 4,
+            rot: facing,
             tile,
             evening: eveningFor(x + 0.5, z + 0.5, seed),
             parcel,
           });
+          clearScatterAt(tile);
           put++;
         }
       }

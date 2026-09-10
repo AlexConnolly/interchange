@@ -26,56 +26,21 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import bpy  # noqa: E402
 import lib  # noqa: E402
+import livery  # noqa: E402
 from boxmodel import Form  # noqa: E402
-
-# Straight off palette.ts BUILT, which is straight off the target frame.
-BRICK = (0.639, 0.384, 0.290, 1)
-RENDER = (0.812, 0.769, 0.682, 1)
-# Oak, banded. A cask is the one container in the district that is neither steel
-# nor a box, and the colour is doing that work on its own.
-CASK = (0.475, 0.333, 0.208, 1)
-SLATE = (0.290, 0.302, 0.333, 1)
-# Terracotta pantile, and adding it was not decoration.
-#
-# The first village went in with slate on everything and read as a cluster of
-# grey lumps. From the game's camera - 38 degrees of elevation - a pitched roof
-# is most of the pixels of a house, so roof colour is very nearly the only
-# colour a building has. A street of slate is a street of nothing.
-PANTILE = (0.710, 0.416, 0.290, 1)
-PANTILE_PALE = (0.769, 0.541, 0.400, 1)
-THATCH = (0.706, 0.596, 0.373, 1)
-STEEL = (0.553, 0.573, 0.596, 1)
-CONCRETE = (0.702, 0.675, 0.635, 1)
-GLASS = (0.373, 0.478, 0.525, 1)
-SILO = (0.847, 0.855, 0.871, 1)
-TIMBER = (0.478, 0.360, 0.243, 1)
-SAWN = (0.741, 0.612, 0.435, 1)
-STONE = (0.667, 0.643, 0.596, 1)
-GRAVEL = (0.596, 0.573, 0.529, 1)
-# The parish's own three, and they are the only greens in this file.
-#
-# Everything else here is a works, and a works is brick, steel and concrete. A
-# green has to read as *not that* from four hundred pixels away, which is a job
-# colour does before shape gets a chance.
-TURF = (0.400, 0.549, 0.286, 1)
-TURF_WORN = (0.510, 0.588, 0.361, 1)
-LEAF = (0.243, 0.420, 0.204, 1)
-PATH = (0.729, 0.690, 0.596, 1)
-RAIL = (0.310, 0.353, 0.322, 1)
-DARK = (0.180, 0.180, 0.196, 1)
-LEAD = (0.400, 0.412, 0.435, 1)
+# One definition of this district's colours, shared with build_town.py, so
+# two build scripts drawing houses on the same street cannot quietly disagree
+# about what brick is. See palette.py for where the numbers come from.
+from palette import (  # noqa: E402
+    BRICK, RENDER, CASK, SLATE, PANTILE, PANTILE_PALE, THATCH, STEEL,
+    CONCRETE, GLASS, SILO, TIMBER, SAWN, STONE, GRAVEL, TURF, TURF_WORN,
+    LEAF, PATH, RAIL, DARK, LEAD, WINDOW, WINDOW_DIM,
+)
 
 
 def _paint(obj, rgba, name, rough=0.75, metal=0.0):
     obj.data.materials.append(lib.material(name, rgba, rough=rough, metal=metal))
     return obj
-
-
-# Warm, and warmer than you would guess. A window at night is tungsten, which is
-# far more orange than daylight, and a lit window painted "pale yellow" reads as
-# a hole in the wall rather than as a room with somebody in it.
-WINDOW = (1.0, 0.72, 0.34, 1.0)
-WINDOW_DIM = (0.26, 0.15, 0.05, 1.0)
 
 
 def windows(name, w, d, wall, floor=0.0, rows=1, warm=WINDOW):
@@ -91,8 +56,8 @@ def windows(name, w, d, wall, floor=0.0, rows=1, warm=WINDOW):
     reads as an evacuation rather than as evening.
     """
     made = []
-    lit = lib.material(lib.LAMP + '_win', warm, emissive=2.4, rough=0.3)
-    halo = lib.material(lib.LAMP + '_winh', WINDOW_DIM, emissive=1.0, rough=0.4)
+    lit = lib.material(livery.LAMP + '_win', warm, emissive=2.4, rough=0.3)
+    halo = lib.material(livery.LAMP + '_winh', WINDOW_DIM, emissive=1.0, rough=0.4)
     ww = min(0.055, w * 0.16)
     wh = min(0.055, wall * 0.34)
     for r in range(rows):
@@ -130,7 +95,7 @@ def pitched(name, w, d, wall, rise, body, roof, ridge='x', eaves=0.07):
     rw = w + eaves * 2
     rd = d + eaves * 2
     f = Form(size=(rw, rd, rise), at=(0, 0, wall + rise / 2))
-    top = f.faces(normal='up')
+    top = f.faces(normal='+z')
     # Collapse the top face along one axis and it is a ridge. Which axis is
     # which way the building faces, and a farmyard wants them not all the same.
     f.scale_faces(top, (0.04, 1.0, 1.0) if ridge == 'y' else (1.0, 0.04, 1.0))
@@ -160,7 +125,7 @@ def spill(name, w, d, wall, warm=WINDOW):
         # unforgiving that way: anything approaching the value of the surface it
         # is added to stops reading as glow and starts reading as an object.
         bright = (1 - g) ** 3
-        mat = lib.material(lib.LAMP + '_sp%d' % i,
+        mat = lib.material(livery.LAMP + '_sp%d' % i,
                            # Dimmer again, because eight *real* lights now do the
                            # near work (see the lamp pool in scene.ts) and this
                            # only has to carry the distance. Two things drawing
@@ -843,7 +808,7 @@ def main():
             o.location = (o.location.x * scale, o.location.y * scale,
                           o.location.z * scale)
         lib.merge_into(name, parts, None)
-        lib.export(name, [], report)
+        lib.export(name, report)
     # Nine hundred, against the fleet's four-eighty. A building does not move,
     # there are a dozen or two in a district, and each is drawn once - where a
     # vehicle is drawn per instance. The budget follows the draw cost, not the
