@@ -620,6 +620,30 @@ def village_shop():
     return p
 
 
+def pub():
+    """A pub: the village shop's cousin, not its twin.
+
+    Same footprint, same yard kit, because a pub belongs on the street the shop
+    is on. What separates the two silhouettes is the sign board on a post
+    rather than an awning over the window — a shop's whole cue is the awning,
+    so giving the pub one too would put two identical shapes in one tray. A
+    pub also gets a bench outside, because it is a place people stop rather
+    than a counter they pass.
+    """
+    p = pad('pup', 0.80, 0.66)
+    p += moved(house('puh', w=0.42, d=0.34, wall=0.34, body=RENDER, roof=SLATE),
+               -0.06, 0.06)
+    # The sign, on a post, rather than an awning.
+    p += [_paint(lib.box('pupost', (0.02, 0.02, 0.20), loc=(0.30, -0.26, 0.10)),
+                 DARK, 'pupost_mat')]
+    p += [_paint(lib.box('pusign', (0.14, 0.02, 0.10), loc=(0.30, -0.26, 0.22)),
+                 CASK, 'pusign_mat')]
+    # A bench against the wall.
+    p += [_paint(lib.box('pubench', (0.20, 0.06, 0.05), loc=(-0.20, -0.20, 0.025)),
+                 TIMBER, 'pubench_mat')]
+    return p
+
+
 def distribution_centre():
     """A big shed and a lot of hardstanding. design.md 4.
 
@@ -730,6 +754,7 @@ BUILDS = [
     ('plc_livestock_farm', livestock_farm),
     ('plc_abattoir', abattoir),
     ('plc_village_shop', village_shop),
+    ('plc_pub', pub),
     ('plc_village_green', village_green),
     ('plc_park', park),
     ('plc_playing_field', playing_field),
