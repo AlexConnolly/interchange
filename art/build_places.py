@@ -633,14 +633,38 @@ def pub():
     p = pad('pup', 0.80, 0.66)
     p += moved(house('puh', w=0.42, d=0.34, wall=0.34, body=RENDER, roof=SLATE),
                -0.06, 0.06)
-    # The sign, on a post, rather than an awning.
-    p += [_paint(lib.box('pupost', (0.02, 0.02, 0.20), loc=(0.30, -0.26, 0.10)),
+    # The sign: a post with a hanging board on a bracket, well clear of the
+    # eaves so it silhouettes on its own rather than merging into the wall.
+    # Sized against the house — the shop's whole cue is its awning (0.40 wide,
+    # a good third of the wall), so the sign board has to be similarly bold or
+    # it reads as a fence post, not a pub.
+    p += [_paint(lib.box('pupost', (0.025, 0.025, 0.34), loc=(0.36, -0.34, 0.17)),
                  DARK, 'pupost_mat')]
-    p += [_paint(lib.box('pusign', (0.14, 0.02, 0.10), loc=(0.30, -0.26, 0.22)),
-                 CASK, 'pusign_mat')]
-    # A bench against the wall.
-    p += [_paint(lib.box('pubench', (0.20, 0.06, 0.05), loc=(-0.20, -0.20, 0.025)),
+    p += [_paint(lib.box('pubracket', (0.13, 0.018, 0.02), loc=(0.29, -0.34, 0.325)),
+                 DARK, 'pubracket_mat')]
+    # The board itself: bigger again — this was still bench-sized and lost the
+    # fight with the bench and the wall at the game's real render size. Nearly
+    # doubled in area and pushed further off the wall on its own bracket so its
+    # shadow falls clear of the building mass instead of pooling into it, and
+    # painted a warm gold (WINDOW) rather than CASK — CASK's value sits too
+    # close to both the dark post and the pale wall at a few pixels across;
+    # WINDOW reads as a hot, high-contrast shape against both.
+    p += [_paint(lib.box('pusign', (0.26, 0.022, 0.20), loc=(0.22, -0.34, 0.225)),
+                 WINDOW, 'pusign_mat')]
+    # A dark surround, sized strictly smaller than the board on every side, so
+    # it reads as a border rather than occluding it.
+    p += [_paint(lib.box('pusignframe', (0.30, 0.014, 0.24), loc=(0.22, -0.334, 0.225)),
+                 DARK, 'pusignframe_mat')]
+    # A bench outside, big enough to survive at the game's real size: a seat,
+    # a backrest and legs, standing clear of the wall rather than a slab lost
+    # against it.
+    p += [_paint(lib.box('pubenchseat', (0.26, 0.09, 0.03), loc=(-0.18, -0.28, 0.09)),
                  TIMBER, 'pubench_mat')]
+    p += [_paint(lib.box('pubenchback', (0.26, 0.025, 0.10), loc=(-0.18, -0.315, 0.145)),
+                 TIMBER, 'pubenchback_mat')]
+    for lx in (-0.28, -0.08):
+        p += [_paint(lib.box('pubenchleg%.2f' % lx, (0.025, 0.09, 0.09),
+                             loc=(lx, -0.28, 0.045)), DARK, 'pubenchleg_mat')]
     return p
 
 
