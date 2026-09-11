@@ -29,6 +29,7 @@ import {
   JOURNAL, MoneyKind, GATE_WEEKLY_TONNES, GATE_REFERENCE_TILES,
   BUYER_NAMES,
   MARKET_TERMS, MAX_PENDING_SALES, RETAIL_PCT, GOODS_SCALE,
+  TRADE_CATCHMENT, RETAIL_REACH,
   type MarketOffer,
 } from './economy.ts';
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
@@ -434,15 +435,24 @@ export class World {
      * shop into a coin-toss with the village behind it for every load. Measured:
      * the shop stopped being offered as a destination on either test seed.
      *
-     * What is left is the finished goods nothing in the district retails. Dairy,
-     * meat and beer go to a kitchen, a butcher and a pub, none of which is a
-     * building here — so a town is a genuinely separate customer rather than a
-     * competitor to its own shop.
+     * What is left is the finished goods nothing in the district retails — and
+     * **beer has just left it**, on exactly that rule. A pub retails beer, so a
+     * village with a pub is a village being served its pint; wanting it here as
+     * well would be the same appetite down two routes, which is the mistake
+     * produce and fuel were removed for.
      *
-     * It also puts feeding a village where it belongs on the ladder. All three
-     * come out of a creamery, an abattoir or a brewery, which are mid-game
-     * buildings; the opening is still milk to the creamery, and the district's
-     * population only becomes yours to move much later.
+     * Dairy and meat stay because a kitchen and a butcher are not buildings here.
+     * Worth watching rather than celebrating: every retail building added takes a
+     * line out of this basket, and an empty basket means `served` sits at a
+     * hundred for ever and towns grow unopposed. The answer when it gets there is
+     * that a village's service level should be read off *whether its shops are
+     * stocked* rather than off deliveries made to the village directly — which is
+     * a better model and a bigger change than the one that needs making today.
+     *
+     * It also puts feeding a village where it belongs on the ladder. Both come
+     * out of a creamery or an abattoir, which are mid-game buildings; the opening
+     * is still milk to the creamery, and the district's population only becomes
+     * yours to move much later.
      *
      * The sum need not reach `ECONOMY_SCALE` — that constant is a normaliser, and
      * `served` is a *ratio* of what a town wanted to what it got, so a lighter
@@ -452,7 +462,6 @@ export class World {
     this.townWant = {
       dairy: 5,
       meat: 4,
-      beer: 4,
     };
     this.townDemandPerThousand = new Float64Array(content.cargo.length);
     this.townProducePerThousand = new Float64Array(content.cargo.length);
@@ -1422,6 +1431,104 @@ export class World {
     return out;
   }
 
+  /**
+   * How much trade each counter in the district actually gets.
+   *
+   * The fix for the plainest exploit the game had. Throughput used to be a
+   * property of the *building*: a pub got through nine tonnes of beer a day
+   * whatever was around it, so in a district of 2,512 people — seven pints a head
+   * a day from one pub — the answer to "how do I sell more beer" was "build
+   * another pub", for ever, and the same was true of the village shop at thirteen
+   * tonnes of produce.
+   *
+   * Demand comes from **people**, and people are in villages. So a counter's
+   * trade is its share of what the people it can reach actually buy, split with
+   * every other counter selling the same thing to the same people. Which gives
+   * the three things that were wanted and is one mechanism:
+   *
+   *   A second pub in the same village **halves both**, so stacking them is
+   *   pointless and spreading them out is the move.
+   *
+   *   A pub in a village of fourteen hundred outsells one in a village of four
+   *   hundred, so **housing pays into retail** — release land near your own pub
+   *   and its takings rise.
+   *
+   *   And a counter with nobody near it sells nothing, which it should.
+   *
+   * Recomputed daily rather than per tick: population moves once a day at most,
+   * and the walk is every retail site against every town.
+   */
+  private refreshTrade(): void {
+    const cargoCount = this.content.cargo.length;
+    /*
+     * Two passes, because a share needs the total before it can be a share.
+     * First what each counter *could* take from its catchment, then what else is
+     * reaching for the same people.
+     */
+    const reach: { site: number; people: number }[] = [];
+    for (let s = 0; s < this.sites.count; s++) {
+      if (this.content.industries[this.sites.def[s]]?.retail !== true) continue;
+      if (this.sites.state[s] === SiteState.Dead
+        || this.sites.state[s] === SiteState.Paused) continue;
+      let people = 0;
+      for (let t = 0; t < this.towns.count; t++) {
+        const d = Math.hypot(this.towns.x[t] - this.sites.x[s], this.towns.y[t] - this.sites.y[s]);
+        if (d > RETAIL_REACH) continue;
+        /*
+         * Falling off with distance rather than a hard circle, so a shop just
+         * inside the edge of two villages is genuinely worth more than one on
+         * the rim of one — and so that moving a counter a tile does not flip its
+         * trade.
+         */
+        people += this.towns.population[t] * (1 - d / RETAIL_REACH);
+      }
+      reach.push({ site: s, people });
+    }
+
+    for (const r of reach) {
+      const ins = this.recipes.inputs[this.sites.def[r.site]];
+      /*
+       * How many other counters are reaching for the same people with the same
+       * thing. Counted by *catchment overlap* rather than by "in the same
+       * village", because two villages a few tiles apart share their trade and a
+       * rule keyed on town membership would say they do not.
+       *
+       * Itself included, so one counter divides by one.
+       */
+      let rivals = 0;
+      for (const o of reach) {
+        const oins = this.recipes.inputs[this.sites.def[o.site]];
+        let same = false;
+        for (let k = 0; k < oins.length; k += 2) {
+          for (let i = 0; i < ins.length; i += 2) {
+            if (oins[k] === ins[i]) { same = true; break; }
+          }
+          if (same) break;
+        }
+        if (!same) continue;
+        const d = Math.hypot(
+          this.sites.x[o.site] - this.sites.x[r.site],
+          this.sites.y[o.site] - this.sites.y[r.site],
+        );
+        if (d <= RETAIL_REACH) rivals++;
+      }
+      const busy = Math.min(1, r.people / TRADE_CATCHMENT);
+      this.sites.trade[r.site] = rivals > 0 ? busy / rivals : busy;
+    }
+  }
+
+  /**
+   * What a counter's trade is worth to it, as a share. For the panel.
+   *
+   * Public because "why is my pub only half busy" is a question the place's own
+   * screen has to be able to answer, and the answer is either "not many people
+   * round here" or "you built two".
+   */
+  tradeShare(site: number): number {
+    if (site < 0 || site >= this.sites.count) return 0;
+    return this.sites.trade[site];
+  }
+
   /** What holding this place costs a week, for the panel. */
   upkeepOf(site: number): number {
     if (site < 0 || site >= this.sites.count) return 0;
@@ -1483,6 +1590,8 @@ export class World {
     if (this.day % DAYS_PER_WEEK === 0) this.settleStandingOrders();
     // And what it costs to keep the doors open on everything you hold.
     if (this.day % DAYS_PER_WEEK === 0) this.settleUpkeep();
+    // Who is near enough to shop where, before anything sells anything.
+    this.refreshTrade();
     // And the money that needs no lorry: the tills and the market.
     this.settleSales();
 

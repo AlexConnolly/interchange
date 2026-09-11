@@ -114,6 +114,22 @@ export class SiteTable {
   readonly powered = new Uint8Array(MAX_SITES);
   readonly watered = new Uint8Array(MAX_SITES);
   readonly staffed = new Uint8Array(MAX_SITES);
+  /**
+   * How much of the local trade this counter actually gets, as a share of what
+   * its recipe could get through. 1.0 is "as much as it can handle".
+   *
+   * Only a retail site reads it, and it is the fix for the plainest exploit the
+   * game had: throughput was a property of the *building*. Measured before this
+   * existed, one pub drank **nine tonnes of beer a day** in a district of 2,512
+   * people — seven pints each, every day, for everybody — and nothing stopped
+   * you building ten more and selling ninety. A village shop was the same, at
+   * thirteen tonnes of produce a day.
+   *
+   * Demand comes from people, and there are only so many of them. See
+   * `refreshTrade`.
+   */
+  readonly trade = new Float32Array(MAX_SITES).fill(1);
+
   /** What the surroundings are like, 0..100. Only tourism reads it, but every
    *  site carries it so the inspector can show the player what their pit has
    *  done to the valley. */
@@ -523,7 +539,18 @@ export function stepSites(
     } else {
       let sold = 0;
       for (let i = 0; i < ins.length; i += 2) {
-        const want = Math.max(1, Math.round(ins[i + 1] * scale));
+        /*
+         * What a counter sells is capped by the people it can reach, split with
+         * whatever else is selling the same thing to the same people.
+         *
+         * Without this, trade was a property of the building and the answer to
+         * every question was another building. The floor is zero rather than one:
+         * a shop with no catchment genuinely sells nothing, and rounding it up to
+         * a tonne is how a hundred shops in an empty valley made a hundred tonnes
+         * a day appear out of the ground.
+         */
+        const want = Math.max(0, Math.round(ins[i + 1] * scale * sites.trade[s]));
+        if (want <= 0) continue;
         const have = sites.stockOf(s, ins[i]);
         if (have <= 0) continue;
         const took = Math.min(want, have);

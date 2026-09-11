@@ -10,7 +10,7 @@
  * the rent line is guaranteed to be zero and looks pointless.
  */
 
-import { MAX_COMPANIES, MAX_CONTRACTS, MAX_ROUTES, TICKS_PER_DAY, TICKS_PER_YEAR, AUTHORITY, MONTHS_PER_YEAR } from './constants.ts';
+import { MAX_COMPANIES, MAX_CONTRACTS, MAX_ROUTES, TICKS_PER_DAY, TICKS_PER_YEAR, AUTHORITY, MONTHS_PER_YEAR, ECONOMY_SCALE } from './constants.ts';
 import { NONE } from './network.ts';
 import type { Hasher } from './hash.ts';
 import type { Rng } from './rng.ts';
@@ -787,6 +787,49 @@ export const MAX_PENDING_SALES = 24;
  * is.
  */
 export const RETAIL_PCT = 260;
+
+/**
+ * How many people it takes to keep one counter busy.
+ *
+ * The fix for the plainest exploit the game had, and the number that makes it a
+ * model rather than an arithmetic. Retail throughput used to be a property of the
+ * *building*: a pub got through nine tonnes of beer a day whatever was around it,
+ * in a district of 2,512 people — seven pints a head, daily, from one pub — and
+ * the answer to "how do I sell more" was "build another pub", for ever.
+ *
+ * The honest derivation says a village of fourteen hundred drinks about a quarter
+ * of a tonne of beer a day, which is a fortieth of what the recipe can get
+ * through. Using that directly would leave every counter in the game running at
+ * one per cent and reading as permanently starved, because the recipes were
+ * authored against a world with no ceiling. Retuning all of them is a separate
+ * job and a bigger one.
+ *
+ * So the share is against the **catchment that saturates one counter** instead.
+ * Twelve hundred people keep a shop or a pub fully busy; fewer, and it is
+ * proportionately quieter. That is a stated model rather than a measured fact and
+ * it is worth knowing which — but it gives the three properties that were wanted
+ * and it gives them from one constant:
+ *
+ *   A second counter selling the same thing to the same people **halves both**,
+ *   so stacking is pointless and spreading out is the move.
+ *
+ *   A pub in a village of fourteen hundred outsells one in a village of four
+ *   hundred by three to one, so **housing pays into retail**.
+ *
+ *   And a counter with nobody near it sells nothing.
+ */
+export const TRADE_CATCHMENT = 1200;
+
+/**
+ * How far people will go to a shop, in tiles.
+ *
+ * Twenty tiles is about six hundred metres at this scale — a village's own walk.
+ * Wide enough that a shop on the edge of a settlement still serves it, narrow
+ * enough that a second village is a second catchment rather than more of the
+ * same one. That is the whole of "spread out demand": trade is somewhere rather
+ * than something, so the way to sell more is to reach more people.
+ */
+export const RETAIL_REACH = 20;
 
 /**
  * What a tonne of goods is worth, against the `basePrice` the content quotes.

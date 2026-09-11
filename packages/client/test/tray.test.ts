@@ -26,7 +26,7 @@ const C = loadContent();
 function contents(): Map<TrayPage, string[]> {
   const out = new Map<TrayPage, string[]>();
   for (const ind of C.industries) {
-    const page = trayPageFor(ind.kind, ind.deposit);
+    const page = trayPageFor(ind.kind, ind.deposit, ind.servesParish, ind.retail);
     out.set(page, [...(out.get(page) ?? []), ind.id]);
   }
   return out;
@@ -35,7 +35,7 @@ function contents(): Map<TrayPage, string[]> {
 describe('filing what you can build', () => {
   it('puts every industry on exactly one page', () => {
     for (const ind of C.industries) {
-      const page = trayPageFor(ind.kind, ind.deposit);
+      const page = trayPageFor(ind.kind, ind.deposit, ind.servesParish, ind.retail);
       const on = BUILDING_PAGES.filter((p) => p === page);
       expect(on.length, `${ind.id} (${ind.kind}) is on ${on.length} pages`).toBe(1);
     }
@@ -65,9 +65,16 @@ describe('filing what you can build', () => {
     expect((by.get('ground') ?? []).sort()).toEqual(['forestry', 'quarry']);
   });
 
-  it('files the greens and parks with the parish', () => {
+  it('files the greens and parks with the parish, and the school with them', () => {
+    /*
+     * The school is a `terminal` in the simulation — it needs road access and
+     * takes deliveries, which is what a terminal is — and a player does not think
+     * of it that way. It belongs beside the green and the playing field, not
+     * beside the freight terminal and the filling station, and `servesParish` is
+     * the flag that already says which buildings those are.
+     */
     expect((contents().get('parish') ?? []).sort())
-      .toEqual(['park', 'playing-field', 'village-green']);
+      .toEqual(['park', 'playing-field', 'village-green', 'village-school']);
   });
 
   it('files a kind nobody has thought of yet somewhere rather than nowhere', () => {
@@ -142,7 +149,7 @@ describe('the category page', () => {
       const ind = C.industries.find((i) => i.id === cat.sample);
       expect(ind).toBeDefined();
       if (!ind) continue;
-      expect(trayPageFor(ind.kind, ind.deposit), `${cat.page}'s sample`).toBe(cat.page);
+      expect(trayPageFor(ind.kind, ind.deposit, ind.servesParish, ind.retail), `${cat.page}'s sample`).toBe(cat.page);
     }
   });
 

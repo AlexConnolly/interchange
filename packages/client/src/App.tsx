@@ -4540,7 +4540,7 @@ export function App(): JSX.Element {
                * renamed, and then a building is on neither.
                */
               live.world.content.industries.map((def, i) => {
-                if (trayPageFor(def.kind, def.deposit) !== buildAt) return null;
+                if (trayPageFor(def.kind, def.deposit, def.servesParish, def.retail) !== buildAt) return null;
                 const stop = blockers === null
                   ? null
                   : blockerFor(blockers, def, live.world.foundPrice(i));

@@ -101,15 +101,18 @@ describe('work into a village', () => {
 
   it('is offered only for what a village actually eats', () => {
     /*
-     * The basket is dairy, meat and beer — the finished goods nothing in the
-     * district retails. Produce, parcels and fuel are deliberately absent: the
-     * village shop takes the first two and a filling station takes the third, so
-     * a town wanting them as well would be the same appetite served twice, and it
-     * put the shop into a coin-toss with the village behind it for every load.
+     * The basket is the finished goods nothing in the district retails, and the
+     * list shrinks every time something gains a counter. Produce and parcels go
+     * over the village shop's, fuel through a filling station, and beer across a
+     * pub's — so a town wanting any of them as well would be the same appetite
+     * served twice, and when produce was in here it put the shop into a coin-toss
+     * with the village behind it for every load.
      */
     const w = district();
-    const wanted = new Set(['dairy', 'meat', 'beer']);
-    for (const id of ['produce', 'parcels', 'fuel', 'milk', 'grain', 'aggregate']) {
+    const wanted = new Set(['dairy', 'meat']);
+    // Beer joined this list the day a pub did: a pub retails beer, so a village
+    // with one is already being served its pint. Same rule, one cargo later.
+    for (const id of ['beer', 'produce', 'parcels', 'fuel', 'milk', 'grain', 'aggregate']) {
       const ci = w.content.cargoIndex.get(id);
       expect(ci, id).toBeDefined();
       expect(w.townDemandFor(ci as number), `a town should not want ${id}`).toBe(0);
