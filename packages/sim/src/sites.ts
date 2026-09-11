@@ -20,10 +20,25 @@ export const SiteState = {
   Dead: 2,
   /** Closed but inside the grace period: still recoverable. */
   Mothballed: 3,
+  /**
+   * Shut on purpose, by the owner.
+   *
+   * Its own state rather than a flag on `Mothballed`, because the two are
+   * opposite things that happen to stop the same machinery. Mothballed is a
+   * business *failing* — it got there because nobody was taking what it made,
+   * and it dies after the grace period. Paused is a business being *managed*: it
+   * stops buying stock in, stops making, costs less to hold, and waits
+   * indefinitely because somebody decided it should.
+   *
+   * Sharing one state would mean either a deliberate pause quietly dying after
+   * sixty days or a failing works living for ever, and both are worse than a
+   * fifth entry in an enum.
+   */
+  Paused: 4,
 } as const;
 export type SiteState = (typeof SiteState)[keyof typeof SiteState];
 
-export const STATE_NAMES = ['thriving', 'struggling', 'dead', 'mothballed'] as const;
+export const STATE_NAMES = ['thriving', 'struggling', 'dead', 'mothballed', 'paused'] as const;
 
 /**
  * Sites: extraction, processing, utility, terminal and tourism, all one table.
@@ -412,6 +427,12 @@ export function stepSites(
     const state = sites.state[s];
     if (state === SiteState.Dead) continue;
     if (state === SiteState.Mothballed) continue;
+    /*
+     * A paused works buys nothing in and makes nothing, which is the whole of
+     * what pausing is for. Before the cycle counter, so it does not quietly
+     * advance while shut and then produce a free batch the moment it reopens.
+     */
+    if (state === SiteState.Paused) continue;
 
     if (--sites.cycle[s] > 0) continue;
     const def = sites.def[s];
@@ -575,6 +596,16 @@ export function stepSiteDecay(
   for (let s = 0; s < sites.count; s++) {
     const state = sites.state[s];
     if (state === SiteState.Dead) continue;
+    /*
+     * A paused works does not decay, and does not die.
+     *
+     * Decay measures a business failing at its job; one that has been switched
+     * off is not failing at anything. Leaving it in the pass would count every
+     * day it was deliberately shut as a day nobody collected from it, so a
+     * player who shut a creamery for a winter would come back to a ruin — which
+     * would make the button a trap rather than a tool.
+     */
+    if (state === SiteState.Paused) continue;
 
     if (state === SiteState.Mothballed) {
       sites.mothballedDays[s]++;

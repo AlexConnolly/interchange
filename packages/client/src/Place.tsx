@@ -34,7 +34,7 @@
  */
 
 import { useEffect, useState, type JSX } from 'react';
-import { type World, ContractState, MoneyKind } from '@interchange/sim';
+import { type World, ContractState, MoneyKind, SiteState, STATE_NAMES } from '@interchange/sim';
 import { content } from '@interchange/data';
 import type { Renderer } from '@interchange/render';
 import { money, Carriers, thumb, useAnchor, placeThumb } from './Markers.tsx';
@@ -79,6 +79,9 @@ export interface PlaceActions {
   previewContract: (contract: number) => void;
   /** Draw a driver's whole job: empty out of the yard, then loaded. */
   previewDriver: (contract: number, vehicle: number) => void;
+  /** Shut a place of yours, or open it again. */
+  pause: (site: number) => void;
+  resume: (site: number) => void;
   /** Take the camera to a place. Only ever called for one you can see. */
   goTo: (site: number) => void;
   close: () => void;
@@ -513,6 +516,7 @@ function About({
   actions: PlaceActions;
 }): JSX.Element {
   const def = C.industries[world.sites.def[site]];
+  const paused = world.sites.state[site] === SiteState.Paused;
   const rows = (ids: string[], want: boolean): JSX.Element[] => ids.flatMap((id) => {
     const ci = C.cargoIndex.get(id);
     if (ci === undefined) return [];
@@ -557,6 +561,70 @@ function About({
             onClick={() => actions.buy(site)}
           >Buy it</button>
           {!verdict.ok && <div className="why">{verdict.reason}</div>}
+          {/*
+            * And what it will cost you *every week* after that.
+            *
+            * Beside the purchase price rather than anywhere else, because it is
+            * the half of the decision that was missing: a business was a one-off
+            * payment and then free to hold for ever, so the only question the
+            * panel could put was "can I afford it today". The weekly figure is
+            * what makes the real question — can I keep it fed — a question at
+            * all.
+            */}
+          <div className="plot-sub">
+            {money(world.upkeepOf(site))} a week to run
+          </div>
+        </div>
+      )}
+      {mine && (
+        /*
+         * A place of yours, and the one lever you have over it.
+         *
+         * Shutting a works stops it buying stock in and stops it making
+         * anything, and drops what it costs you to a standing charge. It is
+         * deliberately not free: a building you have switched off is still a
+         * building you own, and pausing at no cost would just be a parking space
+         * for capital.
+         *
+         * The state has existed since the beginning — `stepSites` has always
+         * skipped a stopped site — but it could only ever be reached by a works
+         * failing. This is the same machinery with somebody's hand on it.
+         */
+        <div className="card">
+          <div className="card-figures">
+            <span>
+              <i>Upkeep</i>
+              <b>{money(world.upkeepOf(site))}</b>
+            </span>
+            <span>
+              <i>State</i>
+              <b>{paused ? 'shut' : STATE_NAMES[world.sites.state[site]]}</b>
+            </span>
+          </div>
+          {paused
+            ? (
+              <>
+                <div className="plot-note">
+                  Shut. It is buying nothing in and making nothing, and costs the
+                  standing charge above.
+                </div>
+                <button
+                  className="btn primary block"
+                  onClick={() => actions.resume(site)}
+                >Open it again</button>
+              </>
+            )
+            : (
+              <>
+                <div className="plot-sub">
+                  Shutting it stops the intake and the output, and cuts the bill.
+                </div>
+                <button
+                  className="btn block"
+                  onClick={() => actions.pause(site)}
+                >Shut it for now</button>
+              </>
+            )}
         </div>
       )}
     </>
@@ -978,6 +1046,13 @@ function Money({ world, site }: { world: World; site: number }): JSX.Element {
       case MoneyKind.Sold: return 'Sold the place';
       case MoneyKind.Traded: return `${load} brought in`;
       case MoneyKind.Delivered: return `${load} delivered`;
+      case MoneyKind.Gate: return `${load} collected from the gate`;
+      case MoneyKind.Moved: return `${load} moved to another of yours`;
+      case MoneyKind.Counter: return `${load} over the counter`;
+      case MoneyKind.Market: return `${load} sold on the market`;
+      // The one that appears whether or not anything happened, which is the
+      // point of it: a place that traded nothing all week still has a row.
+      case MoneyKind.Upkeep: return 'A week of keeping it open';
       default: return 'Money';
     }
   };

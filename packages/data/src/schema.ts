@@ -268,6 +268,33 @@ export const Balance = z.object({
   /** And what a tonne collected from your gate by the buyer is worth, against
    *  hauling it there yourself. Under 100: they deduct the cost of the lorry. */
   gateSalePct: z.number().int(),
+  /**
+   * What a business costs to hold for a week, in basis points of what it cost
+   * to build.
+   *
+   * Owning a place was free. A creamery starved of milk produced nothing and
+   * cost nothing, so buying everything you could afford and letting it rot was
+   * not merely viable — it was costless, and the only consequence was a slow
+   * capital write-off months later that no line in the books ever mentioned.
+   *
+   * A weekly bill is what makes a business something you *run* rather than
+   * something you own. It is the pressure the demand screen reports on and the
+   * reason the pause button exists.
+   *
+   * Flat against build cost rather than scaled by throughput, deliberately: a
+   * bill that fell when a works went idle would reward exactly the hoarding
+   * this exists to stop.
+   */
+  siteUpkeepBps: z.number().int(),
+  /**
+   * And what it costs while deliberately shut, as a percent of that.
+   *
+   * Not zero. A building you have switched off is still a building you own —
+   * it still stands, it is still insured, somebody still walks round it. Paying
+   * nothing would make pausing a free parking space for capital, which is the
+   * hoarding again with an extra click in front of it.
+   */
+  pausedUpkeepPct: z.number().int(),
   /** How sharply traffic abandons an overpriced way. Higher is more elastic.
    *  design.md §3.3 — the first and primary damper. */
   tollElasticity: z.number().int(),

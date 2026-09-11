@@ -49,6 +49,7 @@ import {
   type TrayPage, type Reach,
 } from './tray.ts';
 import { Market } from './Market.tsx';
+import { District } from './District.tsx';
 import { Land } from './Land.tsx';
 import { powerLines, SPAN, WIRE_H } from './powerlines.ts';
 import { isStream, isWet } from './water.ts';
@@ -363,7 +364,8 @@ type Panel =
   | { k: 'owned' }
   | { k: 'contracts' }
   | { k: 'inbox' }
-  | { k: 'market' };
+  | { k: 'market' }
+  | { k: 'district' };
 
 /**
  * Map the content's way classes onto the three the renderer draws.
@@ -829,6 +831,14 @@ export function App(): JSX.Element {
         { tiles: world.previewContract(contract), colour: RUN.loaded },
       ], src);
     }, [live]),
+    pause: useCallback((site: number): void => {
+      if (!live) return;
+      if (live.world.pauseSite(site).ok) bump();
+    }, [live, bump]),
+    resume: useCallback((site: number): void => {
+      if (!live) return;
+      if (live.world.resumeSite(site).ok) bump();
+    }, [live, bump]),
     goTo: useCallback((site: number): void => {
       if (!live) return;
       lookAt(live.world.sites.x[site] + 0.5, live.world.sites.y[site] + 0.5);
@@ -4639,6 +4649,12 @@ export function App(): JSX.Element {
           <b>{placeHint}</b>
         </div>
       )}
+      {live && showPanel && shownPanel.k === 'district' && (
+        <District
+          world={live.world}
+          onClose={() => setPanel({ k: 'none' })}
+        />
+      )}
       {live && showPanel && shownPanel.k === 'market' && (
         <Market
           world={live.world}
@@ -4938,6 +4954,22 @@ export function App(): JSX.Element {
               on: panel.k === 'market',
               onClick: () => setPanel(
                 panel.k === 'market' ? { k: 'none' } : { k: 'market' },
+              ),
+            },
+            /*
+             * The district, next to Market, because the two answer neighbouring
+             * questions and the pairing is the point: Market says what a tonne is
+             * *worth*, and this says what the district is *short of*. A player
+             * deciding what to build next needs the second and only ever had the
+             * first.
+             */
+            {
+              key: 'district',
+              label: 'District',
+              icon: 'creamery',
+              on: panel.k === 'district',
+              onClick: () => setPanel(
+                panel.k === 'district' ? { k: 'none' } : { k: 'district' },
               ),
             },
             /*

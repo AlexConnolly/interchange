@@ -1274,6 +1274,205 @@ export class World {
     }
   }
 
+  /**
+   * What every business you own costs you for the week.
+   *
+   * Owning a place used to be free. `Line.Upkeep` existed and was posted for
+   * *roads* only, so a creamery starved of milk produced nothing and cost
+   * nothing — and buying everything you could afford and letting it rot was not
+   * merely a viable strategy, it was a costless one. The only consequence was
+   * `stepSiteDecay` writing the capital off months later, with no line in the
+   * books ever saying that this place had cost anything this week. You cannot
+   * feel a write-off. You feel a bill.
+   *
+   * It is the pressure the whole of the rest of this rests on: without it, a
+   * district ledger showing you a starved works is trivia, and a button to pause
+   * one is a button nobody presses.
+   *
+   * Charged against what the place cost to build, so a distribution yard is a
+   * heavier thing to hold than a village shop — and *flat*, rather than scaled by
+   * how hard it is working. A bill that fell when a works went idle would reward
+   * exactly the hoarding this exists to stop.
+   *
+   * A dead site is not billed. A paused one is billed less, and the reason it is
+   * billed at all is in `pausedUpkeepPct`.
+   */
+  private settleUpkeep(): void {
+    const b = this.content.balance;
+    for (let s = 0; s < this.sites.count; s++) {
+      /*
+       * Yours only, and that is a rule rather than a shortcut.
+       *
+       * The district's own businesses belong to company 0, which is allocated
+       * with **no cash at all** — it is the incumbent owner of everything that
+       * was here before you, not a rival with a balance sheet. Billing it
+       * bankrupted it in under a fortnight on the first run of this, which is not
+       * a gameplay outcome, it is deleting the district's existing economy as a
+       * side effect of a new cost line. `design.md` is explicit that there are no
+       * AI rival companies, so there is nobody else this could sensibly apply to.
+       */
+      if (this.sites.owner[s] !== this.player) continue;
+      if (this.sites.state[s] === SiteState.Dead) continue;
+      const build = this.foundPrice(this.sites.def[s]);
+      let pence = Math.round((build * b.siteUpkeepBps) / 10000);
+      if (this.sites.state[s] === SiteState.Paused) {
+        pence = Math.round((pence * b.pausedUpkeepPct) / 100);
+      }
+      if (pence <= 0) continue;
+      this.companies.post(this.player, Line.Upkeep, pence);
+      this.note(s, MoneyKind.Upkeep, -pence);
+    }
+  }
+
+  /**
+   * What the district makes of each cargo, what wants it, and where it is
+   * standing.
+   *
+   * The screen this feeds answers the one question nothing in the game could:
+   * **what is this district short of?** Every number in it already existed —
+   * `outputPerDay` and `intakePerDay` have been public since somebody added them
+   * with the note that *"stock is a level; production is a flow, and the flow is
+   * the thing you are actually purchasing"* — and nothing ever summed them, so
+   * the answer was only ever discoverable by owning a works and watching it
+   * starve.
+   *
+   * Measured on seed 1985 before this existed, and it is worth writing down
+   * because it is not what anybody expected: the district **starves its own works
+   * of raw materials and drowns in finished goods.** Milk ran at 0.76 of what the
+   * creameries wanted, produce 0.47, feed 0.52, timber 0.60 — while dairy was
+   * over-made fifty-six times over, meat thirty-five, beer eighteen, and nothing
+   * in the district took sawn timber at all. One building in the whole content
+   * has `retail: true`. The chain has somewhere to start and nowhere to end.
+   *
+   * ## Why the stock columns are the important half
+   *
+   * A ratio under one has two completely different causes and they want opposite
+   * answers. Milk at 0.76 with **224 tonnes standing at the farms** is not a
+   * shortage of milk — it is a shortage of *lorries*, and building another dairy
+   * farm would make it worse. The same ratio with empty sheds at both ends is a
+   * genuine shortage and wants another farm.
+   *
+   * So the shape is: a flow on each side, and the level at each end, because the
+   * flows alone cannot tell a production problem from a haulage one. `verdict`
+   * does that reading once, here, rather than in the panel — the panel should not
+   * be the only thing that knows what the numbers mean.
+   */
+  districtBalance(): {
+    cargo: number;
+    made: number;
+    wantedByWorks: number;
+    wantedByTowns: number;
+    atMakers: number;
+    atTakers: number;
+    verdict: 'short' | 'stranded' | 'unwanted' | 'balanced';
+  }[] {
+    const out: {
+      cargo: number; made: number; wantedByWorks: number; wantedByTowns: number;
+      atMakers: number; atTakers: number;
+      verdict: 'short' | 'stranded' | 'unwanted' | 'balanced';
+    }[] = [];
+    let population = 0;
+    for (let t = 0; t < this.towns.count; t++) population += this.towns.population[t];
+
+    for (let c = 0; c < this.content.cargo.length; c++) {
+      let made = 0;
+      let wantedByWorks = 0;
+      let atMakers = 0;
+      let atTakers = 0;
+      for (let s = 0; s < this.sites.count; s++) {
+        /*
+         * A works that is not running is neither making nor wanting. `intakePerDay`
+         * reads the recipe rather than the state, so without this a creamery you
+         * had deliberately shut still reported an appetite for milk — and the
+         * screen would have sent you looking for a lorry to feed a building with
+         * its doors shut.
+         */
+        const st = this.sites.state[s];
+        if (st === SiteState.Dead || st === SiteState.Paused
+          || st === SiteState.Mothballed) continue;
+        const o = this.outputPerDay(s, c);
+        const i = this.intakePerDay(s, c);
+        made += o;
+        wantedByWorks += i;
+        // A place that both makes and takes a cargo — a distribution yard —
+        // counts on both sides, which is honest: it is genuinely both.
+        if (o > 0) atMakers += this.sites.stockOf(s, c);
+        if (i > 0) atTakers += this.sites.stockOf(s, c);
+      }
+      const wantedByTowns = (this.townDemandPerThousand[c] * population) / 1000;
+      const wanted = wantedByWorks + wantedByTowns;
+      if (made === 0 && wanted === 0) continue;
+
+      /*
+       * The reading, and the thresholds are deliberately loose. This is a
+       * sentence on a screen, not a controller: "about right" has to cover a
+       * district that is working, or every row shouts and none of them mean
+       * anything.
+       */
+      let verdict: 'short' | 'stranded' | 'unwanted' | 'balanced' = 'balanced';
+      if (wanted <= 0 || made > wanted * 2) verdict = 'unwanted';
+      else if (made < wanted * 0.85) {
+        // Enough of it exists, it is just in the wrong sheds. A week of the
+        // shortfall standing at the makers is the test — less than that and the
+        // producers genuinely are not keeping up.
+        verdict = atMakers > (wanted - made) * 7 ? 'stranded' : 'short';
+      }
+      out.push({ cargo: c, made, wantedByWorks, wantedByTowns, atMakers, atTakers, verdict });
+    }
+    return out;
+  }
+
+  /** What holding this place costs a week, for the panel. */
+  upkeepOf(site: number): number {
+    if (site < 0 || site >= this.sites.count) return 0;
+    if (this.sites.state[site] === SiteState.Dead) return 0;
+    const b = this.content.balance;
+    const build = this.foundPrice(this.sites.def[site]);
+    let pence = Math.round((build * b.siteUpkeepBps) / 10000);
+    if (this.sites.state[site] === SiteState.Paused) {
+      pence = Math.round((pence * b.pausedUpkeepPct) / 100);
+    }
+    return pence;
+  }
+
+  /**
+   * Shut a business of yours, or open it again.
+   *
+   * The state already existed and already did the work — `stepSites` skips a
+   * stopped site, so it buys nothing in and makes nothing — it simply had no way
+   * in from the interface and no way to tell "shut on purpose" from "failing".
+   * See `SiteState.Paused` for why that distinction is a separate state rather
+   * than a flag.
+   *
+   * It comes back as Struggling rather than as whatever it was. A works that has
+   * been shut for a season has empty sheds and nobody in the habit of collecting
+   * from it, and reopening straight into Thriving would be the button handing back
+   * a month of supply chain it had not earned.
+   */
+  pauseSite(site: number): { ok: boolean; reason: string } {
+    if (site < 0 || site >= this.sites.count) return { ok: false, reason: 'No such place.' };
+    if (this.sites.owner[site] !== this.player) return { ok: false, reason: 'Not yours.' };
+    if (this.sites.state[site] === SiteState.Dead) {
+      return { ok: false, reason: 'That one has closed for good.' };
+    }
+    if (this.sites.state[site] === SiteState.Paused) {
+      return { ok: false, reason: 'Already shut.' };
+    }
+    this.sites.state[site] = SiteState.Paused;
+    return { ok: true, reason: '' };
+  }
+
+  resumeSite(site: number): { ok: boolean; reason: string } {
+    if (site < 0 || site >= this.sites.count) return { ok: false, reason: 'No such place.' };
+    if (this.sites.owner[site] !== this.player) return { ok: false, reason: 'Not yours.' };
+    if (this.sites.state[site] !== SiteState.Paused) {
+      return { ok: false, reason: 'It is already working.' };
+    }
+    this.sites.state[site] = SiteState.Struggling;
+    this.sites.starvedDays[site] = 0;
+    return { ok: true, reason: '' };
+  }
+
   private stepDay(): void {
     // The farming year, once a day. The season step is usually a no-op; the
     // catch-up brings on whatever no tractor has got round to.
@@ -1282,6 +1481,8 @@ export class World {
 
     // Standing orders, on the day the week turns.
     if (this.day % DAYS_PER_WEEK === 0) this.settleStandingOrders();
+    // And what it costs to keep the doors open on everything you hold.
+    if (this.day % DAYS_PER_WEEK === 0) this.settleUpkeep();
     // And the money that needs no lorry: the tills and the market.
     this.settleSales();
 

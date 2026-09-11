@@ -382,6 +382,15 @@ html, body, #root, .app {
 }
 .card-figures b { color: var(--ink); font-weight: 600; }
 .card-figures.big { font-size: 18px; margin-bottom: 4px; }
+/* A labelled figure stacks, so "Upkeep £594" reads as two things rather than as
+   one run-together word. Only where there is a label — the big single-figure
+   form above has none and must stay on one line. */
+.card-figures span:has(i) { display: flex; flex-direction: column; gap: 1px; }
+.card-figures i {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--ink-dim);
+}
 .btn.block { width: 100%; justify-content: center; }
 
 /* The driver chooser. Buttons, not a select: three lorries is a choice you make
@@ -3228,4 +3237,72 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   font-size: 15px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- the district
+
+   A list of problems, not a table. Most of thirteen cargoes are usually fine, so
+   the screen is sorted trouble-first and the healthy ones sit underneath as a
+   quiet block — a player opening this wants the two rows that are wrong. */
+.district { width: 356px; }
+.dist-rows { max-height: 460px; overflow-y: auto; }
+.dist-row {
+  padding: 8px 9px 7px;
+  margin-bottom: 5px;
+  border: 1px solid rgba(0, 0, 0, 0.10);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+}
+/* A left edge rather than a fill, on the argument the plot washes make: the row
+   has to be readable, and a tinted card behind small tabular figures is worse at
+   that than a stripe beside them. */
+.dist-row.bad { border-left: 3px solid #c0504a; }
+.dist-row.warn { border-left: 3px solid #c08a3a; }
+.dist-row.ok { opacity: 0.68; }
+.dist-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.dist-tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.01em;
+}
+.dist-tag.bad { background: rgba(192, 80, 74, 0.16); color: #9c3a34; }
+.dist-tag.warn { background: rgba(192, 138, 58, 0.18); color: #8a5f1e; }
+.dist-tag.ok { background: rgba(63, 122, 82, 0.14); color: #3f7a52; }
+.dist-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.dist-figures span { display: flex; flex-direction: column; }
+.dist-figures i {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--ink-dim);
+}
+.dist-figures b { font-size: 13px; font-weight: 700; }
+/* The stock column carries its unit inline because it is a sentence fragment
+   rather than a figure — "224t at the makers" is the whole finding. */
+.dist-stock b { font-size: 11.5px; font-weight: 600; color: var(--ink-dim); }
+.dist-note {
+  margin-top: 5px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #6f685a;
+}
+.sheet-foot {
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--ink-dim);
+  text-align: right;
 }

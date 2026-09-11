@@ -686,6 +686,14 @@ export const MoneyKind = {
   Counter: 7,
   /** Land bought. Not tied to a place, because it *is* the place. */
   Land: 8,
+  /**
+   * A week of keeping the doors open on somewhere you own.
+   *
+   * Tied to the place, because the whole point of it is that the player can see
+   * *which* one is costing them — a lump under Upkeep in the ledger says the
+   * estate costs money, and a row against the creamery says the creamery does.
+   */
+  Upkeep: 9,
 } as const;
 export type MoneyKind = (typeof MoneyKind)[keyof typeof MoneyKind];
 
