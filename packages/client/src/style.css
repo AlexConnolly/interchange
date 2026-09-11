@@ -3306,3 +3306,47 @@ button.veh-row:disabled { opacity: 0.5; cursor: default; }
   color: var(--ink-dim);
   text-align: right;
 }
+
+/* What a village gets through, as a row of small facts rather than a table.
+   Three or four cargoes at a couple of tonnes each is a sentence, and a table
+   would give four columns of chrome to hold twelve characters of number. */
+.dist-wants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 6px;
+}
+.want {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.want b { color: var(--ink); font-weight: 700; }
+/* The taste multiplier, and it only appears when it is worth mentioning. Green
+   up and brown down, because "likes it" and "does not" is the whole reading and
+   a neutral colour would make it a third number to decode. */
+.want em {
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 999px;
+}
+.want em.up { background: rgba(63, 122, 82, 0.16); color: #3f7a52; }
+.want em.down { background: rgba(138, 90, 42, 0.14); color: #8a5a2a; }
+.district .tabs { margin: 0 -9px 6px; }
+
+/* The two halves of what a village consumes, labelled by a rule rather than a
+   heading: a heading each would be two words of chrome above three words of
+   content. Hauled in on top, bought over a counter below it. */
+.dist-wants.hauled::before,
+.dist-wants.over::before {
+  width: 100%;
+  font-size: 10px;
+  color: var(--ink-dim);
+}
+.dist-wants.hauled::before { content: "hauled in"; }
+.dist-wants.over::before { content: "over the counter"; margin-top: 2px; }

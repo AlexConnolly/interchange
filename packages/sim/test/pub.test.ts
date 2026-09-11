@@ -96,6 +96,14 @@ describe('the pub', () => {
     const stocked = w.approval;
     expect(stocked).toBeGreaterThan(start);
 
+    /*
+     * The cellar is emptied rather than left to run down. A counter's trade is
+     * capped by the people it can reach now, so a pub gets through a couple of
+     * tonnes a day instead of nine and ninety-nine tonnes of beer outlasts any
+     * sensible test — which is the cap working and nothing to do with what this
+     * is pinning.
+     */
+    w.sites.takeStock(pub, beer, w.sites.stockOf(pub, beer));
     for (let d = 0; d < 20; d++) {
       for (let t = 0; t < TICKS_PER_DAY; t++) w.step();
     }

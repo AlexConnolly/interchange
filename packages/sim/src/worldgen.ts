@@ -626,6 +626,17 @@ export function generateWorld(w: World): void {
    */
   w.settleLand();
 
+  /*
+   * And who can shop where, before the first tick rather than after the first
+   * day.
+   *
+   * `sites.trade` starts at one — "as busy as it can be" — and is only
+   * recomputed on the day boundary, so between the world being generated and the
+   * clock turning over, every counter in the district read as fully busy. Which
+   * is the one moment a player is most likely to be looking: the panel opened on
+   * a new game showed a pub in an empty valley selling as much as one in a town.
+   */
+  w.refreshTrade();
 }
 
 function nearestLand(t: Terrain, x: number, y: number, radius: number): [number, number] | null {

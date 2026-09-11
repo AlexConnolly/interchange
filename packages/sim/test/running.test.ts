@@ -434,3 +434,92 @@ describe('one place is not another', () => {
     }
   });
 });
+
+describe('the parish, village by village', () => {
+  /*
+   * The same world the district ledger reads by cargo, read by place. The two
+   * answer neighbouring halves of one question: the ledger says the district is
+   * short of beer, and this says which village is thirsty and whether anything is
+   * already selling to it.
+   *
+   * It exists because the pieces were scattered and one of them was nowhere.
+   * Population lived only inside the land price, how well a village was served
+   * drove its growth and appeared on nothing, and character was assigned at
+   * worldgen and read by the determinism hash.
+   */
+  it('gives every settlement its figures, biggest first', () => {
+    const w = district();
+    const rows = w.parishOverview();
+    expect(rows.length).toBe(w.towns.count);
+    for (let i = 1; i < rows.length; i++) {
+      expect(rows[i - 1].population).toBeGreaterThanOrEqual(rows[i].population);
+    }
+    for (const r of rows) {
+      expect(r.name).not.toBe('');
+      expect(r.population).toBeGreaterThan(0);
+      expect(r.capacity).toBeGreaterThan(0);
+      expect(r.crowding).toBeCloseTo(r.population / r.capacity, 5);
+    }
+  });
+
+  it('says what each village wants more of than the average', () => {
+    const w = district();
+    const rows = w.parishOverview();
+    const tastes = new Set<string>();
+    for (const r of rows) {
+      for (const want of r.wants) {
+        expect(want.perDay).toBeGreaterThan(0);
+        tastes.add(`${r.character}:${want.taste.toFixed(3)}`);
+      }
+    }
+    // Not one number repeated. Character and jitter between them have to make
+    // two villages genuinely different or the page is three identical cards.
+    expect(tastes.size).toBeGreaterThan(2);
+  });
+
+  it('counts only the counters actually within a shopper walk', () => {
+    // The same reach `refreshTrade` splits trade over, so the list on the page is
+    // the list sharing the village's trade rather than a second opinion.
+    const w = district();
+    for (const r of w.parishOverview()) {
+      for (const c of r.counters) {
+        const d = Math.hypot(
+          w.sites.x[c.site] - w.towns.x[r.town], w.sites.y[c.site] - w.towns.y[r.town],
+        );
+        expect(d).toBeLessThanOrEqual(20);
+        expect(w.content.industries[c.def].retail).toBe(true);
+      }
+    }
+  });
+
+  it('reports what those counters actually sell, not what their recipe could', () => {
+    /*
+     * The bug this caught: `sites.trade` starts at one — "as busy as it can be" —
+     * and was only recomputed on the day boundary, so a panel opened on a new game
+     * showed every counter fully busy and a pub in an empty valley selling as much
+     * as one in a town. Worldgen settles it now.
+     */
+    const w = district();
+    for (const r of w.parishOverview()) {
+      for (const b of r.buys) {
+        let could = 0;
+        for (const c of r.counters) could += w.intakePerDay(c.site, b.cargo);
+        expect(b.perDay).toBeLessThanOrEqual(could + 0.001);
+      }
+      if (r.counters.length === 0) expect(r.buys.length).toBe(0);
+    }
+  });
+
+  it('is settled before the first tick, not after the first day', () => {
+    const fresh = createWorld({ seed: 1985, size: D, townCount: 3, companyCount: 1 });
+    let retail = 0;
+    let busy = 0;
+    for (let s = 0; s < fresh.sites.count; s++) {
+      if (fresh.content.industries[fresh.sites.def[s]]?.retail !== true) continue;
+      retail++;
+      if (fresh.tradeShare(s) >= 1) busy++;
+    }
+    expect(retail, 'no counters in the district').toBeGreaterThan(0);
+    expect(busy, 'every counter reads as fully busy on a fresh world').toBe(0);
+  });
+});

@@ -1334,6 +1334,115 @@ export class World {
   }
 
   /**
+   * Every settlement, what it is like, and what it is getting.
+   *
+   * The district ledger reads the same world by cargo — what is short, what is
+   * stranded, what nobody wants. This reads it by *place*, and the two answer
+   * neighbouring halves of one question: the ledger says the district is short of
+   * beer, and this says which village is thirsty and whether anything is already
+   * selling to it.
+   *
+   * It exists because the pieces were scattered across three screens and one of
+   * them was nowhere. Population lived only in the land price. How well a village
+   * was served drove its growth and appeared on nothing. Character was assigned at
+   * worldgen and read by the determinism hash. Crowding was a row on the approval
+   * panel and only when it was already a problem. None of it could be compared
+   * between two villages, which is the comparison every build decision is.
+   */
+  parishOverview(): {
+    town: number;
+    name: string;
+    character: string;
+    population: number;
+    capacity: number;
+    crowding: number;
+    /** Rolling 0..100 of how much of what it wants it is getting. */
+    served: number;
+    /** What the parish thinks of you, here. */
+    approval: number;
+    /** The basket hauled *to* it — what nothing in the district retails. */
+    wants: { cargo: number; perDay: number; taste: number; stock: number }[];
+    /** And the counters selling to it, which are the other half of its supply. */
+    counters: { site: number; def: number; trade: number }[];
+    /**
+     * What those counters actually sell it, per cargo, per day.
+     *
+     * The other half of "what does this place consume", and without it the page
+     * showed a village wanting two hundred kilos of dairy and said nothing about
+     * the beer and the produce going across its counters — which is most of what
+     * it gets through. Derived from the counters rather than from a second demand
+     * table, so it cannot disagree with what is actually being sold.
+     */
+    buys: { cargo: number; perDay: number }[];
+  }[] {
+    const cargoCount = this.content.cargo.length;
+    const out: ReturnType<World['parishOverview']> = [];
+    for (let t = 0; t < this.towns.count; t++) {
+      const kind = TownCharacter[this.towns.character[t]] ?? 'market';
+      const pop = this.towns.population[t];
+
+      const wants: { cargo: number; perDay: number; taste: number; stock: number }[] = [];
+      for (let c = 0; c < cargoCount; c++) {
+        const base = this.townDemandPerThousand[c];
+        if (base <= 0) continue;
+        const taste = tasteOf(kind, this.content.cargo[c].id, t, this.config.seed);
+        wants.push({
+          cargo: c,
+          perDay: (base * taste * pop) / 1000,
+          taste,
+          stock: this.towns.stock[t * cargoCount + c],
+        });
+      }
+      wants.sort((a, b) => b.perDay - a.perDay);
+
+      /*
+       * Counters within a shopper's walk of it. The same reach `refreshTrade`
+       * uses, so the list on this page is the list that is actually sharing the
+       * village's trade rather than a second opinion about who is nearby.
+       */
+      const counters: { site: number; def: number; trade: number }[] = [];
+      for (let sIdx = 0; sIdx < this.sites.count; sIdx++) {
+        if (this.content.industries[this.sites.def[sIdx]]?.retail !== true) continue;
+        if (this.sites.state[sIdx] === SiteState.Dead) continue;
+        const d = Math.hypot(
+          this.sites.x[sIdx] - this.towns.x[t], this.sites.y[sIdx] - this.towns.y[t],
+        );
+        if (d > RETAIL_REACH) continue;
+        counters.push({ site: sIdx, def: this.sites.def[sIdx], trade: this.sites.trade[sIdx] });
+      }
+      counters.sort((a, b) => b.trade - a.trade);
+
+      const sold = new Map<number, number>();
+      for (const c of counters) {
+        const ins = this.recipes.inputs[c.def];
+        for (let i = 0; i < ins.length; i += 2) {
+          sold.set(ins[i], (sold.get(ins[i]) ?? 0) + this.intakePerDay(c.site, ins[i]) * c.trade);
+        }
+      }
+      const buys = [...sold.entries()]
+        .map(([cargo, perDay]) => ({ cargo, perDay }))
+        .filter((b) => b.perDay > 0.01)
+        .sort((a, b) => b.perDay - a.perDay);
+
+      out.push({
+        town: t,
+        name: this.towns.names[t] ?? 'The village',
+        character: kind,
+        population: pop,
+        capacity: this.towns.capacity[t],
+        crowding: crowding(this.towns, t),
+        served: this.towns.served[t],
+        approval: this.approvalAt(this.towns.x[t], this.towns.y[t]),
+        wants,
+        counters,
+        buys,
+      });
+    }
+    out.sort((a, b) => b.population - a.population);
+    return out;
+  }
+
+  /**
    * What the district makes of each cargo, what wants it, and where it is
    * standing.
    *
@@ -1458,7 +1567,7 @@ export class World {
    * Recomputed daily rather than per tick: population moves once a day at most,
    * and the walk is every retail site against every town.
    */
-  private refreshTrade(): void {
+  refreshTrade(): void {
     const cargoCount = this.content.cargo.length;
     /*
      * Two passes, because a share needs the total before it can be a share.

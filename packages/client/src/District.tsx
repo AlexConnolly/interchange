@@ -32,8 +32,9 @@
  * knows what the numbers mean.
  */
 
-import { type JSX } from 'react';
+import { useState, type JSX } from 'react';
 import type { World } from '@interchange/sim';
+import { money } from './Markers.tsx';
 import { content } from '@interchange/data';
 import { Icon } from './Icons.tsx';
 
@@ -59,6 +60,22 @@ const SAYS: Record<string, { label: string; note: string; tone: string }> = {
   balanced: { label: 'about right', note: '', tone: 'ok' },
 };
 
+/**
+ * What a settlement is like, said rather than labelled.
+ *
+ * The enum is `market | industrial | port | resort | dormitory`, which is a
+ * category and not a sentence. What the player needs is why this village wants
+ * what it wants, and "a working town — thirsty, and it eats" says that in the
+ * same space the word "industrial" would take.
+ */
+const CHARACTER: Record<string, string> = {
+  market: 'a market town',
+  industrial: 'a working town, thirsty',
+  port: 'a port — fuel and freight',
+  resort: 'visitors to feed',
+  dormitory: 'a commuter village',
+};
+
 /** Tonnes, at the precision the figure deserves. */
 function t(n: number): string {
   if (n <= 0) return '—';
@@ -77,7 +94,9 @@ export function District({
    * unloads. A cached one would go stale in exactly the moment the player opened
    * the screen to check.
    */
+  const [view, setView] = useState<'cargo' | 'villages'>('cargo');
   const rows = world.districtBalance();
+  const parish = world.parishOverview();
 
   /*
    * Trouble first, and within that the biggest flows first.
@@ -103,14 +122,120 @@ export function District({
         <div className="grow">
           <div className="sheet-title">The district</div>
           <div className="sheet-sub">
-            {trouble === 0
-              ? 'Everything made has somewhere to go'
-              : `${trouble} of ${rows.length} out of balance`}
+            {view === 'villages'
+              ? `${parish.reduce((n, v) => n + v.population, 0).toLocaleString('en-GB')} people`
+              : trouble === 0
+                ? 'Everything made has somewhere to go'
+                : `${trouble} of ${rows.length} out of balance`}
           </div>
         </div>
         <button className="x" onClick={onClose} aria-label="Close">&times;</button>
       </div>
 
+      <div className="tabs">
+        <button
+          className={`tab ${view === 'cargo' ? 'on' : ''}`}
+          onClick={() => setView('cargo')}
+        >By cargo</button>
+        <button
+          className={`tab ${view === 'villages' ? 'on' : ''}`}
+          onClick={() => setView('villages')}
+        >Villages<em>{parish.length}</em></button>
+      </div>
+
+      {view === 'villages' && (
+        <div className="dist-rows">
+          {parish.map((v) => {
+            /*
+             * Crowded, full, or room to grow. The same three readings the growth
+             * model actually uses, so the word on screen is the reason the number
+             * is moving rather than a separate opinion about it.
+             */
+            const tight = v.crowding >= 1;
+            const tone = tight ? 'bad' : v.crowding > 0.85 ? 'warn' : 'ok';
+            return (
+              <div key={v.town} className={`dist-row ${tone}`}>
+                <div className="dist-head">
+                  <span className="grow">{v.name}</span>
+                  <span className={`dist-tag ${tone}`}>
+                    {tight ? 'crowded' : v.crowding > 0.85 ? 'filling up' : 'room to grow'}
+                  </span>
+                </div>
+                <div className="dist-note">{CHARACTER[v.character] ?? v.character}</div>
+                <div className="dist-figures">
+                  <span><i>people</i><b>{v.population.toLocaleString('en-GB')}</b></span>
+                  <span><i>room for</i><b>{v.capacity.toLocaleString('en-GB')}</b></span>
+                  {/*
+                    * How well it is fed, which is the number that decides whether
+                    * it grows at all — above sixty it climbs, below forty it
+                    * shrinks, and between the two it holds.
+                    */}
+                  <span><i>served</i><b>{Math.round(v.served)}</b></span>
+                  <span><i>parish</i><b>{Math.round(v.approval)}</b></span>
+                </div>
+
+                {v.wants.length > 0 && (
+                  <div className="dist-wants hauled">
+                    {v.wants.map((want) => (
+                      <span key={want.cargo} className="want">
+                        <span
+                          className="swatch"
+                          style={{ background: C.cargo[want.cargo].colour }}
+                        />
+                        {C.cargo[want.cargo].name}
+                        <b>{t(want.perDay)}</b>
+                        {/*
+                          * The taste multiplier, and only when it is worth
+                          * mentioning. "×1.0" against every row would be a column
+                          * of noise; "×1.5" against one is the whole point of
+                          * character.
+                          */}
+                        {Math.abs(want.taste - 1) > 0.12 && (
+                          <em className={want.taste > 1 ? 'up' : 'down'}>
+                            ×{want.taste.toFixed(1)}
+                          </em>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/*
+                  * And what its counters actually sell it, which is most of what
+                  * a village gets through. Separated from the row above because
+                  * the two arrive by different routes and the player can only act
+                  * on one of them at a time: the first wants a lorry to the
+                  * village, the second wants a lorry to the shop.
+                  */}
+                {v.buys.length > 0 && (
+                  <div className="dist-wants over">
+                    {v.buys.map((b) => (
+                      <span key={b.cargo} className="want">
+                        <span
+                          className="swatch"
+                          style={{ background: C.cargo[b.cargo].colour }}
+                        />
+                        {C.cargo[b.cargo].name}
+                        <b>{t(b.perDay)}</b>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="dist-note">
+                  {v.counters.length === 0
+                    ? 'No counter within reach of it — anything sold here is hauled in.'
+                    : `Over the counter at ${v.counters
+                        .map((c) => C.industries[c.def].name.toLowerCase())
+                        .join(', ')}`}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {view === 'cargo' && (
       <div className="dist-rows">
         {sorted.map((r) => {
           const cargo = C.cargo[r.cargo];
@@ -156,6 +281,7 @@ export function District({
           );
         })}
       </div>
+      )}
       <div className="sheet-foot">Tonnes a day.</div>
     </div>
   );

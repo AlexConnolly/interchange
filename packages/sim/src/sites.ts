@@ -110,6 +110,20 @@ export class SiteTable {
    */
   readonly counter: Int32Array;
 
+  /**
+   * The fraction of a tonne a counter is owed but has not sold yet.
+   *
+   * Tonnes are whole numbers everywhere in this simulation, and a counter's
+   * trade is now a *share* — so a village shop entitled to a third of a tonne of
+   * produce a day rounded to nothing and sold **nothing, ever**. Not slowly:
+   * never, because `round(0.33)` is zero every day for ever.
+   *
+   * Same fix the town basket already uses for the same reason — see
+   * `demandAcc` — and the same reason it has to exist at all: a rate below one
+   * tonne is still a rate.
+   */
+  readonly tradeAcc: Float32Array;
+
   /** Production multiplier 0..100 from the three-network requirement. */
   readonly powered = new Uint8Array(MAX_SITES);
   readonly watered = new Uint8Array(MAX_SITES);
@@ -188,6 +202,7 @@ export class SiteTable {
     this.cargoCount = cargoCount;
     this.stock = new Int32Array(MAX_SITES * cargoCount);
     this.counter = new Int32Array(MAX_SITES * cargoCount);
+    this.tradeAcc = new Float32Array(MAX_SITES * cargoCount);
     this.capacity = new Int32Array(MAX_SITES * cargoCount);
   }
 
@@ -549,8 +564,18 @@ export function stepSites(
          * a tonne is how a hundred shops in an empty valley made a hundred tonnes
          * a day appear out of the ground.
          */
-        const want = Math.max(0, Math.round(ins[i + 1] * scale * sites.trade[s]));
+        /*
+         * Accumulated rather than rounded. A counter's trade is a share of the
+         * people it can reach, so a shop owed a third of a tonne a day has to be
+         * able to sell one every third day — rounding each day's entitlement
+         * independently floors it at zero and the shop never sells anything at
+         * all.
+         */
+        const acc = s * cargoCount + ins[i];
+        sites.tradeAcc[acc] += ins[i + 1] * scale * sites.trade[s];
+        const want = Math.floor(sites.tradeAcc[acc]);
         if (want <= 0) continue;
+        sites.tradeAcc[acc] -= want;
         const have = sites.stockOf(s, ins[i]);
         if (have <= 0) continue;
         const took = Math.min(want, have);
