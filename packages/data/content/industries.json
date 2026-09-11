@@ -433,7 +433,8 @@
   "colour": "#6b3a2f",
   "approvalImpact": 13,
   "approvalRadius": 10,
-  "approvalNeed": 0
+  "approvalNeed": 0,
+  "servesParish": true
  },
  {
   "id": "distribution-centre",

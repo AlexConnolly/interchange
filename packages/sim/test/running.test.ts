@@ -195,20 +195,28 @@ describe('what the district is short of', () => {
     }
   });
 
-  it('calls a finished good with nowhere to go unwanted', () => {
+  it('calls anything with no taker at all unwanted', () => {
     /*
-     * The finding this screen exists for. One building in the whole content has
-     * `retail: true`, so the chain has somewhere to start and nowhere to end —
-     * measured on this seed, dairy is over-made fifty-six times over and nothing
-     * takes sawn timber at all.
+     * Stated as a rule over every row rather than by naming a cargo, because
+     * which cargo it is depends entirely on what worldgen happened to build.
+     * The first version of this named dairy and sawn — true of the content at the
+     * time, and false the moment a pub and a distribution yard turned up in the
+     * district and gave both of them a customer.
+     *
+     * The structural point survives that and is worth keeping: a district where
+     * one building has `retail: true` will always have finished goods with
+     * nowhere to go, whichever ones they are this seed.
      */
     const w = district();
     const rows = w.districtBalance();
-    const byId = (id: string) => rows.find(
-      (r) => w.content.cargo[r.cargo].id === id,
-    );
-    expect(byId('dairy')?.verdict).toBe('unwanted');
-    expect(byId('sawn')?.verdict).toBe('unwanted');
+    let orphans = 0;
+    for (const r of rows) {
+      if (r.wantedByWorks + r.wantedByTowns > 0) continue;
+      orphans++;
+      expect(r.verdict, `${w.content.cargo[r.cargo].id} has no taker and is not unwanted`)
+        .toBe('unwanted');
+    }
+    expect(orphans, 'every cargo in the district has a customer').toBeGreaterThan(0);
   });
 
   it('tells a haulage problem from a production one', () => {
@@ -247,5 +255,105 @@ describe('what the district is short of', () => {
     w.pauseSite(creamery);
     const after = w.districtBalance().find((r) => r.cargo === milk);
     expect(after?.wantedByWorks).toBeLessThan(before?.wantedByWorks as number);
+  });
+});
+
+describe('trade is somewhere, not something', () => {
+  /*
+   * The plainest exploit the game had. Retail throughput was a property of the
+   * *building*: measured before this, one pub got through **nine tonnes of beer a
+   * day** in a district of 2,512 people — seven pints a head, daily, from one pub
+   * — and nothing stopped you building ten more and selling ninety. The village
+   * shop was the same at thirteen tonnes of produce.
+   *
+   * So the answer to "how do I sell more" was "another building", for ever, and
+   * the district's population had no bearing on anything.
+   */
+  it('splits a village between the counters serving it', () => {
+    const w = district();
+    weeks(w, 1);
+    const pub = siteOf(w, 'pub');
+    if (pub < 0) return;
+    const alone = w.tradeShare(pub);
+    expect(alone).toBeGreaterThan(0);
+
+    // Five more on top of it. The catchment is the same catchment.
+    const def = w.sites.def[pub];
+    const x = w.sites.x[pub];
+    const y = w.sites.y[pub];
+    const added: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const id = w.sites.alloc(def, x + 1, y + 1, (y + 1) * D + (x + 1), 0);
+      if (id >= 0) added.push(id);
+    }
+    expect(added.length).toBe(5);
+    weeks(w, 1);
+
+    let together = w.tradeShare(pub);
+    for (const a of added) together += w.tradeShare(a);
+    /*
+     * To a tenth, not a hundredth. The five extras stand a tile nearer the
+     * village than the original, so they each reach marginally more people —
+     * which is the distance falloff working, not drift. What is being pinned is
+     * that six counters share one village's trade rather than multiplying it.
+     */
+    expect(together, 'six pubs beat one').toBeCloseTo(alone, 1);
+    expect(w.tradeShare(pub), 'the original kept its trade').toBeLessThan(alone);
+  });
+
+  it('leaves a counter in another village alone', () => {
+    // Which is the other half: stacking gains nothing, spreading out gains
+    // everything. Trade is somewhere rather than something.
+    const w = district();
+    weeks(w, 1);
+    let first = -1;
+    let far = -1;
+    for (let s = 0; s < w.sites.count; s++) {
+      if (w.content.industries[w.sites.def[s]].id !== 'pub') continue;
+      if (first < 0) { first = s; continue; }
+      const d = Math.hypot(w.sites.x[s] - w.sites.x[first], w.sites.y[s] - w.sites.y[first]);
+      if (d > 20) { far = s; break; }
+    }
+    if (first < 0 || far < 0) return;
+    const before = w.tradeShare(far);
+    const def = w.sites.def[first];
+    for (let i = 0; i < 4; i++) {
+      w.sites.alloc(def, w.sites.x[first] + 1, w.sites.y[first] + 1,
+        (w.sites.y[first] + 1) * D + w.sites.x[first] + 1, 0);
+    }
+    weeks(w, 1);
+    // Loose for the same reason, plus a week of the village growing under it.
+    expect(w.tradeShare(far)).toBeCloseTo(before, 1);
+  });
+
+  it('pays a counter more where there are more people', () => {
+    /*
+     * And this is where housing pays into retail. A pub in a village of four
+     * hundred is a third as busy as one in a village of twelve hundred, so
+     * releasing land near your own counter raises its takings — two decisions
+     * that used to be unrelated.
+     */
+    const w = district();
+    weeks(w, 1);
+    const pub = siteOf(w, 'pub');
+    if (pub < 0) return;
+    const quiet = w.tradeShare(pub);
+    for (let t = 0; t < w.towns.count; t++) {
+      w.towns.population[t] *= 3;
+      w.towns.capacity[t] *= 3;
+    }
+    weeks(w, 1);
+    expect(w.tradeShare(pub), 'more people did not mean more trade')
+      .toBeGreaterThan(quiet);
+  });
+
+  it('gives nothing to a counter with nobody near it', () => {
+    const w = district();
+    const pub = siteOf(w, 'pub');
+    if (pub < 0) return;
+    const away = w.sites.alloc(w.sites.def[pub], 2, 2, 2 * D + 2, 0);
+    expect(away).toBeGreaterThanOrEqual(0);
+    weeks(w, 1);
+    expect(w.tradeShare(away)).toBe(0);
   });
 });

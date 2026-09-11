@@ -120,8 +120,17 @@ describe('the village shop', () => {
     const stocked = w.approval;
     expect(stocked).toBeGreaterThan(start);
 
-    // And left to run dry it gives the ground back, because approval is for
-    // serving the place rather than for having bought a building in it.
+    /*
+     * And emptied it gives the ground back, because approval is for serving the
+     * place rather than for having bought a building in it.
+     *
+     * The shelves are cleared rather than left to run down. A counter's trade is
+     * capped by the people it can reach now, so a shop sells a few tonnes a day
+     * instead of thirteen and ninety-nine tonnes of produce outlasts any sensible
+     * test — which is the cap working, and nothing to do with what this is
+     * pinning.
+     */
+    w.sites.takeStock(shop, produce, w.sites.stockOf(shop, produce));
     for (let d = 0; d < 20; d++) {
       for (let t = 0; t < TICKS_PER_DAY; t++) w.step();
     }

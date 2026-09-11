@@ -113,7 +113,24 @@ const FARMLAND = 9;
  * kind matching no page at all is a building that is simply not in the game, with
  * nothing anywhere to say so. That is how the distribution centre went missing.
  */
-export function trayPageFor(kind: string, deposit = 0): TrayPage {
+export function trayPageFor(
+  kind: string, deposit = 0, servesParish = false, retail = false,
+): TrayPage {
+  /*
+   * Something built for the parish that sells nothing files under Parish.
+   *
+   * Both halves of that matter. A school is a `terminal` in the simulation
+   * because it needs road access and takes deliveries, which is the right thing
+   * for the simulation to think and not what a player thinks — it belongs beside
+   * the green and the playing field. But a **pub** also serves the parish and it
+   * sells beer over a counter, so it is trade, and filing it with the greens
+   * because it shares a mechanical flag would be letting an approval rule decide
+   * a shelf.
+   *
+   * It also keeps the rows honest, which is the one thing this file exists for:
+   * with both on Trade the page reached seven. Split this way it is six and four.
+   */
+  if (servesParish && !retail) return 'parish';
   if (kind === 'amenity') return 'parish';
   if (kind === 'terminal') return 'trade';
   if (kind === 'extraction') return deposit === FARMLAND ? 'farms' : 'ground';
