@@ -6964,6 +6964,20 @@ export class World {
 
   // ------------------------------------------------------------- hashing
 
+  /**
+   * The determinism hash, and a note about what is deliberately not in it.
+   *
+   * Land is not hashed and housing is land — no `use`, `plots` or `made`. That is
+   * a decision rather than an omission, and it rests on one fact: a house raises
+   * the nearest town's `capacity`, and `hashSites` **does** hash capacity. So two
+   * clients that disagreed about a street would disagree about how many people a
+   * village has room for, and the hash would catch it on the next interval.
+   *
+   * Hashing the register as well would add a second signal for the same
+   * divergence, and the thing it costs is not cycles — it is that a hash which
+   * includes everything stops telling you *where* a desync is. Capacity is the
+   * narrower and more useful place for this one to surface.
+   */
   hash(): number {
     const h = new Hasher();
     h.int(this.tick);

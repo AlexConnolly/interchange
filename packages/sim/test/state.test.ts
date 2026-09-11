@@ -88,12 +88,63 @@ function played() {
     break;
   }
 
+  // A field given over to housing, with a street on it and a village grown to
+  // match. Three columns on the land register and one on the town table, none of
+  // which existed when this fixture was written.
+  let released = NONE;
+  for (const p of bought) {
+    if (!w.canReleaseForHousing(p).ok) continue;
+    if (w.releaseForHousing(p).ok) { released = p; break; }
+  }
+  if (released !== NONE) {
+    w.approval = 95;
+    w.refreshApproval();
+  }
+
   // And let it run, so stock moves, money moves and lorries are mid-journey.
   for (let i = 0; i < 30 * TICKS_PER_DAY; i++) w.step();
-  return { w, bought, placed, laid };
+  return { w, bought, placed, laid, released };
 }
 
 describe('a save of a played world', () => {
+  it('carries housing, which the walker test cannot prove on its own', () => {
+    /*
+     * `stateHash` digests whatever `saveState` produced, so a field the walker
+     * cannot see is invisible to the round-trip test *and* to the hash — the two
+     * agree with each other about a value neither of them has. The guard below
+     * (`worldArrays`) closes that for `World`'s own arrays and does not reach a
+     * field on a table, so `LandRegister` and `TownTable` need saying out loud.
+     *
+     * The specific trap: `bagOf` keeps typed arrays and scalars and silently drops
+     * anything else, so a `number[]` added to the land register would vanish on
+     * save, pass every existing test, and turn up as a district whose streets had
+     * gone back to being fields.
+     */
+    const { w, released } = played();
+    expect(released, 'the fixture released no field').not.toBe(NONE);
+    expect(w.land.housing(released)).toBe(true);
+    expect(w.land.plots[released]).toBeGreaterThan(0);
+    expect(w.land.made[released], 'the fixture built no plot').toBeGreaterThan(0);
+
+    const capacity = [...w.towns.capacity.slice(0, w.towns.count)];
+    expect(capacity.some((c) => c > 0)).toBe(true);
+
+    const file = JSON.parse(JSON.stringify(saveState(w)));
+    const back = fresh();
+    expect(back.land.housing(released), 'a fresh world already has housing')
+      .toBe(false);
+
+    restoreState(back, file);
+    expect(back.land.use[released]).toBe(w.land.use[released]);
+    expect(back.land.plots[released]).toBe(w.land.plots[released]);
+    expect(back.land.made[released]).toBe(w.land.made[released]);
+    expect([...back.towns.capacity.slice(0, back.towns.count)]).toEqual(capacity);
+    // And the parish still knows why, which is a *derived* thing rather than a
+    // saved one: crowding is read off population against capacity, so a capacity
+    // that failed to load would read as a district that had quietly got roomier.
+    expect(back.crowdingAt(0)).toBeCloseTo(w.crowdingAt(0), 5);
+  });
+
   it('restores to exactly the same state', () => {
     /*
      * The whole point, in one assertion. `stateHash` digests every field the
