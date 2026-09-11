@@ -792,6 +792,14 @@ export function stepTowns(
   demandPerThousand: Float64Array,
   producePerThousand: Float64Array,
   growthPerDay: number,
+  /**
+   * How much more of a cargo *this* town wants than the average.
+   *
+   * Passed in rather than computed here, because what a place is like is a fact
+   * about the world and this table knows only about tonnes. Defaults to flat, so
+   * a caller that does not care gets the old uniform district.
+   */
+  taste: (town: number, cargo: number) => number = () => 1,
 ): void {
   const cargoCount = towns.cargoCount;
   for (let t = 0; t < towns.count; t++) {
@@ -832,8 +840,16 @@ export function stepTowns(
     let wanted = 0;
     let met = 0;
     for (let c = 0; c < cargoCount; c++) {
-      const per = demandPerThousand[c];
-      if (per === 0) continue;
+      if (demandPerThousand[c] === 0) continue;
+      /*
+       * Taste multiplies what the town wants *and* what its own fields supply,
+       * because `LOCAL_SUPPLY_POP` is a number of people rather than a number of
+       * tonnes — a village that drinks half again as much beer does not grow half
+       * again as much of it. Applying it to one side only would quietly turn a
+       * preference into a permanent shortfall and make every working town
+       * unservable.
+       */
+      const per = demandPerThousand[c] * taste(t, c);
       // Fractional on purpose. Rounding each cargo up to a whole tonne a day
       // put a floor under a small town's basket that was larger than the
       // basket, so every town wanted a dozen tonnes a day whatever its size.

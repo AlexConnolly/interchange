@@ -29,7 +29,7 @@ import {
   JOURNAL, MoneyKind, GATE_WEEKLY_TONNES, GATE_REFERENCE_TILES,
   BUYER_NAMES,
   MARKET_TERMS, MAX_PENDING_SALES, RETAIL_PCT, GOODS_SCALE,
-  TRADE_CATCHMENT, RETAIL_REACH,
+  TRADE_CATCHMENT, TRADE_RIVALRY, RETAIL_REACH, TOWN_TASTE, tasteOf,
   type MarketOffer,
 } from './economy.ts';
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
@@ -61,7 +61,7 @@ import {
 import { Heap } from './heap.ts';
 import { Rng } from './rng.ts';
 import {
-  IndustryKind, SiteState, SiteTable, TownTable, hashSites, stepSiteDecay, ageSites,
+  IndustryKind, SiteState, SiteTable, TownTable, TownCharacter, hashSites, stepSiteDecay, ageSites,
   crowding,
   stepSites, stepTowns, type RecipeTables,
 } from './sites.ts';
@@ -1465,12 +1465,19 @@ export class World {
      * First what each counter *could* take from its catchment, then what else is
      * reaching for the same people.
      */
-    const reach: { site: number; people: number }[] = [];
+    const reach: { site: number; pull: number[] }[] = [];
     for (let s = 0; s < this.sites.count; s++) {
       if (this.content.industries[this.sites.def[s]]?.retail !== true) continue;
       if (this.sites.state[s] === SiteState.Dead
         || this.sites.state[s] === SiteState.Paused) continue;
-      let people = 0;
+      /*
+       * Per cargo, not one figure, because a district is not uniform any more.
+       * The same five hundred people are worth half again as much to a pub if
+       * they live in a working town and three quarters as much if they commute
+       * out of a dormitory — so "how many people can this counter reach" has a
+       * different answer for beer than for parcels.
+       */
+      const pull = new Array<number>(cargoCount).fill(0);
       for (let t = 0; t < this.towns.count; t++) {
         const d = Math.hypot(this.towns.x[t] - this.sites.x[s], this.towns.y[t] - this.sites.y[s]);
         if (d > RETAIL_REACH) continue;
@@ -1480,40 +1487,51 @@ export class World {
          * the rim of one — and so that moving a counter a tile does not flip its
          * trade.
          */
-        people += this.towns.population[t] * (1 - d / RETAIL_REACH);
+        const near = this.towns.population[t] * (1 - d / RETAIL_REACH);
+        const kind = TownCharacter[this.towns.character[t]] ?? 'market';
+        for (let c = 0; c < cargoCount; c++) {
+          pull[c] += near * tasteOf(kind, this.content.cargo[c].id, t, this.config.seed);
+        }
       }
-      reach.push({ site: s, people });
+      reach.push({ site: s, pull });
     }
 
     for (const r of reach) {
       const ins = this.recipes.inputs[this.sites.def[r.site]];
-      /*
-       * How many other counters are reaching for the same people with the same
-       * thing. Counted by *catchment overlap* rather than by "in the same
-       * village", because two villages a few tiles apart share their trade and a
-       * rule keyed on town membership would say they do not.
-       *
-       * Itself included, so one counter divides by one.
-       */
-      let rivals = 0;
-      for (const o of reach) {
-        const oins = this.recipes.inputs[this.sites.def[o.site]];
-        let same = false;
-        for (let k = 0; k < oins.length; k += 2) {
-          for (let i = 0; i < ins.length; i += 2) {
-            if (oins[k] === ins[i]) { same = true; break; }
-          }
-          if (same) break;
+      let share = 0;
+      let n = 0;
+      for (let i = 0; i < ins.length; i += 2) {
+        const cargo = ins[i];
+        /*
+         * How many other counters reach for the same people with the same thing.
+         * Counted by *catchment overlap* rather than by "in the same village",
+         * because two villages a few tiles apart share their trade and a rule
+         * keyed on town membership would say they do not. Itself included, so a
+         * lone counter divides by one plus the rivalry term.
+         */
+        let rivals = 0;
+        for (const o of reach) {
+          const oins = this.recipes.inputs[this.sites.def[o.site]];
+          let same = false;
+          for (let k = 0; k < oins.length; k += 2) if (oins[k] === cargo) { same = true; break; }
+          if (!same) continue;
+          const d = Math.hypot(
+            this.sites.x[o.site] - this.sites.x[r.site],
+            this.sites.y[o.site] - this.sites.y[r.site],
+          );
+          if (d <= RETAIL_REACH) rivals++;
         }
-        if (!same) continue;
-        const d = Math.hypot(
-          this.sites.x[o.site] - this.sites.x[r.site],
-          this.sites.y[o.site] - this.sites.y[r.site],
-        );
-        if (d <= RETAIL_REACH) rivals++;
+        /*
+         * And the saturating split. Not `pull / rivals`, which conserves the
+         * total and so makes a second counter pure cannibalisation — see
+         * `TRADE_RIVALRY`. This way the village supports more trade the more
+         * there is to go to, each counter earns less than the last, and it tops
+         * out at what the people there can actually get through.
+         */
+        share += Math.min(1, (r.pull[cargo] / TRADE_CATCHMENT) / (rivals + TRADE_RIVALRY));
+        n++;
       }
-      const busy = Math.min(1, r.people / TRADE_CATCHMENT);
-      this.sites.trade[r.site] = rivals > 0 ? busy / rivals : busy;
+      this.sites.trade[r.site] = n > 0 ? share / n : 0;
     }
   }
 
@@ -1527,6 +1545,45 @@ export class World {
   tradeShare(site: number): number {
     if (site < 0 || site >= this.sites.count) return 0;
     return this.sites.trade[site];
+  }
+
+  /**
+   * Why a counter's trade is what it is, in the two numbers that decide it.
+   *
+   * "My pub is half empty" has exactly two answers — not many people round here,
+   * or you built two — and the panel cannot tell them apart from the share alone.
+   * A village and a rival count says which, and the player can act on either.
+   */
+  tradeReach(site: number): { people: number; rivals: number; village: string } {
+    const out = { people: 0, rivals: 0, village: '' };
+    if (site < 0 || site >= this.sites.count) return out;
+    let best = -1;
+    let bestNear = 0;
+    for (let t = 0; t < this.towns.count; t++) {
+      const d = Math.hypot(this.towns.x[t] - this.sites.x[site], this.towns.y[t] - this.sites.y[site]);
+      if (d > RETAIL_REACH) continue;
+      const near = this.towns.population[t] * (1 - d / RETAIL_REACH);
+      out.people += near;
+      if (near > bestNear) { bestNear = near; best = t; }
+    }
+    out.village = best >= 0 ? (this.towns.names[best] ?? '') : '';
+
+    const ins = this.recipes.inputs[this.sites.def[site]];
+    for (let o = 0; o < this.sites.count; o++) {
+      if (o === site) continue;
+      if (this.content.industries[this.sites.def[o]]?.retail !== true) continue;
+      if (this.sites.state[o] === SiteState.Dead || this.sites.state[o] === SiteState.Paused) continue;
+      const oins = this.recipes.inputs[this.sites.def[o]];
+      let same = false;
+      for (let k = 0; k < oins.length; k += 2) {
+        for (let i = 0; i < ins.length; i += 2) if (oins[k] === ins[i]) { same = true; break; }
+        if (same) break;
+      }
+      if (!same) continue;
+      const d = Math.hypot(this.sites.x[o] - this.sites.x[site], this.sites.y[o] - this.sites.y[site]);
+      if (d <= RETAIL_REACH) out.rivals++;
+    }
+    return out;
   }
 
   /** What holding this place costs a week, for the panel. */
@@ -1764,6 +1821,10 @@ export class World {
     this.rebuildTownBasket(this.era);
     stepTowns(
       this.towns, this.townDemandPerThousand, this.townProducePerThousand, b.townGrowthPerDay,
+      (t, c) => tasteOf(
+        TownCharacter[this.towns.character[t]] ?? 'market',
+        this.content.cargo[c].id, t, this.config.seed,
+      ),
     );
     stepFinance(this.companies, b, (c) => this.declareBankrupt(c));
 

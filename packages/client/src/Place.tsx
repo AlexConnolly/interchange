@@ -591,6 +591,40 @@ function About({
          * failing. This is the same machinery with somebody's hand on it.
          */
         <div className="card">
+          {def.retail === true && (() => {
+            /*
+             * Why a counter is as busy as it is, which is a question the panel
+             * could not answer at all: trade used to be a property of the
+             * building, so a pub sold the same whether it stood in a town of
+             * fourteen hundred or in an empty valley.
+             *
+             * Two numbers, because there are exactly two answers — not many
+             * people round here, or you built two — and the player can act on
+             * either. A third pub is a decision against this figure.
+             */
+            const reach = world.tradeReach(site);
+            const pct = Math.round(world.tradeShare(site) * 100);
+            return (
+              <>
+                <div className="card-figures">
+                  <span>
+                    <i>Trade</i>
+                    <b>{pct}%</b>
+                  </span>
+                  <span>
+                    <i>{reach.village === '' ? 'Nobody near' : reach.village}</i>
+                    <b>{Math.round(reach.people).toLocaleString('en-GB')} within reach</b>
+                  </span>
+                </div>
+                {reach.rivals > 0 && (
+                  <div className="plot-sub">
+                    Sharing them with {reach.rivals} other
+                    {reach.rivals === 1 ? ' counter' : ' counters'}.
+                  </div>
+                )}
+              </>
+            );
+          })()}
           <div className="card-figures">
             <span>
               <i>Upkeep</i>

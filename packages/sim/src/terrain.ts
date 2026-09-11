@@ -961,9 +961,32 @@ function placeTowns(t: Terrain, rng: Rng, count: number): TownSeed[] {
     }
     if (!name) continue;
 
-    const coastal = (t.flags[t.idx(c.x, c.y)] & TileFlag.Coast) !== 0 || nearSea(t, c.x, c.y, 6);
+    /*
+     * What sort of place this is, which decides what it buys more of.
+     *
+     * Terrain narrows it and does not decide it, and that is a fact about this
+     * generator rather than a preference. Measured over six seeds, town heights
+     * are strictly bimodal — eleven towns between 1 and 15, seven between 257 and
+     * 497, and nothing at all in between — so a rule of "coastal, else upland,
+     * else something" produced districts of three ports or a port and two resorts
+     * and never anything else. A character table has nothing to say to a district
+     * that is all one character.
+     *
+     * So the ground picks the *pair* and the index picks between them. A coastal
+     * town is a port or just a village by the sea; high ground is a resort or the
+     * working town that grew round the quarry. Both readings are true of the same
+     * hillside, which is what makes choosing between them honest rather than
+     * arbitrary — and it guarantees a district gets a mix.
+     */
+    const coastal = (t.flags[t.idx(c.x, c.y)] & TileFlag.Coast) !== 0
+      || nearSea(t, c.x, c.y, 3);
     const upland = t.height[t.idx(c.x, c.y)] > 300;
-    const character = coastal ? 2 : upland ? 3 : out.length % 3 === 0 ? 1 : 0;
+    const i = out.length;
+    const character = coastal
+      ? [2, 0][i % 2]
+      : upland
+        ? [3, 1][i % 2]
+        : [0, 1, 4][i % 3];
     out.push({
       x: c.x,
       y: c.y,

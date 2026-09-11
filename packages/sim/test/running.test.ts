@@ -18,7 +18,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  createWorld, TICKS_PER_DAY, DAYS_PER_WEEK, Line, LINE_COUNT, SiteState,
+  createWorld, TICKS_PER_DAY, DAYS_PER_WEEK, Line, LINE_COUNT, SiteState, tasteOf,
 } from '../src/index.ts';
 import { loadContent } from '../../data/src/index.ts';
 
@@ -269,7 +269,17 @@ describe('trade is somewhere, not something', () => {
    * So the answer to "how do I sell more" was "another building", for ever, and
    * the district's population had no bearing on anything.
    */
-  it('splits a village between the counters serving it', () => {
+  it('grows a village trade when there is more to go to, and tops out', () => {
+    /*
+     * The first version of the split conserved the total, which conserves nothing
+     * worth having: it made the second pub pure cannibalisation and the only
+     * sensible number of them one. "Two pubs is bad" is a rule, not a decision,
+     * and it is also wrong about villages — a place with two pubs drinks more
+     * than a place with one.
+     *
+     * So each counter added earns something and each earns less than the last,
+     * toward a ceiling the people there set. See `TRADE_RIVALRY`.
+     */
     const w = district();
     weeks(w, 1);
     const pub = siteOf(w, 'pub');
@@ -277,7 +287,6 @@ describe('trade is somewhere, not something', () => {
     const alone = w.tradeShare(pub);
     expect(alone).toBeGreaterThan(0);
 
-    // Five more on top of it. The catchment is the same catchment.
     const def = w.sites.def[pub];
     const x = w.sites.x[pub];
     const y = w.sites.y[pub];
@@ -291,14 +300,19 @@ describe('trade is somewhere, not something', () => {
 
     let together = w.tradeShare(pub);
     for (const a of added) together += w.tradeShare(a);
+
+    // More in total than one managed…
+    expect(together, 'six pubs sell no more than one').toBeGreaterThan(alone);
+    // …and less each, so the sixth is a judgement against its own upkeep.
+    expect(w.tradeShare(pub), 'the sixth pub cost the first nothing')
+      .toBeLessThan(alone);
     /*
-     * To a tenth, not a hundredth. The five extras stand a tile nearer the
-     * village than the original, so they each reach marginally more people —
-     * which is the distance falloff working, not drift. What is being pinned is
-     * that six counters share one village's trade rather than multiplying it.
+     * And nowhere near six times, which is the whole point. The ceiling is the
+     * pull of the people there — about twice what a lone counter takes, since a
+     * lone one gets `pull / (1 + 1)`.
      */
-    expect(together, 'six pubs beat one').toBeCloseTo(alone, 1);
-    expect(w.tradeShare(pub), 'the original kept its trade').toBeLessThan(alone);
+    expect(together, 'trade scaled with buildings rather than with people')
+      .toBeLessThan(alone * 2.2);
   });
 
   it('leaves a counter in another village alone', () => {
@@ -355,5 +369,68 @@ describe('trade is somewhere, not something', () => {
     expect(away).toBeGreaterThanOrEqual(0);
     weeks(w, 1);
     expect(w.tradeShare(away)).toBe(0);
+  });
+});
+
+describe('one place is not another', () => {
+  /*
+   * `cut.md` had settlement character down as cut and cheap to bring back —
+   * *"flavour on a demand basket… genuinely nice; not load-bearing"* — and the
+   * scaffolding outlived the cut: `towns.character` has been assigned from the
+   * terrain since the beginning and read by nothing but the determinism hash.
+   *
+   * What it buys is that a district stops being uniform. A pub in a working town
+   * is worth half again what the same pub is worth in a commuter village, so
+   * *where* you build is a decision before *what* is.
+   */
+  it('gives a district more than one kind of town', () => {
+    /*
+     * The measurement that forced the rule. Town heights are strictly bimodal —
+     * eleven of eighteen between 1 and 15, the rest between 257 and 497, nothing
+     * in between — so deriving character from terrain alone gave districts of
+     * three ports, and a taste table has nothing to say to those.
+     */
+    for (const seed of [1985, 7, 42, 99, 123]) {
+      const w = createWorld({ seed, size: D, townCount: 3, companyCount: 1 });
+      const kinds = new Set<number>();
+      for (let t = 0; t < w.towns.count; t++) kinds.add(w.towns.character[t]);
+      expect(kinds.size, `seed ${seed} is all one kind of town`).toBeGreaterThan(1);
+    }
+  });
+
+  it('makes a working town thirstier than a commuter one', () => {
+    expect(tasteOf('industrial', 'beer', 0, 1)).toBeGreaterThan(tasteOf('dormitory', 'beer', 0, 1));
+    expect(tasteOf('dormitory', 'parcels', 0, 1)).toBeGreaterThan(tasteOf('industrial', 'parcels', 0, 1));
+    expect(tasteOf('resort', 'produce', 0, 1)).toBeGreaterThan(tasteOf('industrial', 'produce', 0, 1));
+  });
+
+  it('separates two towns of the same kind, so it is a place and not a label', () => {
+    // Character alone would make every market town identical, which is a district
+    // built from four rubber stamps.
+    const a = tasteOf('resort', 'beer', 0, 1985);
+    const b = tasteOf('resort', 'beer', 1, 1985);
+    expect(a).not.toBe(b);
+  });
+
+  it('holds the same taste for the whole game and across a reload', () => {
+    // Hashed from the town and the seed rather than drawn from the world's rng,
+    // which would make the answer depend on what else had asked a question first.
+    for (let t = 0; t < 3; t++) {
+      expect(tasteOf('port', 'beer', t, 42)).toBe(tasteOf('port', 'beer', t, 42));
+    }
+  });
+
+  it('never turns a preference into a permanent shortfall', () => {
+    /*
+     * Taste multiplies what a town wants *and* what its own fields supply,
+     * because `LOCAL_SUPPLY_POP` counts people rather than tonnes. Scaling one
+     * side only would make every thirsty town unservable — so a district nobody
+     * hauls to must still settle, whatever its towns are like.
+     */
+    const w = district();
+    for (let d = 0; d < 300; d++) for (let t = 0; t < TICKS_PER_DAY; t++) w.step();
+    for (let t = 0; t < w.towns.count; t++) {
+      expect(w.towns.population[t], `${w.towns.names[t]} emptied out`).toBeGreaterThan(59);
+    }
   });
 });

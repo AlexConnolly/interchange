@@ -821,6 +821,91 @@ export const RETAIL_PCT = 260;
 export const TRADE_CATCHMENT = 1200;
 
 /**
+ * How much a second counter takes off the first, and why it is not half.
+ *
+ * The first version of the catchment split a village's trade evenly between
+ * whatever was selling into it, which conserves the total and therefore says
+ * **two pubs are worse than one** — the second is pure cannibalisation and the
+ * only sensible number of them is one. That is a rule, not a decision, and it is
+ * also wrong about villages: a place with two pubs genuinely drinks more than a
+ * place with one, because there is somewhere to go when the other is full and
+ * going out is a thing people do more of when there is more of it to do.
+ *
+ * So demand *grows* with what is there and tops out. With `n` counters the
+ * village supports `pull * n / (n + RIVALRY)` between them, so each gets
+ * `pull / (n + RIVALRY)`:
+ *
+ *   one pub    half the village's pull, all to itself
+ *   two pubs   two thirds of it, a third each
+ *   three      three quarters, a quarter each
+ *   many       the whole pull, and nothing more
+ *
+ * Every counter you add earns *something* and each one earns less than the last,
+ * which makes the second pub a judgement against its own upkeep rather than an
+ * obvious mistake. One, because it puts the halfway point at a single rival: the
+ * first competitor is the one that matters most, as it should be.
+ */
+export const TRADE_RIVALRY = 1;
+
+/**
+ * What a place is like, and therefore what it buys more of.
+ *
+ * `cut.md` has settlement character down as cut and cheap to restore — *"flavour
+ * on a demand basket… genuinely nice; not load-bearing"* — and the scaffolding
+ * survived the cut: `towns.character` is assigned at worldgen from the terrain
+ * (coastal makes a port, high ground a resort, every third a working town) and
+ * has been read by nothing but the determinism hash ever since.
+ *
+ * This is the table it was assigned for. Multipliers against the baseline, and a
+ * market town *is* the baseline, so it has no entries at all — a reference that
+ * needs tuning is not a reference.
+ *
+ * The point of it is that a district stops being uniform. A pub in a working
+ * town is worth half again what the same pub is worth in a commuter village, so
+ * *where* you build is a decision before *what* is, and two identical creameries
+ * in two different places are genuinely different businesses.
+ */
+export const TOWN_TASTE: Record<string, Record<string, number>> = {
+  // A working town drinks, eats meat, and has less time for anything fancy.
+  industrial: { beer: 1.55, meat: 1.2, fuel: 1.15, produce: 0.9, dairy: 0.95 },
+  // A port runs on fuel and freight, and its pubs are never empty.
+  port: { beer: 1.3, fuel: 1.35, parcels: 1.25, meat: 1.05 },
+  // Visitors eat out and drive in, and somebody has to feed them.
+  resort: { produce: 1.4, dairy: 1.3, beer: 1.2, fuel: 1.2, meat: 1.15 },
+  // People who work elsewhere buy their lives by post and drink at home.
+  dormitory: { parcels: 1.5, produce: 1.2, dairy: 1.1, beer: 0.75, fuel: 0.9 },
+};
+
+/**
+ * And how much two towns of the same sort still differ.
+ *
+ * Character alone would make every market town identical, which is a district
+ * built from four rubber stamps. A fifth either way, fixed per town and cargo
+ * from the seed, is enough that the player learns *this* village rather than
+ * *this kind of village* — and small enough that character is still the thing
+ * doing the work.
+ */
+export const TASTE_JITTER = 0.2;
+
+/**
+ * How much more of a cargo this town wants than the average.
+ *
+ * Deterministic from the town and the cargo, so a village that likes its beer
+ * likes it for the whole game and still likes it after a reload. Hashed rather
+ * than drawn from the world's rng, which would make the answer depend on how
+ * many other things had asked a question first.
+ */
+export function tasteOf(
+  character: string, cargo: string, town: number, seed: number,
+): number {
+  const base = TOWN_TASTE[character]?.[cargo] ?? 1;
+  let h = (town * 2654435761 + seed * 40503 + cargo.length * 97) | 0;
+  for (let i = 0; i < cargo.length; i++) h = (h * 31 + cargo.charCodeAt(i)) | 0;
+  const unit = ((h >>> 8) & 0xffff) / 0xffff;
+  return Math.max(0.1, base * (1 - TASTE_JITTER + unit * TASTE_JITTER * 2));
+}
+
+/**
  * How far people will go to a shop, in tiles.
  *
  * Twenty tiles is about six hundred metres at this scale — a village's own walk.
