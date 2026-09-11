@@ -789,36 +789,33 @@ export const MAX_PENDING_SALES = 24;
 export const RETAIL_PCT = 260;
 
 /**
- * How many people it takes to keep one counter busy.
+ * How many people a counter needs within reach to have a full book.
  *
- * The fix for the plainest exploit the game had, and the number that makes it a
- * model rather than an arithmetic. Retail throughput used to be a property of the
- * *building*: a pub got through nine tonnes of beer a day whatever was around it,
- * in a district of 2,512 people — seven pints a head, daily, from one pub — and
- * the answer to "how do I sell more" was "build another pub", for ever.
+ * The scale the *reading* is against, and only the reading — the amount a
+ * counter draws comes from `RETAIL_PER_1000` and the people it reaches.
  *
- * The honest derivation says a village of fourteen hundred drinks about a quarter
- * of a tonne of beer a day, which is a fortieth of what the recipe can get
- * through. Using that directly would leave every counter in the game running at
- * one per cent and reading as permanently starved, because the recipes were
- * authored against a world with no ceiling. Retuning all of them is a separate
- * job and a bigger one.
+ * It needs its own denominator because the obvious one is useless. Measuring
+ * busy-ness against the *recipe* gives every counter in the game one per cent,
+ * since a recipe was authored against a world with no ceiling and is two hundred
+ * times any appetite a village actually has. "Trade 1%" on a shop turning a
+ * healthy profit is a number that can only mislead.
  *
- * So the share is against the **catchment that saturates one counter** instead.
- * Twelve hundred people keep a shop or a pub fully busy; fewer, and it is
- * proportionately quieter. That is a stated model rather than a measured fact and
- * it is worth knowing which — but it gives the three properties that were wanted
- * and it gives them from one constant:
- *
- *   A second counter selling the same thing to the same people **halves both**,
- *   so stacking is pointless and spreading out is the move.
- *
- *   A pub in a village of fourteen hundred outsells one in a village of four
- *   hundred by three to one, so **housing pays into retail**.
- *
- *   And a counter with nobody near it sells nothing.
+ * A consequence worth knowing rather than hiding: a lone counter reads about
+ * fifty per cent, because `TRADE_RIVALRY` leaves half the custom unserved until
+ * something else turns up for it. That is the saturating model saying out loud
+ * that there is room for another, which is exactly what a player deciding where
+ * to build wants told.
  */
 export const TRADE_CATCHMENT = 1200;
+
+export const RETAIL_PER_1000: Record<string, number> = {
+  produce: 6 / ECONOMY_SCALE,
+  dairy: 5 / ECONOMY_SCALE,
+  meat: 4 / ECONOMY_SCALE,
+  beer: 4 / ECONOMY_SCALE,
+  parcels: 3 / ECONOMY_SCALE,
+  fuel: 2 / ECONOMY_SCALE,
+};
 
 /**
  * How much a second counter takes off the first, and why it is not half.

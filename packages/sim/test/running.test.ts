@@ -19,6 +19,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   createWorld, TICKS_PER_DAY, DAYS_PER_WEEK, Line, LINE_COUNT, SiteState, tasteOf,
+  RETAIL_PER_1000,
 } from '../src/index.ts';
 import { loadContent } from '../../data/src/index.ts';
 
@@ -494,10 +495,12 @@ describe('the parish, village by village', () => {
 
   it('reports what those counters actually sell, not what their recipe could', () => {
     /*
-     * The bug this caught: `sites.trade` starts at one — "as busy as it can be" —
-     * and was only recomputed on the day boundary, so a panel opened on a new game
-     * showed every counter fully busy and a pub in an empty valley selling as much
-     * as one in a town. Worldgen settles it now.
+     * Two bugs this caught. `sites.trade` starts at one — "as busy as it can be"
+     * — and was only recomputed on the day boundary, so a panel opened on a new
+     * game showed every counter fully busy and a pub in an empty valley selling
+     * as much as one in a town; worldgen settles it now. And the figure was the
+     * recipe capacity times the busy-ness reading, which stopped being the same
+     * thing as the amount the moment the amount came from the people instead.
      */
     const w = district();
     for (const r of w.parishOverview()) {
@@ -521,5 +524,75 @@ describe('the parish, village by village', () => {
     }
     expect(retail, 'no counters in the district').toBeGreaterThan(0);
     expect(busy, 'every counter reads as fully busy on a fresh world').toBe(0);
+  });
+});
+
+describe('one appetite, not two', () => {
+  /*
+   * The incoherence this closes. A counter used to draw its *recipe* rate scaled
+   * by how busy it was, and a recipe was authored against a world with no
+   * ceiling — so measured, a pub drew 3.7 tonnes of beer a day from about a
+   * thousand people while the direct basket said the same thousand wanted 0.167.
+   *
+   * The same person drank a third of a pint if it was carted to their village
+   * and seven pints if there happened to be a pub. That is not a balance
+   * problem, it is two models of one appetite, and only one of them can be right.
+   */
+  it('feeds a person the same whether it comes by lorry or over a counter', () => {
+    const w = district();
+    weeks(w, 1);
+    const beer = w.content.cargoIndex.get('beer') as number;
+    const perHead = RETAIL_PER_1000[w.content.cargo[beer].id] / 1000;
+    expect(perHead).toBeGreaterThan(0);
+
+    for (const v of w.parishOverview()) {
+      const bought = v.buys.find((b) => b.cargo === beer);
+      if (!bought) continue;
+      /*
+       * Never more than the village drinks. Less is expected and correct — a
+       * lone counter is entitled to half of it, the rest being the room for
+       * another that `TRADE_RIVALRY` leaves open.
+       */
+      expect(bought.perDay, `${v.name} drinks more than it wants`)
+        .toBeLessThanOrEqual(perHead * v.population * 1.05);
+    }
+  });
+
+  it('reads its busy-ness against people rather than against its own recipe', () => {
+    /*
+     * A recipe is two hundred times any appetite a village has, so measuring
+     * against it gave every counter in the game one per cent — a number on a
+     * panel that can only mislead, on a shop turning a healthy profit.
+     */
+    const w = district();
+    weeks(w, 1);
+    let counters = 0;
+    for (let s = 0; s < w.sites.count; s++) {
+      if (w.content.industries[w.sites.def[s]]?.retail !== true) continue;
+      const reach = w.tradeReach(s);
+      if (reach.people <= 0) continue;
+      counters++;
+      expect(w.tradeShare(s), 'a counter with people near it reads as empty')
+        .toBeGreaterThan(0.02);
+    }
+    expect(counters, 'no counter has anybody near it').toBeGreaterThan(0);
+  });
+
+  it('still pays for itself, which is the point of owning one', () => {
+    // The cap had to bite without making a counter pointless. Measured: a shop
+    // nets about £633 a week against £94 of upkeep, a pub £413 against £112.
+    const w = district();
+    const shop = siteOf(w, 'village-shop');
+    if (shop < 0) return;
+    w.sites.owner[shop] = w.player;
+    const ins = w.recipes.inputs[w.sites.def[shop]];
+    const before = w.companies.cash[w.player];
+    for (let d = 0; d < DAYS_PER_WEEK * 8; d++) {
+      for (let i = 0; i < ins.length; i += 2) w.sites.addStock(shop, ins[i], 20);
+      for (let t = 0; t < TICKS_PER_DAY; t++) w.step();
+    }
+    const net = (w.companies.cash[w.player] - before) / 8;
+    expect(net, 'a supplied shop does not cover its own upkeep')
+      .toBeGreaterThan(w.upkeepOf(shop) * 2);
   });
 });

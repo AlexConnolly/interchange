@@ -64,7 +64,15 @@ describe('the village shop', () => {
     w.sites.addStock(shop, produce, 12);
     const before = w.sites.stockOf(shop, produce);
     expect(before).toBeGreaterThan(0);
-    for (let i = 0; i < TICKS_PER_DAY * 3; i++) w.step();
+    /*
+     * Thirty days rather than three. A counter draws its catchment's appetite
+     * now instead of its recipe's capacity — this shop serves four hundred and
+     * forty-eight people, so it gets through about fifty-five kilos of produce a
+     * day and a tonne takes three weeks. What is being pinned is that produce
+     * moves *without the beer having arrived*, which is unaffected by how fast it
+     * moves.
+     */
+    for (let i = 0; i < TICKS_PER_DAY * 30; i++) w.step();
     expect(w.sites.stockOf(shop, produce)).toBeLessThan(before);
   });
 

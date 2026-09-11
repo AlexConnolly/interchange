@@ -124,6 +124,16 @@ export class SiteTable {
    */
   readonly tradeAcc: Float32Array;
 
+  /**
+   * Tonnes a day this counter's catchment actually buys of each cargo.
+   *
+   * The amount, where `trade` is only the reading. It is set from the people
+   * within reach and their basket rather than from the recipe, because the
+   * recipe is what the building *could* get through and the people are what it
+   * *does* — and the two were twenty-two times apart. See `RETAIL_PER_1000`.
+   */
+  readonly tradeWant: Float32Array;
+
   /** Production multiplier 0..100 from the three-network requirement. */
   readonly powered = new Uint8Array(MAX_SITES);
   readonly watered = new Uint8Array(MAX_SITES);
@@ -203,6 +213,7 @@ export class SiteTable {
     this.stock = new Int32Array(MAX_SITES * cargoCount);
     this.counter = new Int32Array(MAX_SITES * cargoCount);
     this.tradeAcc = new Float32Array(MAX_SITES * cargoCount);
+    this.tradeWant = new Float32Array(MAX_SITES * cargoCount);
     this.capacity = new Int32Array(MAX_SITES * cargoCount);
   }
 
@@ -572,7 +583,16 @@ export function stepSites(
          * all.
          */
         const acc = s * cargoCount + ins[i];
-        sites.tradeAcc[acc] += ins[i + 1] * scale * sites.trade[s];
+        /*
+         * The catchment's appetite for a cycle's worth of time, not the recipe's.
+         * `scale` still applies — a struggling or obsolete counter serves its
+         * people worse — but what it scales is what the people want rather than
+         * what the building could manage.
+         */
+        sites.tradeWant[acc] = Math.min(
+          sites.tradeWant[acc], (ins[i + 1] * TICKS_PER_DAY) / Math.max(1, r.period[def]),
+        );
+        sites.tradeAcc[acc] += (sites.tradeWant[acc] * r.period[def] * scale) / TICKS_PER_DAY;
         const want = Math.floor(sites.tradeAcc[acc]);
         if (want <= 0) continue;
         sites.tradeAcc[acc] -= want;

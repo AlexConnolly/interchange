@@ -29,7 +29,7 @@ import {
   JOURNAL, MoneyKind, GATE_WEEKLY_TONNES, GATE_REFERENCE_TILES,
   BUYER_NAMES,
   MARKET_TERMS, MAX_PENDING_SALES, RETAIL_PCT, GOODS_SCALE,
-  TRADE_CATCHMENT, TRADE_RIVALRY, RETAIL_REACH, TOWN_TASTE, tasteOf,
+  TRADE_CATCHMENT, TRADE_RIVALRY, RETAIL_REACH, RETAIL_PER_1000, TOWN_TASTE, tasteOf,
   type MarketOffer,
 } from './economy.ts';
 import { FX_ONE, fx, fxDiv, fxMul } from './fixed.ts';
@@ -1412,11 +1412,21 @@ export class World {
       }
       counters.sort((a, b) => b.trade - a.trade);
 
+      /*
+       * Read off `tradeWant`, which is the tonnage a counter actually draws —
+       * not its recipe scaled by the busy-ness reading. Those were the same
+       * number once and are two different things now: the amount comes from the
+       * people and their basket, and the reading is how full that leaves the
+       * counter's book. Multiplying one by the other reported a village drinking
+       * twenty-two times what it wanted.
+       */
+      const cargoCount2 = this.content.cargo.length;
       const sold = new Map<number, number>();
       for (const c of counters) {
         const ins = this.recipes.inputs[c.def];
         for (let i = 0; i < ins.length; i += 2) {
-          sold.set(ins[i], (sold.get(ins[i]) ?? 0) + this.intakePerDay(c.site, ins[i]) * c.trade);
+          const want = this.sites.tradeWant[c.site * cargoCount2 + ins[i]];
+          sold.set(ins[i], (sold.get(ins[i]) ?? 0) + want);
         }
       }
       const buys = [...sold.entries()]
@@ -1606,7 +1616,8 @@ export class World {
     }
 
     for (const r of reach) {
-      const ins = this.recipes.inputs[this.sites.def[r.site]];
+      const def = this.sites.def[r.site];
+      const ins = this.recipes.inputs[def];
       let share = 0;
       let n = 0;
       for (let i = 0; i < ins.length; i += 2) {
@@ -1631,13 +1642,23 @@ export class World {
           if (d <= RETAIL_REACH) rivals++;
         }
         /*
-         * And the saturating split. Not `pull / rivals`, which conserves the
+         * And the saturating split. Not an even division, which conserves the
          * total and so makes a second counter pure cannibalisation — see
          * `TRADE_RIVALRY`. This way the village supports more trade the more
          * there is to go to, each counter earns less than the last, and it tops
-         * out at what the people there can actually get through.
+         * out at what the people there actually buy.
          */
-        share += Math.min(1, (r.pull[cargo] / TRADE_CATCHMENT) / (rivals + TRADE_RIVALRY));
+        const per = RETAIL_PER_1000[this.content.cargo[cargo].id] ?? 0;
+        const want = (per * r.pull[cargo]) / 1000 / (rivals + TRADE_RIVALRY);
+        this.sites.tradeWant[r.site * cargoCount + cargo] = want;
+
+        /*
+         * And the *reading*, which is a different question from the amount: how
+         * full is this counter's book, against the people it would take to fill
+         * one. Not against the recipe — see `TRADE_CATCHMENT` for why that gives
+         * every counter in the game one per cent.
+         */
+        share += Math.min(1, r.pull[cargo] / (rivals + TRADE_RIVALRY) / TRADE_CATCHMENT);
         n++;
       }
       this.sites.trade[r.site] = n > 0 ? share / n : 0;

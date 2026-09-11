@@ -76,10 +76,22 @@ const CHARACTER: Record<string, string> = {
   dormitory: 'a commuter village',
 };
 
-/** Tonnes, at the precision the figure deserves. */
+/**
+ * A weight, at the precision the figure deserves and in the unit it deserves.
+ *
+ * Kilos under a tonne, because a village buying fifty-five kilos of produce a
+ * day is a real and useful figure and "0.1" is not — and a counter serving a
+ * small village genuinely trades in tens of kilos. One decimal to ten tonnes and
+ * whole ones above that, where the tenths are noise beside the number.
+ *
+ * The unit rides with the number rather than sitting in a footnote, because the
+ * same list now holds both: a district makes 33 t of milk a day and a shop sells
+ * 55 kg of veg, and a reader should not have to hold a scale in their head.
+ */
 function t(n: number): string {
   if (n <= 0) return '—';
-  return n < 10 ? n.toFixed(1) : String(Math.round(n));
+  if (n < 1) return `${Math.round(n * 1000)} kg`;
+  return n < 10 ? `${n.toFixed(1)} t` : `${Math.round(n)} t`;
 }
 
 export function District({
@@ -282,7 +294,7 @@ export function District({
         })}
       </div>
       )}
-      <div className="sheet-foot">Tonnes a day.</div>
+      <div className="sheet-foot">Per day.</div>
     </div>
   );
 }

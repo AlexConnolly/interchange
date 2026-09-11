@@ -240,7 +240,15 @@ describe('being paid', () => {
     const produce = w.content.cargo.findIndex((c) => c.id === 'produce');
 
     const before = w.companies.cash[w.player];
-    for (let d = 0; d < 6; d++) {
+    /*
+     * Thirty days, not six. A counter draws its *catchment's* appetite now
+     * rather than its recipe's capacity, and this shop serves a village of four
+     * hundred and forty-eight — about fifty-five kilos of produce a day, so a
+     * whole tonne takes the better part of three weeks. The rule being pinned is
+     * that the public turns up at all, which is unchanged; the rate it turns up
+     * at is the fix and not a regression.
+     */
+    for (let d = 0; d < 30; d++) {
       w.sites.addStock(shop, produce, 4);
       for (let t = 0; t < TICKS_PER_DAY; t++) w.step();
     }
