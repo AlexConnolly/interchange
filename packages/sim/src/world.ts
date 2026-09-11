@@ -4253,9 +4253,6 @@ export class World {
     for (const group of this.suppliersFor(site)) {
       if (!group.owned) needs.push(group.cargo);
     }
-    if (this.companies.cash[this.player] < this.priceOf(site)) {
-      return { ok: false, reason: 'Not enough in the bank.', needs };
-    }
     return { ok: true, reason: '', needs };
   }
 
