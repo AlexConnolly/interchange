@@ -230,6 +230,25 @@ export function generateWorld(w: World): void {
      */
     const resume = wave === 1 ? w.rng.getState() : null;
     if (wave === 1) w.rng.seed((w.config.seed ^ 0x5eed51de) | 0);
+    /*
+     * A running counter across the whole wave, not a formula recomputed per
+     * town.
+     *
+     * It used to be `consumers[(townId * 3 + k + wave * 5) % consumers.length]`,
+     * which is a modulo blind spot waiting to happen: whenever `consumers.length`
+     * shares a factor with the town multiplier, whole entries in the list are
+     * never reached by any town, in any district, on any seed. With three towns
+     * and three same-era shop-terminals eligible in a district (filling station,
+     * village shop, pub), `townId * 3` is a multiple of 3 for every town, so the
+     * list's middle entry — the village shop, on the seeds where the pub had
+     * just made the list three long — was never once selected. It had always
+     * been one unlucky consumer count away from this; the pub only exposed it.
+     *
+     * A counter that just advances by one every slot, town after town, cannot
+     * have that failure: it visits every residue before it repeats any of them,
+     * whatever the list's length turns out to be.
+     */
+    let rot = wave * 5;
     for (let townId = 0; townId < w.towns.count; townId++) {
       /*
        * Two or three per settlement, not one.
@@ -239,11 +258,27 @@ export function generateWorld(w: World): void {
        * design.md asks for. One per town gave eight sites for fourteen
        * industries, most of them duplicates of the same three.
        */
+      /*
+       * Wave 1's base slot count was tuned against a pool of at most three
+       * shop-terminals (concrete plant, builders' merchant, village shop).
+       * `findSiteSpot` can fail — a town's street frontage is finite — and
+       * with three consumers cycling through five-odd slots a type typically
+       * got two or three tries at a spot before the wave moved on. A fourth
+       * or fifth competitor (filling station, now the pub) thins that
+       * redundancy: each type gets fewer of the slots, so one failed search
+       * can drop it from the district rather than being covered by a retry.
+       * Scaling the extra slots with how far the pool has grown past two
+       * keeps each type's odds of a successful search roughly where they
+       * were — measured against the village shop, which this pays for:
+       * dropped from every district on seed 7 at `+1`, present again at
+       * `+ (consumers.length - 2)`.
+       */
       const count = wave === 0
         ? 2 + (w.towns.population[townId] > 900 ? 1 : 0) + (townId % 2 === 0 ? 1 : 0)
-        : 1 + (w.towns.population[townId] > 900 ? 1 : 0);
+        : 1 + (w.towns.population[townId] > 900 ? 1 : 0) + Math.max(0, consumers.length - 2);
       for (let k = 0; k < count; k++) {
-        const def = consumers[(townId * 3 + k + wave * 5) % consumers.length];
+        const def = consumers[rot % consumers.length];
+        rot++;
         /*
          * A shop stands in the village; a works stands outside it.
          *

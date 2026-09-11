@@ -708,7 +708,14 @@ function classify(t: Terrain, seed: number): void {
       }
       if ((t.flags[i] & TileFlag.River) !== 0) {
         t.biome[i] = Biome.River;
-        if (process.env.WETBUILD) t.flags[i] |= TileFlag.Buildable;
+        // Guarded: this file runs in the browser client as well as under
+        // Node (the balance tool, the test suite), and `process` does not
+        // exist there unless a bundler chooses to polyfill it. Vite does
+        // not, so the unguarded read threw on every page load and blanked
+        // the client to a plain background colour before React ever got a
+        // chance to render — `WETBUILD` is a debug knob for the Node-side
+        // tools and was never meant to be reachable from the client at all.
+        if (typeof process !== 'undefined' && process.env.WETBUILD) t.flags[i] |= TileFlag.Buildable;
         /*
          * And *not* buildable, which it used to be marked explicitly.
          *

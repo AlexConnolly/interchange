@@ -165,6 +165,24 @@ function Cleaver(): JSX.Element {
   );
 }
 
+/**
+ * A tankard, handle and all: the pub.
+ *
+ * Not a bottle, because the creamery already owns that silhouette, and not a
+ * shopfront, because "sells something over a counter" is the village shop's
+ * shape and a pub reads as a place you sit rather than a place you buy from.
+ * A handle on one side is the one mark that survives at twenty pixels.
+ */
+function Mug(): JSX.Element {
+  return (
+    <>
+      <rect x="6" y="7" width="10" height="13" rx="1" />
+      <rect x="7.4" y="9.4" width="7.2" height="2" fill="#fff" opacity="0.45" />
+      <path d="M16 9.4h2.4a1.6 1.6 0 0 1 1.6 1.6v4.6a1.6 1.6 0 0 1-1.6 1.6H16v-2h2v-3.8h-2Z" />
+    </>
+  );
+}
+
 /** A shopfront with an awning: the village shop. */
 function Shop(): JSX.Element {
   return (
@@ -279,6 +297,7 @@ const BY_ID: Record<string, () => JSX.Element> = {
   'livestock-farm': Beast,
   abattoir: Cleaver,
   'village-shop': Shop,
+  pub: Mug,
   brewery: Copper,
   'distribution-centre': Shed,
   yard: Lorry,

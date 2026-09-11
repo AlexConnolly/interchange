@@ -409,6 +409,33 @@
   "approvalNeed": 0
  },
  {
+  "id": "pub",
+  "name": "Pub",
+  "kind": "terminal",
+  "retail": true,
+  "deposit": 0,
+  "recipe": {
+   "inputs": {
+    "beer": 2
+   },
+   "outputs": {},
+   "period": 30
+  },
+  "footprint": 1,
+  "foundCost": 310000,
+  "powerNeed": 0,
+  "waterNeed": 0,
+  "labourNeed": 0,
+  "amenityPenalty": 3,
+  "amenityRadius": 4,
+  "fromEra": 1,
+  "kit": "yard",
+  "colour": "#6b3a2f",
+  "approvalImpact": 13,
+  "approvalRadius": 10,
+  "approvalNeed": 0
+ },
+ {
   "id": "distribution-centre",
   "name": "Distribution yard",
   "kind": "terminal",
